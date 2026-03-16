@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cream: #faf7f2;
+  --warm-white: #f5f0e8;
+  --sand: #e8ddd0;
+  --taupe: #c9b99a;
+  --brown: #8b6f47;
+  --espresso: #3d2b1f;
+  --ink: #1a1208;
+  --gold: #c9963a;
+  --gold-light: #e8c068;
+  --sage: #7a8c6e;
+  --blush: #d4856a;
+}
+
+body {
+  background-color: var(--cream);
+  color: var(--espresso);
+  font-family: var(--font-body), sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display), serif;
+  color: var(--ink);
+}
+
+.card {
+  @apply bg-[var(--warm-white)] border border-[var(--sand)] rounded-xl shadow-sm p-6;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.btn-primary {
+  @apply btn bg-[var(--espresso)] text-white hover:bg-[var(--ink)] focus:ring-[var(--espresso)];
+}
+
+.btn-ghost {
+  @apply btn bg-transparent border border-[var(--sand)] text-[var(--espresso)] hover:bg-[var(--warm-white)] focus:ring-[var(--espresso)];
+}
+
+.btn-gold {
+  @apply btn bg-[var(--gold)] text-white hover:bg-[var(--gold-light)] focus:ring-[var(--gold)];
+}
+
+.tag {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[var(--sand)] text-[var(--espresso)];
+}
+
+.input {
+  @apply block w-full rounded-md border-[var(--sand)] bg-[var(--warm-white)] focus:border-[var(--gold)] focus:ring focus:ring-[var(--gold)] focus:ring-opacity-50 sm:text-sm;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.skeleton {
+  @apply animate-pulse bg-[var(--sand)] rounded-md;
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.5s ease-out forwards;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
