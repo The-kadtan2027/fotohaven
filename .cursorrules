@@ -1,0 +1,29 @@
+# .cursorrules — FotoHaven
+# Fallback context file for Cursor and other agents that read .cursorrules.
+# Primary context is in CLAUDE.md — read that first.
+
+You are working on FotoHaven, a Next.js 14 photo handoff platform for event photographers.
+The primary deployment is an old Android phone running Termux + PM2 + Cloudflare Tunnel.
+
+## Critical rules — never violate these
+
+1. Read CLAUDE.md before writing any code. It has the full spec.
+2. Read AGENTS.md before implementing any roadmap feature. It has task specs.
+3. All storage I/O goes through src/lib/storage.ts — never import AWS SDK directly.
+4. All DB access goes through src/lib/db.ts — never `new PrismaClient()`.
+5. Colours are CSS variables from globals.css — never hardcode hex values.
+6. TypeScript strict mode — no `any`, no `@ts-ignore`.
+7. Do not run `prisma migrate` — use `prisma db push` only (SQLite MVP mode).
+8. Do not add packages without user confirmation.
+
+## Stack
+Next.js 14.1.4 · React 18 · Prisma 5.11 · SQLite · Cloudflare R2 · Tailwind (minimal)
+
+## Key paths
+- Data models: prisma/schema.prisma
+- Storage layer: src/lib/storage.ts
+- DB client: src/lib/db.ts
+- Types: src/types/index.ts
+- Design system: src/app/globals.css
+- API routes: src/app/api/**/route.ts
+- Pages: src/app/**/page.tsx

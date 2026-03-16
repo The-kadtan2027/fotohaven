@@ -1,0 +1,33 @@
+# infra/android/cloudflared-config.yml
+#
+# Cloudflare Tunnel configuration for FotoHaven on Android
+#
+# HOW TO USE:
+#   1. Run: cloudflared tunnel login
+#   2. Run: cloudflared tunnel create fotohaven
+#   3. The tunnel UUID will be printed — paste it below as `tunnel:`
+#   4. Copy the credentials JSON file path printed during creation
+#   5. Run: cloudflared tunnel route dns fotohaven yourdomain.com
+#   6. Start: cloudflared tunnel --config ~/fotohaven/infra/android/cloudflared-config.yml run
+#
+# QUICK TEST (no domain needed):
+#   cloudflared tunnel --url http://localhost:3000
+#   → gives you a random *.trycloudflare.com URL instantly
+
+tunnel: YOUR_TUNNEL_UUID_HERE
+credentials-file: /data/data/com.termux/files/home/.cloudflared/YOUR_TUNNEL_UUID_HERE.json
+
+ingress:
+  # Main app
+  - hostname: yourdomain.com
+    service: http://localhost:3000
+
+  # www redirect (optional)
+  - hostname: www.yourdomain.com
+    service: http://localhost:3000
+
+  # Catch-all — required by cloudflared, returns 404 for unknown hosts
+  - service: http_status:404
+
+# Optional: enable metrics endpoint for monitoring
+# metrics: localhost:2000

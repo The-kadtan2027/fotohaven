@@ -1,0 +1,32 @@
+{
+  "projectContext": "CLAUDE.md",
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npm run build)",
+      "Bash(npm run db:push)",
+      "Bash(npm run db:generate)",
+      "Bash(npm run db:studio)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx prisma generate)",
+      "Bash(npx prisma db push)",
+      "Bash(npx prisma studio)",
+      "Bash(npx prisma format)",
+      "Bash(npm install)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log --oneline -20)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(npx prisma migrate*)",
+      "Bash(curl * | bash)",
+      "Bash(wget * | bash)"
+    ]
+  },
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

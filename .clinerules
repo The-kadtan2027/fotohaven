@@ -1,0 +1,67 @@
+# .clinerules — FotoHaven
+# Read by Cline (Antigravity) at the start of every task.
+# Keep this file in sync with CLAUDE.md.
+
+## Project identity
+- Name: FotoHaven
+- Type: Next.js 14 App Router web application
+- Purpose: Photo handoff platform for event photographers (Indian wedding focus)
+- Primary deploy target: Old Android phone via Termux + PM2 + Cloudflare Tunnel
+- Secondary deploy: Vercel + Postgres (production cloud)
+
+## Before you write any code
+
+1. Read `CLAUDE.md` at repo root — it contains the full project context,
+   data models, API contracts, design system and conventions.
+2. Read the file you are about to modify. Never assume its contents.
+3. If a task touches the database schema, read `prisma/schema.prisma` first.
+4. If a task touches storage, read `src/lib/storage.ts` first.
+5. If a task touches styling, read `src/app/globals.css` for CSS variables.
+
+## File edit rules
+
+- Always use `str_replace` for targeted edits — never rewrite whole files
+  unless the task explicitly asks for a full rewrite.
+- After editing a TypeScript file, verify the import paths are correct.
+- After editing a Prisma schema, remind the user to run:
+  `npx prisma generate && npx prisma db push`
+- After adding a new API route, document it in the API Reference section
+  of `README.md`.
+
+## Code style
+
+- TypeScript strict mode — no `any`, no `@ts-ignore`.
+- `"use client"` directive required on any component using hooks or event handlers.
+- CSS: use variables from `globals.css`, never hardcode hex colours.
+- Icons: use `lucide-react` only. Do not add other icon libraries.
+- Imports: use `@/` alias for all src imports (e.g. `@/lib/db`, `@/types`).
+
+## What NOT to do
+
+- Do not run `npm install <package>` without the user confirming the package.
+- Do not run `prisma migrate` — only `prisma db push` (we are in SQLite MVP mode).
+- Do not delete or overwrite `CLAUDE.md` or `.clinerules`.
+- Do not add `console.log` debug statements in production paths.
+- Do not add hardcoded credentials or secrets anywhere.
+- Do not change CSS variable names in `globals.css` — they are referenced everywhere.
+- Do not use Tailwind colour utilities (e.g. `bg-blue-500`) — use CSS vars only.
+- Do not create a `components/` folder — components live co-located in their page
+  file unless explicitly asked to extract them.
+
+## Task execution checklist
+
+Before marking a task complete:
+- [ ] TypeScript compiles without errors (`npx tsc --noEmit`)
+- [ ] No unused imports left in modified files
+- [ ] API changes reflected in README.md API Reference section
+- [ ] Schema changes have had `prisma generate + db push` instructions noted
+- [ ] New env vars added to `.env.example` with a comment explaining them
+- [ ] Android-specific concerns noted if relevant (ARM compat, memory, file paths)
+
+## Asking for clarification
+
+Ask the user before proceeding if:
+- The task would modify the Prisma schema
+- The task requires a new npm dependency
+- The task is ambiguous about whether it's MVP scope or Roadmap scope
+- The task would change the storage abstraction in `src/lib/storage.ts`

@@ -1,0 +1,45 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Album {
+  id          String      @id @default(uuid())
+  title       String
+  clientName  String
+  shareToken  String      @unique
+  password    String?     // optional bcrypt hash
+  expiresAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  ceremonies  Ceremony[]
+}
+
+model Ceremony {
+  id        String   @id @default(uuid())
+  name      String   // "Mehndi", "Sangeet", "Wedding", "Reception"
+  albumId   String
+  album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  photos    Photo[]
+}
+
+model Photo {
+  id          String   @id @default(uuid())
+  filename    String
+  originalName String
+  size        Int
+  mimeType    String
+  storageKey  String   // R2/S3 object key
+  width       Int?
+  height      Int?
+  ceremonyId  String
+  ceremony    Ceremony @relation(fields: [ceremonyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+}
