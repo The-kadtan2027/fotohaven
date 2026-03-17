@@ -25,13 +25,13 @@ Always keep ARM compatibility and low memory footprint in mind.
 |---------|---------|---------|
 | next | 14.1.4 | Framework (App Router) |
 | react / react-dom | 18.2.x | UI |
-| @prisma/client | 5.11.x | ORM |
-| prisma | 5.11.x | CLI + migrations |
+| @prisma/client | 5.22.x | ORM |
+| prisma | 5.22.x | CLI + migrations |
 | @aws-sdk/client-s3 | 3.540.x | Cloudflare R2 (S3-compatible) |
 | @aws-sdk/s3-request-presigner | 3.540.x | Presigned URLs |
 | react-dropzone | 14.2.x | File drag-and-drop |
 | jszip | 3.10.x | Client-side ZIP generation |
-| lucide-react | 0.368.x | Icons |
+| lucide-react | 0.468.x | Icons (React 19 compatible) |
 | uuid | 9.0.x | ID generation |
 | tailwindcss | 3.4.x | Utility CSS (used sparingly) |
 
@@ -363,6 +363,11 @@ Fix applied:
      node_modules/.prisma/client/query-engine-linux-arm64-openssl-3.0.x
    Both chmod +x
 
+Note: `infra/android/prisma-android-fix.js` automates steps 3 and 4 as a
+postinstall hook. It detects Termux via `TERMUX_VERSION` env var (not
+`process.platform` which always reports `linux` on Termux). The engine
+version string (`5.22.0-44.{hash}`) is parsed to extract the hash only.
+
 4. The x86_64 library engine deleted from:
      node_modules/.prisma/client/libquery_engine-debian-openssl-1.1.x.so.node
      node_modules/@prisma/engines/libquery_engine-debian-openssl-1.1.x.so.node
@@ -389,3 +394,96 @@ npm run dev                   # → http://localhost:3000
 
 See `infra/android/termux-setup.sh` — it is fully automated and idempotent.
 See `README.md` for the full step-by-step guide.
+
+
+### Termux+Alpine environment — architecture and runtime facts
+
+This Termux installation uses TermuxAlpine (musl libc, aarch64).
+Bare Termux has NO GNU linker (`ld-linux-aarch64.so.1`) and NO `libgcc_s.so.1`.
+Prisma's `debian-openssl-1.1.x` binaries are x86-64 — never usable on this device.
+
+Key paths:
+  Alpine musl linker (inside Alpine):   /lib/ld-musl-aarch64.so.1
+  Alpine musl linker (from Termux):     /data/data/com.termux/files/usr/share/TermuxAlpine/lib/ld-musl-aarch64.so.1
+  Alpine OpenSSL libs:                  /data/data/com.termux/files/usr/share/TermuxAlpine/usr/lib/
+  Enter Alpine:                         startalpine
+  Project path inside Alpine:           /data/data/com.termux/files/home/fotohaven
+
+---
+
+### Prisma on Termux+Alpine — definitive setup procedure
+
+Binary target: `linux-musl-arm64-openssl-3.0.x` (only working target on this device)
+
+schema.prisma generator block:
+  generator client {
+    provider      = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+  }
+
+After `npm install`, ALL of the following must be redone (npm install overwrites node_modules):
+
+#### Step 1 — Download musl ARM64 engines (from bare Termux)
+  ENGINE_HASH is found at: node_modules/@prisma/engines/package.json → "@prisma/engines-version"
+  Parse: "5.22.0-44.{hash}" → take only the hash part
+
+  curl -L "https://binaries.prisma.sh/all_commits/{HASH}/linux-musl-arm64-openssl-3.0.x/schema-engine.gz" | gunzip > node_modules/@prisma/engines/schema-engine-linux-musl-arm64-openssl-3.0.x
+  curl -L "https://binaries.prisma.sh/all_commits/{HASH}/linux-musl-arm64-openssl-3.0.x/query-engine.gz"  | gunzip > node_modules/@prisma/engines/query-engine-linux-musl-arm64-openssl-3.0.x
+  cp node_modules/@prisma/engines/schema-engine-linux-musl-arm64-openssl-3.0.x node_modules/.prisma/client/
+  cp node_modules/@prisma/engines/query-engine-linux-musl-arm64-openssl-3.0.x  node_modules/.prisma/client/
+  chmod +x node_modules/@prisma/engines/*musl* node_modules/.prisma/client/*musl*
+
+#### Step 2 — Patch binaries (from inside Alpine: startalpine)
+  apk add patchelf   # if not already installed
+
+  for each of the 4 binaries (schema-engine + query-engine in both @prisma/engines and .prisma/client):
+    patchelf --set-interpreter /lib/ld-musl-aarch64.so.1 <binary>
+    patchelf --set-rpath /usr/lib:/lib <binary>
+
+  Verify:
+    /data/data/com.termux/files/home/fotohaven/node_modules/.prisma/client/schema-engine-linux-musl-arm64-openssl-3.0.x --version
+    → should print: schema-engine-cli {hash}
+
+#### Step 3 — Run Prisma CLI operations (always inside Alpine)
+  startalpine
+  cd /data/data/com.termux/files/home/fotohaven
+
+  PRISMA_SCHEMA_ENGINE_PATH="$(pwd)/node_modules/.prisma/client/schema-engine-linux-musl-arm64-openssl-3.0.x" \
+    npx prisma db push
+
+  PRISMA_SCHEMA_ENGINE_PATH="$(pwd)/node_modules/.prisma/client/schema-engine-linux-musl-arm64-openssl-3.0.x" \
+    npx prisma generate
+
+  PRISMA_SCHEMA_ENGINE_PATH="$(pwd)/node_modules/.prisma/client/schema-engine-linux-musl-arm64-openssl-3.0.x" \
+    npx prisma migrate deploy
+
+#### Step 4 — Run the Next.js app (inside Alpine)
+  All runtime Prisma queries also require the musl engine.
+  Run the dev/prod server from inside Alpine, not bare Termux:
+
+  startalpine
+  cd /data/data/com.termux/files/home/fotohaven
+  npm run dev
+  # or: npm run build && npm run start
+  # or: pm2 start ecosystem.config.js  (if pm2 installed inside Alpine)
+
+  DO NOT run `npm run dev` from bare Termux — Prisma runtime will detect
+  "debian-openssl-1.1.x", find no matching ARM64 binary, and crash.
+
+#### Why bare Termux doesn't work for Prisma runtime
+  - Termux Node.js detects runtime as "debian-openssl-1.1.x"
+  - Prisma's debian-openssl-1.1.x binary is x86-64 only — unusable on ARM
+  - Termux injects LD_PRELOAD=libtermux-exec-ld-preload.so (glibc symbols)
+    which crashes when musl linker tries to load it
+  - Alpine environment has none of these issues: native musl, correct linker,
+    correct OpenSSL, no LD_PRELOAD injection
+
+---
+
+### prisma-android-fix.js — current status
+  The postinstall script handles Steps 1 correctly (download + copy + chmod).
+  It does NOT handle Step 2 (patchelf) because patchelf is only available
+  inside Alpine, not in bare Termux.
+  TODO: add a separate script `infra/android/prisma-alpine-patch.sh` that
+  runs the patchelf commands and is executed manually after npm install:
+    startalpine -c "cd /data/data/com.termux/files/home/fotohaven && sh infra/android/prisma-alpine-patch.sh"
