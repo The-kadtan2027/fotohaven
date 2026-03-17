@@ -1,6 +1,7 @@
 // prisma/schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {
@@ -31,15 +32,25 @@ model Ceremony {
 }
 
 model Photo {
-  id          String   @id @default(uuid())
-  filename    String
+  id           String    @id @default(uuid())
+  filename     String
   originalName String
-  size        Int
-  mimeType    String
-  storageKey  String   // R2/S3 object key
-  width       Int?
-  height      Int?
-  ceremonyId  String
-  ceremony    Ceremony @relation(fields: [ceremonyId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  size         Int
+  mimeType     String
+  storageKey   String    // R2/S3 object key
+  width        Int?
+  height       Int?
+  ceremonyId   String
+  ceremony     Ceremony  @relation(fields: :ceremonyId, references: :id, onDelete: Cascade)
+  comments     Comment[]
+  createdAt    DateTime  @default(now())
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  body      String
+  author    String   // "photographer" | "client" — no auth yet, honour-system
+  photoId   String
+  photo     Photo    @relation(fields: :photoId, references: :id, onDelete: Cascade)
+  createdAt DateTime @default(now())
 }
