@@ -41,7 +41,7 @@ model Photo {
   width        Int?
   height       Int?
   ceremonyId   String
-  ceremony     Ceremony  @relation(fields: :ceremonyId, references: :id, onDelete: Cascade)
+  ceremony     Ceremony  @relation(fields: [ceremonyId], references: [id], onDelete: Cascade)
   comments     Comment[]
   createdAt    DateTime  @default(now())
 }
@@ -51,6 +51,6 @@ model Comment {
   body      String
   author    String   // "photographer" | "client" — no auth yet, honour-system
   photoId   String
-  photo     Photo    @relation(fields: :photoId, references: :id, onDelete: Cascade)
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 }
