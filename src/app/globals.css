@@ -14,6 +14,9 @@
   --gold-light: #e8c068;
   --sage: #7a8c6e;
   --blush: #d4856a;
+  /* Font family vars — populated at runtime via Google Fonts <link> in layout.tsx */
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
 }
 
 body {

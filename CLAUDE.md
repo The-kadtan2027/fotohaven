@@ -341,6 +341,40 @@ packages with `.node` bindings don't compile on ARM — test before adding).
 
 ---
 
+## Android / Termux — known fixes
+
+### Prisma engine fix (one-time setup)
+
+Prisma detects Android as unknown OS and defaults to linux,
+but downloads the wrong x86_64 Debian engine binary.
+The app will crash at runtime with "EM_X86_64 instead of EM_AARCH64".
+
+Fix applied:
+1. schema.prisma generator block must have:
+     binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
+
+2. The ARM64 query engine binary must be manually downloaded from:
+     https://binaries.prisma.sh/all_commits/{ENGINE_HASH}/linux-arm64-openssl-3.0.x/query-engine.gz
+   Engine hash found at: node_modules/@prisma/engines/package.json
+   → field: "@prisma/engines-version"
+
+3. Extracted binary placed in both:
+     node_modules/@prisma/engines/query-engine-linux-arm64-openssl-3.0.x
+     node_modules/.prisma/client/query-engine-linux-arm64-openssl-3.0.x
+   Both chmod +x
+
+4. The x86_64 library engine deleted from:
+     node_modules/.prisma/client/libquery_engine-debian-openssl-1.1.x.so.node
+     node_modules/@prisma/engines/libquery_engine-debian-openssl-1.1.x.so.node
+
+5. npx prisma generate run after above steps.
+
+After any npm install, steps 3 and 4 must be repeated as
+npm install overwrites node_modules and restores the wrong binary.
+To automate: add a postinstall script in package.json.
+
+---
+
 ## How to run locally (dev)
 
 ```bash

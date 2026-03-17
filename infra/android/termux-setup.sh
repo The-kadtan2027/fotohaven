@@ -97,9 +97,14 @@ fi
 
 # ── Step 9: Prisma DB bootstrap ───────────────────────────────────────────────
 step "Bootstrapping database"
+# Prisma's schema engine on Android/Termux has a known issue with relative
+# file:// paths — it leaks the binary path to stdout, breaking JSON IPC.
+# Fix: write an absolute DATABASE_URL to .env before running db push.
+DB_PATH="$HOME/fotohaven/prisma/dev.db"
+echo "DATABASE_URL=\"file:${DB_PATH}\"" > .env
 npx prisma generate
 npx prisma db push
-ok "SQLite database created at prisma/dev.db"
+ok "SQLite database created at ${DB_PATH}"
 
 # ── Step 10: Build Next.js ─────────────────────────────────────────────────────
 step "Building Next.js for production"
