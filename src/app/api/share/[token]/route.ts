@@ -4,10 +4,10 @@ import { getPresignedUrl } from "@/lib/storage";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
   try {
-    const { token } = params;
+    const { token } = await params;
 
     const album = await db.album.findUnique({
       where: { shareToken: token },
