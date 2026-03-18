@@ -1,40 +1,24 @@
 Bug report:
-- Where: npm run build
-- What happens: Failed to collect page data for /api/albums
-- What should happen: npm run build
-- Error message:   npm run build
-
-> fotohaven@0.1.0 build
-> next build
-
-   ▲ Next.js 15.1.4
-   - Environments: .env.local, .env
-
-   Creating an optimized production build ...
-   Using cached swc package @next/swc-wasm-nodejs...
- ✓ Compiled successfully
-   Skipping validation of types
-   Skipping linting
-
-   We detected TypeScript in your project and reconfigured your tsconfig.json file for you.
-   The following suggested values were added to your tsconfig.json. These values can be changed to fit your project's needs:
-
-        - target was set to ES2017 (For top-level `await`. Note: Next.js only polyfills for the esmodules target.)
-
-   Collecting page data  ...Error [PrismaClientValidationError]: Invalid client engine type, please use `library` or `binary`
-    at 4272 (.next/server/app/api/albums/route.js:1:3143)
-    at t (.next/server/webpack-runtime.js:1:127)
-    at 6493 (.next/server/app/api/albums/route.js:1:807)
-    at t (.next/server/webpack-runtime.js:1:127)
-    at t (.next/server/app/api/albums/route.js:1:3242)
-    at <unknown> (.next/server/app/api/albums/route.js:1:3273)
-    at t.X (.next/server/webpack-runtime.js:1:1191)
-    at <unknown> (.next/server/app/api/albums/route.js:1:3255) {
-  clientVersion: '5.22.0'
-}
-
-> Build error occurred
-[Error: Failed to collect page data for /api/albums] { type: 'Error' }
+- Where:  browser console logs
+- What happens: Error occurred when i tried to click on copy link button in albums page and main page
+- What should happen: Success
+- Error message: page-7157aac92b0096d6.js:1 Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'writeText')
+    at m (page-7157aac92b0096d6.js:1:1714)
+    at onClick (page-7157aac92b0096d6.js:1:5548)
+    at uB (4bd1b696-f21fca8ea5dcfed5.js:1:131447)
+    at 4bd1b696-f21fca8ea5dcfed5.js:1:137623
+    at nC (4bd1b696-f21fca8ea5dcfed5.js:1:18576)
+    at uK (4bd1b696-f21fca8ea5dcfed5.js:1:132754)
+    at sG (4bd1b696-f21fca8ea5dcfed5.js:1:158334)
+    at sY (4bd1b696-f21fca8ea5dcfed5.js:1:158156)
+m @ page-7157aac92b0096d6.js:1
+onClick @ page-7157aac92b0096d6.js:1
+uB @ 4bd1b696-f21fca8ea5dcfed5.js:1
+(anonymous) @ 4bd1b696-f21fca8ea5dcfed5.js:1
+nC @ 4bd1b696-f21fca8ea5dcfed5.js:1
+uK @ 4bd1b696-f21fca8ea5dcfed5.js:1
+sG @ 4bd1b696-f21fca8ea5dcfed5.js:1
+sY @ 4bd1b696-f21fca8ea5dcfed5.js:1
 
 Before fixing:
 1. Read the relevant file(s) in full — do not guess at their contents.
@@ -53,7 +37,7 @@ Show me the exact before/after diff of what you changed.
 
 
 
-I want to implement: [FEATURE NAME]
+I want to implement: delete a photo or group of photos from album feature, what i observed is the once we uplodad the photo it is stored in the /data/uploads folder but i am not able to delete it from the app, also i want to implement the delete feature for photos as well
 
 Before writing any code:
 1. Read CLAUDE.md — confirm the current data models and which files you will touch.
@@ -90,69 +74,5 @@ Wait for my confirmation before resuming work.
 
 
 
-Now I have pulled the repo to my android device and ran the setup script but see what I got at 
-Setting up environment file
-⚠ .env.local created from .env.example
-⚠ IMPORTANT: Edit .env.local with your actual values:
-⚠   nano .env.local
-
-▶ Bootstrapping database
-prisma:warn Prisma detected unknown OS "android" and may not work as expected. Defaulting to "linux".
-Environment variables loaded from .env
-Prisma schema loaded from prisma/schema.prisma
-prisma:warn Prisma detected unknown OS "android" and may not work as expected. Defaulting to "linux".
-
-✔ Generated Prisma Client (v5.11.0) to ./node_modules/@prisma/client in 243ms
-
-Start using Prisma Client in Node.js (See: https://pris.ly/d/client)
-```
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
-```
-or start using Prisma Client at the edge (See: https://pris.ly/d/accelerate)
-```
-import { PrismaClient } from '@prisma/client/edge'
-const prisma = new PrismaClient()
-```
-
-See other ways of importing Prisma Client: http://pris.ly/d/importing-client
-
-┌─────────────────────────────────────────────────────────────┐
-│  Deploying your app to serverless or edge functions?        │
-│  Try Prisma Accelerate for connection pooling and caching.  │
-│  https://pris.ly/cli/accelerate                             │
-└─────────────────────────────────────────────────────────────┘
-
-prisma:warn Prisma detected unknown OS "android" and may not work as expected. Defaulting to "linux".
-prisma:warn Prisma detected unknown OS "android" and may not work as expected. Defaulting to "linux".
-Environment variables loaded from .env
-Prisma schema loaded from prisma/schema.prisma
-Datasource "db": SQLite database "dev.db" at "file:./dev.db"
-
-Error: Could not parse schema engine response: SyntaxError: Unexpected token '/', "/data/data"... is not valid JSON
-~/fotohaven $
 
 
-
-
-# Download the correct binary
-curl -L -o /tmp/query-engine.gz \
-  "https://binaries.prisma.sh/all_commits/605197351a3c8bdd595af2d2a9bc3025bca48ea2/linux-arm64-openssl-3.0.x/query-engine.gz"
-
-# Check the download size — should be 15-25MB not 27KB
-ls -lh /tmp/query-engine.gz
-
-
-
-# Extract
-gunzip -c /tmp/query-engine.gz > ~/fotohaven/node_modules/@prisma/engines/query-engine-linux-arm64-openssl-3.0.x
-
-# Make executable
-chmod +x ~/fotohaven/node_modules/@prisma/engines/query-engine-linux-arm64-openssl-3.0.x
-
-# Also place it where Prisma Client looks
-cp ~/fotohaven/node_modules/@prisma/engines/query-engine-linux-arm64-openssl-3.0.x \
-   ~/fotohaven/node_modules/.prisma/client/query-engine-linux-arm64-openssl-3.0.x
-
-# Verify it's a real ARM64 binary
-file ~/fotohaven/node_modules/@prisma/engines/query-engine-linux-arm64-openssl-3.0.x

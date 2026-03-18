@@ -454,7 +454,7 @@ export default function SharePage() {
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
 
       {/* ── Hero header ── */}
-      <div style={{ background: "var(--espresso)", padding: "52px 40px 40px", position: "relative", overflow: "hidden" }}>
+      <div className="bg-[var(--espresso)] relative overflow-hidden px-4 md:px-10 py-10 md:py-14">
         {/* subtle texture overlay */}
         <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle at 20% 50%, rgba(201,150,58,0.15) 0%, transparent 60%), radial-gradient(circle at 80% 20%, rgba(201,150,58,0.08) 0%, transparent 50%)", pointerEvents: "none" }} />
 
@@ -462,10 +462,10 @@ export default function SharePage() {
           <p style={{ fontSize: 12, color: "var(--gold)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 10 }}>
             Photo Album
           </p>
-          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 52, fontWeight: 300, color: "#faf7f2", marginBottom: 6, lineHeight: 1.1 }}>
+          <h1 className="text-4xl md:text-5xl" style={{ fontFamily: "var(--font-display)", fontWeight: 300, color: "#faf7f2", marginBottom: 6, lineHeight: 1.1 }}>
             {album.title}
           </h1>
-          <p style={{ color: "rgba(250,247,242,0.55)", fontSize: 15, marginBottom: 32 }}>
+          <p style={{ color: "rgba(250,247,242,0.65)", fontSize: 15, marginBottom: 32 }}>
             Shared by {album.clientName} · {totalPhotos} photos · {totalFinals > 0 ? `${totalFinals} finals · ` : ""}{album.ceremonies.length} ceremonies
           </p>
 
@@ -528,13 +528,14 @@ export default function SharePage() {
       </div>
 
       {/* ── Body ── */}
-      <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", gap: 0, padding: "0 40px" }}>
+      <div className="flex flex-col md:flex-row px-4 md:px-10" style={{ maxWidth: 1200, margin: "0 auto", gap: 0 }}>
 
         {/* Sidebar */}
-        <aside style={{ width: 220, flexShrink: 0, paddingTop: 32, paddingRight: 24 }}>
-          <p style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+        <aside className="w-full md:w-[220px] flex-shrink-0 pt-6 md:pt-8 pr-0 md:pr-6 pb-4 md:pb-0 border-b md:border-b-0 border-[var(--sand)] overflow-x-auto whitespace-nowrap">
+          <p className="hidden md:block" style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
             Ceremonies
           </p>
+          <div className="inline-flex md:block items-center gap-2">
           {album.ceremonies.map((c) => {
             const origCount = c.photos.filter((p) => !p.isReturn).length;
             const finCount = c.photos.filter((p) => p.isReturn).length;
@@ -542,11 +543,11 @@ export default function SharePage() {
               <button
                 key={c.id}
                 onClick={() => setActiveCeremony(c.id)}
+                className="flex items-center gap-3 md:justify-between px-4 md:px-3 py-2 md:py-2.5 rounded-full md:rounded-lg transition-all text-left border md:border-0 md:border-l-[3px]"
                 style={{
-                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "10px 12px", background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
-                  border: "none", borderRadius: 8, cursor: "pointer", transition: "all 0.15s", marginBottom: 2,
-                  borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
+                  background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
+                  borderColor: activeCeremony === c.id ? "var(--gold)" : "var(--sand)",
+                  marginBottom: 2,
                 }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
@@ -562,10 +563,11 @@ export default function SharePage() {
               </button>
             );
           })}
+          </div>
         </aside>
 
         {/* Gallery */}
-        <main style={{ flex: 1, paddingTop: 32, paddingBottom: 80 }}>
+        <main className="flex-1 pt-6 md:pt-8 pb-20">
           {activeCeremonyData && (
             <>
               {/* Ceremony header */}

@@ -62,13 +62,12 @@ export default function Home() {
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       {/* Header */}
       <header
-        className="glass"
+        className="glass px-4 md:px-10"
         style={{
           position: "sticky",
           top: 0,
           zIndex: 50,
           borderBottom: "1px solid var(--sand)",
-          padding: "0 40px",
         }}
       >
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
@@ -88,7 +87,7 @@ export default function Home() {
       </header>
 
       {/* Hero section */}
-      <section style={{ padding: "60px 40px 40px", maxWidth: 1200, margin: "0 auto" }}>
+      <section className="px-4 md:px-10 py-10 md:py-16" style={{ maxWidth: 1200, margin: "0 auto" }}>
         <p style={{ fontFamily: "var(--font-display)", fontSize: 13, letterSpacing: "0.15em", color: "var(--gold)", textTransform: "uppercase", marginBottom: 12 }}>
           Your Albums
         </p>
@@ -103,9 +102,9 @@ export default function Home() {
       </section>
 
       {/* Albums grid */}
-      <main style={{ padding: "0 40px 80px", maxWidth: 1200, margin: "0 auto" }}>
+      <main className="px-4 md:px-10 pb-20" style={{ maxWidth: 1200, margin: "0 auto" }}>
         {loading ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 320px), 1fr))", gap: 20 }}>
             {[1, 2, 3].map((i) => (
               <div key={i} className="skeleton" style={{ height: 200, borderRadius: 16 }} />
             ))}
@@ -113,7 +112,7 @@ export default function Home() {
         ) : albums.length === 0 ? (
           <EmptyState />
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 1fr))", gap: 20 }}>
             {albums.map((album, i) => (
               <div
                 key={album.id}
@@ -186,7 +185,7 @@ export default function Home() {
 
 function EmptyState() {
   return (
-    <div style={{ textAlign: "center", padding: "80px 20px", opacity: 0, animation: "fadeUp 0.6s ease 0.2s forwards" }}>
+    <div className="px-4 py-16 md:py-20" style={{ textAlign: "center", opacity: 0, animation: "fadeUp 0.6s ease 0.2s forwards" }}>
       <div style={{ width: 80, height: 80, background: "var(--warm-white)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
         <Image size={32} color="var(--taupe)" />
       </div>

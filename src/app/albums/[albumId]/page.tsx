@@ -276,8 +276,8 @@ export default function AlbumPage() {
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       {/* Header */}
       <header
-        className="glass"
-        style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)", padding: "0 32px" }}
+        className="glass px-4 md:px-8"
+        style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}
       >
         <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -318,16 +318,17 @@ export default function AlbumPage() {
         </div>
       </header>
 
-      <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", gap: 0, minHeight: "calc(100vh - 64px)" }}>
+      <div className="flex flex-col md:flex-row" style={{ maxWidth: 1400, margin: "0 auto", minHeight: "calc(100vh - 64px)" }}>
         {/* Sidebar — ceremony list */}
-        <aside style={{ width: 240, borderRight: "1px solid var(--sand)", padding: "28px 0", flexShrink: 0 }}>
-          <div style={{ padding: "0 20px", marginBottom: 20 }}>
-            <p style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+        <aside className="w-full md:w-[240px] border-b md:border-b-0 md:border-r border-[var(--sand)] py-4 md:py-7 flex-shrink-0 overflow-x-auto whitespace-nowrap">
+          <div className="px-4 md:px-5 mb-0 md:mb-5 inline-block md:block align-middle">
+            <p className="hidden md:block" style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>
               Ceremonies
             </p>
-            <p style={{ fontSize: 12, color: "var(--brown)" }}>{totalPhotos} photos total</p>
+            <p className="hidden md:block" style={{ fontSize: 12, color: "var(--brown)" }}>{totalPhotos} photos total</p>
           </div>
 
+          <div className="inline-flex md:block items-center gap-2 px-4 md:px-0 py-2 md:py-0">
           {album.ceremonies.map((c) => {
             const origCount = c.photos.filter((p) => !p.isReturn).length;
             const finCount = c.photos.filter((p) => p.isReturn).length;
@@ -335,18 +336,11 @@ export default function AlbumPage() {
               <button
                 key={c.id}
                 onClick={() => setActiveCeremony(c.id)}
+                className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]"
                 style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "10px 20px",
                   background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
-                  border: "none",
-                  borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
+                  borderColor: activeCeremony === c.id ? "var(--gold)" : "var(--sand)",
                   cursor: "pointer",
-                  transition: "all 0.15s ease",
-                  textAlign: "left",
                 }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
@@ -364,10 +358,11 @@ export default function AlbumPage() {
               </button>
             );
           })}
+          </div>
         </aside>
 
         {/* Main content */}
-        <main style={{ flex: 1, padding: 32, overflow: "auto" }}>
+        <main className="flex-1 p-4 md:p-8 overflow-auto">
           {activeCeremonyData && (
             <>
               {/* Ceremony header */}
