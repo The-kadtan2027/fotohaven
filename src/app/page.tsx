@@ -12,7 +12,7 @@ interface AlbumSummary {
   expiresAt: string | null;
   createdAt: string;
   totalPhotos: number;
-  ceremonies: { id: string; name: string; _count: { photos: number } }[];
+  ceremonies: { id: string; name: string; photos: any[] }[];
 }
 
 export default function Home() {
@@ -113,7 +113,7 @@ export default function Home() {
                     <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--brown)", background: "var(--warm-white)", padding: "3px 10px", borderRadius: 100, border: "1px solid var(--sand)" }}>
                       <FolderOpen size={11} />
                       {c.name}
-                      <span style={{ color: "var(--taupe)" }}>·{c._count.photos}</span>
+                      <span style={{ color: "var(--taupe)" }}>·{c.photos.length}</span>
                     </span>
                   ))}
                 </div>
