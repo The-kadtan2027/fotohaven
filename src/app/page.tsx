@@ -2,7 +2,7 @@
 // src/app/page.tsx
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Image, Share2, Clock, FolderOpen } from "lucide-react";
+import { Plus, Image, Share2, Clock, FolderOpen, Trash2 } from "lucide-react";
 
 interface AlbumSummary {
   id: string;
@@ -44,6 +44,18 @@ export default function Home() {
       textArea.remove();
     }
     alert("Share link copied to clipboard!");
+  };
+
+  const deleteAlbum = async (albumId: string) => {
+    if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      // Remove from state immediately
+      setAlbums(prev => prev.filter(a => a.id !== albumId));
+    } catch {
+      alert("Failed to delete album.");
+    }
   };
 
   return (
@@ -138,7 +150,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Actions */}
                 <div style={{ display: "flex", gap: 8, paddingTop: 16, borderTop: "1px solid var(--sand)" }}>
                   <Link
                     href={`/albums/${album.id}`}
@@ -154,6 +165,14 @@ export default function Home() {
                   >
                     <Share2 size={14} />
                     Copy Link
+                  </button>
+                  <button
+                    onClick={() => deleteAlbum(album.id)}
+                    className="btn-ghost"
+                    style={{ padding: "0 12px", color: "var(--blush)" }}
+                    title="Delete Album"
+                  >
+                    <Trash2 size={14} />
                   </button>
                 </div>
               </div>

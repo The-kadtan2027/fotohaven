@@ -219,3 +219,37 @@ When the user asks to implement something not listed here:
 2. Include: Status, Scope, Schema changes, New files, Modified files, New types, Acceptance criteria
 3. Get user confirmation before executing
 4. Mark `[x]` on acceptance criteria as you complete each one
+
+---
+
+## Task: Delete photo / album feature
+
+**Status:** Completed
+**Scope:** Photographer can delete an individual photo or an entire album from the admin interface. When deleting, the actual image files must be deleted from storage (R2/local).
+
+### Schema change
+None needed. `onDelete: 'cascade'` is already configured for ceremonies → albums and photos → ceremonies in Drizzle. Deleting an album from the database automatically cascades to its ceremonies, photos, and comments.
+
+### New API routes
+- `DELETE /api/photos/[photoId]` — `src/app/api/photos/[photoId]/route.ts`
+  - Looks up the photo record.
+  - Calls `deleteFile(photo.storageKey)`.
+  - Deletes the photo from the database.
+- `DELETE /api/albums/[albumId]` — `src/app/api/albums/[albumId]/route.ts`
+  - Looks up all photos belonging to the album (via its ceremonies).
+  - Iterates through the photos and calls `deleteFile(photo.storageKey)` for each.
+  - Deletes the album from the database (cascade handles the rest).
+
+### UI changes
+- `src/app/albums/[albumId]/page.tsx`
+  - Add a trash/delete icon to individual `PhotoCard` components (only visible to photographer).
+  - Add a "Delete Album" button in the top header.
+  - Use `confirm()` dialogues before executing the delete.
+- `src/app/page.tsx`
+  - Add a "Delete" button to the album cards on the dashboard.
+
+### Acceptance criteria
+- [x] Photographer can delete a single photo from the album management page
+- [x] Photo is permanently removed from both the database and the `/data/uploads` folder
+- [x] Photographer can delete an entire album
+- [x] Deleting an album removes all of its associated photo files from the storage backend (no orphaned files left on disk)

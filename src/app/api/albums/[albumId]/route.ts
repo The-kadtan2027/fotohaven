@@ -57,3 +57,44 @@ export async function GET(
     );
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ albumId: string }> }
+) {
+  try {
+    const { albumId } = await params;
+
+    const album = await db.query.albums.findFirst({
+      where: eq(albums.id, albumId),
+      with: {
+        ceremonies: {
+          with: { photos: true },
+        },
+      },
+    });
+
+    if (!album) {
+      return NextResponse.json({ error: "Album not found" }, { status: 404 });
+    }
+
+    // Call deleteFile on all photos
+    const { deleteFile } = await import("@/lib/storage");
+    for (const ceremony of album.ceremonies) {
+      for (const photo of ceremony.photos) {
+        await deleteFile(photo.storageKey);
+      }
+    }
+
+    // Delete album from database (cascade deletes ceremonies, photos, comments)
+    await db.delete(albums).where(eq(albums.id, albumId)).run();
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[DELETE /api/albums]", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
+}

@@ -198,6 +198,29 @@ export default function AlbumPage() {
     }
   };
 
+  const deleteAlbum = async () => {
+    if (!album) return;
+    if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/albums/${album.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      window.location.href = "/";
+    } catch {
+      alert("Failed to delete album.");
+    }
+  };
+
+  const deletePhoto = async (photoId: string) => {
+    if (!confirm("Are you sure you want to delete this photo forever?")) return;
+    try {
+      const res = await fetch(`/api/photos/${photoId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      await fetchAlbum();
+    } catch {
+      alert("Failed to delete photo.");
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)" }}>
@@ -238,6 +261,15 @@ export default function AlbumPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn-ghost"
+              onClick={deleteAlbum}
+              style={{ textDecoration: "none", fontSize: 13, color: "var(--blush)" }}
+              title="Delete Album"
+            >
+              <Trash2 size={14} />
+              Delete Album
+            </button>
             <Link
               href={`/share/${album.shareToken}`}
               target="_blank"
@@ -407,7 +439,7 @@ export default function AlbumPage() {
               {activeCeremonyData.photos.length > 0 ? (
                 <div className="photo-grid">
                   {activeCeremonyData.photos.map((photo) => (
-                    <PhotoCard key={photo.id} photo={photo} />
+                    <PhotoCard key={photo.id} photo={photo} onDelete={deletePhoto} />
                   ))}
                 </div>
               ) : (
@@ -433,7 +465,7 @@ function StatusIcon({ status }: { status: UploadStatus }) {
   return <div style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />;
 }
 
-function PhotoCard({ photo }: { photo: Photo }) {
+function PhotoCard({ photo, onDelete }: { photo: Photo, onDelete?: (id: string) => void }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <div
@@ -475,9 +507,18 @@ function PhotoCard({ photo }: { photo: Photo }) {
         onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
         onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
       >
-        <p style={{ fontSize: 11, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <p style={{ fontSize: 11, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: onDelete ? 24 : 0 }}>
           {photo.originalName}
         </p>
+        {onDelete && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onDelete(photo.id); }}
+            style={{ position: "absolute", bottom: 6, right: 6, background: "var(--blush)", border: "none", color: "#fff", borderRadius: 4, padding: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            title="Delete Photo"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
