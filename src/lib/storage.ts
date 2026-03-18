@@ -1,89 +1,107 @@
-// src/lib/storage.ts
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+// infra/android/local-storage-adapter.ts
+//
+// DROP-IN REPLACEMENT for src/lib/storage.ts when hosting on Android.
+//
+// Instead of uploading to Cloudflare R2, photos are saved directly to
+// the phone's storage at ~/storage/shared/fotohaven/ (visible in Files app).
+//
+// HOW TO USE:
+//   Replace src/lib/storage.ts with this file when running on Android.
+//   Or: set STORAGE_ADAPTER=local in .env.local and import conditionally.
+//
+// TRADE-OFFS vs R2:
+//   + No cloud costs, works fully offline on your LAN
+//   + Photos accessible directly on the phone via Files app
+//   - Limited by phone storage capacity
+//   - Photos lost if phone dies (add backup script below)
+//   - No CDN — all photo traffic goes through your phone's WiFi
 
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-  },
-});
+import fs from "fs/promises";
+import path from "path";
+import { createReadStream } from "fs";
 
-const BUCKET = process.env.R2_BUCKET_NAME!;
+// Termux shared storage path — accessible from Android Files app
+// Alternatively use: /data/data/com.termux/files/home/fotohaven-uploads
+// (internal Termux storage — faster but not visible to Files app)
+const UPLOAD_BASE =
+  process.env.LOCAL_UPLOAD_PATH ||
+  "/data/data/com.termux/files/home/storage/shared/fotohaven";
+
+const APP_BASE_URL =
+  process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 /**
- * Upload a file buffer to R2
+ * Ensure a directory exists (recursive mkdir)
+ */
+async function ensureDir(dirPath: string): Promise<void> {
+  await fs.mkdir(dirPath, { recursive: true });
+}
+
+/**
+ * Upload a file buffer to local storage
  */
 export async function uploadFile(
   key: string,
   body: Buffer,
-  contentType: string
+  _contentType: string
 ): Promise<string> {
-  await r2.send(
-    new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    })
-  );
+  const filePath = path.join(UPLOAD_BASE, key);
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, body);
   return key;
 }
 
 /**
- * Generate a pre-signed URL for direct browser download (valid 1 hour)
+ * Returns a local API URL that streams the file from disk.
+ * The /api/files/[...key] route handles serving.
+ * "Expires" in 1 hour (honoured by the API route via Cache-Control).
  */
 export async function getPresignedUrl(
   key: string,
-  expiresIn = 3600
+  _expiresIn = 3600
 ): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-  return getSignedUrl(r2, command, { expiresIn });
+  // Encode the key so slashes survive URL routing
+  const encodedKey = encodeURIComponent(key);
+  return `${APP_BASE_URL}/api/files/${encodedKey}`;
 }
 
 /**
- * Generate a pre-signed PUT URL for direct browser upload (valid 15 min)
- * Useful for large files — client uploads directly to R2, bypassing your server
+ * For local storage, "presigned upload" means we return a special token URL.
+ * The client POSTs to /api/upload/local which writes to disk server-side.
+ * (Direct PUT to the filesystem from the browser isn't possible.)
  */
 export async function getPresignedUploadUrl(
   key: string,
-  contentType: string,
-  expiresIn = 900
+  _contentType: string,
+  _expiresIn = 900
 ): Promise<string> {
-  const command = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    ContentType: contentType,
-  });
-  return getSignedUrl(r2, command, { expiresIn });
+  // Signal to the upload API that this is a local-storage upload
+  return `${APP_BASE_URL}/api/upload/local?key=${encodeURIComponent(key)}`;
 }
 
 /**
- * Delete a single object from R2
+ * Delete a file from local storage
  */
 export async function deleteFile(key: string): Promise<void> {
-  await r2.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+  const filePath = path.join(UPLOAD_BASE, key);
+  try {
+    await fs.unlink(filePath);
+    // Clean up empty parent directories
+    await fs.rmdir(path.dirname(filePath)).catch(() => {});
+  } catch {
+    // File not found — ignore
+  }
 }
 
 /**
- * Build the public URL for a stored object
- * (Requires R2 bucket to have public access enabled, or use presigned URLs)
+ * Return the local file path for a key
  */
 export function getPublicUrl(key: string): string {
-  return `${process.env.R2_PUBLIC_URL}/${key}`;
+  return `${APP_BASE_URL}/api/files/${encodeURIComponent(key)}`;
 }
 
 /**
- * Build the storage key for a photo
- * Pattern: albums/{albumId}/ceremonies/{ceremonyId}/{photoId}/{filename}
+ * Build storage key (same pattern as R2 adapter — keeps DB records compatible)
  */
 export function buildPhotoKey(
   albumId: string,
@@ -92,4 +110,36 @@ export function buildPhotoKey(
   filename: string
 ): string {
   return `albums/${albumId}/ceremonies/${ceremonyId}/${photoId}/${filename}`;
+}
+
+/**
+ * Get disk usage stats — useful for the health check page
+ */
+export async function getStorageStats(): Promise<{
+  totalFiles: number;
+  totalSizeBytes: number;
+}> {
+  let totalFiles = 0;
+  let totalSizeBytes = 0;
+
+  async function walk(dir: string) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else {
+          const stat = await fs.stat(fullPath);
+          totalFiles++;
+          totalSizeBytes += stat.size;
+        }
+      }
+    } catch {
+      // Directory doesn't exist yet
+    }
+  }
+
+  await walk(UPLOAD_BASE);
+  return { totalFiles, totalSizeBytes };
 }

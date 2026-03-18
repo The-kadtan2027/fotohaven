@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPresignedUrl } from "@/lib/storage";
+import { albums } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(
   request: NextRequest,
@@ -9,14 +11,17 @@ export async function GET(
   try {
     const { albumId } = await params;
 
-    const album = await db.album.findUnique({
-      where: { id: albumId },
-      include: {
+    const album = await db.query.albums.findFirst({
+      where: eq(albums.id, albumId),
+      with: {
         ceremonies: {
-          orderBy: { order: 'asc' },
-          include: {
+          orderBy: (c, { asc }) => [asc(c.order)],
+          with: {
             photos: {
-              orderBy: { createdAt: 'desc' },
+              orderBy: (p, { desc }) => [desc(p.createdAt)],
+              with: {
+                comments: true,
+              },
             },
           },
         },
@@ -31,10 +36,10 @@ export async function GET(
     const albumWithUrls = {
       ...album,
       ceremonies: await Promise.all(
-        album.ceremonies.map(async (ceremony) => ({
+        album.ceremonies.map(async (ceremony: any) => ({
           ...ceremony,
           photos: await Promise.all(
-            ceremony.photos.map(async (photo) => ({
+            ceremony.photos.map(async (photo: any) => ({
               ...photo,
               url: await getPresignedUrl(photo.storageKey),
             }))

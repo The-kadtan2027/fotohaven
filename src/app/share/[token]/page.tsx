@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   Download, FolderOpen, Image as ImageIcon,
-  Loader2, X, ZoomIn, ChevronLeft, ChevronRight, Check
+  Loader2, X, ZoomIn, ChevronLeft, ChevronRight, Check,
+  MessageSquare, Send
 } from "lucide-react";
+import { Comment } from "@/types";
 
 interface Photo {
   id: string;
@@ -14,6 +16,7 @@ interface Photo {
   url: string;
   storageKey: string;
   mimeType: string;
+  comments?: any[];
 }
 
 interface Ceremony {
@@ -41,22 +44,48 @@ export default function SharePage() {
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null); // ceremonyId or "all"
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [passwordRequired, setPasswordRequired] = useState(false);
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+
+  const fetchAlbum = async (providedPassword?: string) => {
+    setLoading(true);
+    setAuthError("");
+    const headers: Record<string, string> = {};
+    if (providedPassword) {
+      headers["Authorization"] = `Bearer ${providedPassword}`;
+    }
+
+    try {
+      const resp = await fetch(`/api/share/${token}`, { headers });
+      const data = await resp.json();
+
+      if (resp.status === 401 && data.passwordRequired) {
+        setPasswordRequired(true);
+        setLoading(false);
+        return;
+      }
+
+      if (!resp.ok) {
+        throw new Error(data.error || "Failed to load album");
+      }
+
+      setAlbum(data);
+      setActiveCeremony(data.ceremonies[0]?.id ?? null);
+      setPasswordRequired(false);
+    } catch (err: any) {
+      setError(err.message || "This link is invalid or has expired.");
+      if (providedPassword) setAuthError("Incorrect password. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch(`/api/share/${token}`)
-      .then((r) => {
-        if (!r.ok) return r.json().then((d) => Promise.reject(d.error));
-        return r.json();
-      })
-      .then((data: Album) => {
-        setAlbum(data);
-        setActiveCeremony(data.ceremonies[0]?.id ?? null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(typeof err === "string" ? err : "This link is invalid or has expired.");
-        setLoading(false);
-      });
+    fetchAlbum();
   }, [token]);
 
   const toggleSelect = (photoId: string) => {
@@ -189,6 +218,47 @@ export default function SharePage() {
     return () => window.removeEventListener("keydown", handler);
   }, [lightbox]);
 
+  // Fetch comments when lightbox photo changes
+  useEffect(() => {
+    if (!lightbox) {
+      setComments([]);
+      return;
+    }
+    const photoId = lightbox.photos[lightbox.index].id;
+    fetch(`/api/comments?photoId=${photoId}`)
+      .then(r => r.json())
+      .then(setComments)
+      .catch(console.error);
+  }, [lightbox?.index, !!lightbox]);
+
+  const submitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newComment.trim() || !lightbox || isSubmitting) return;
+
+    const photoId = lightbox.photos[lightbox.index].id;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        body: JSON.stringify({
+          photoId,
+          body: newComment,
+          author: "client", // defaulting to client for share page
+        }),
+      });
+      if (res.ok) {
+        const added = await res.json();
+        setComments(prev => [added, ...prev]);
+        setNewComment("");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // ---- Render states ----
 
   if (loading) {
@@ -201,7 +271,40 @@ export default function SharePage() {
     );
   }
 
-  if (error) {
+  if (passwordRequired) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)", padding: 32 }}>
+        <div className="card" style={{ maxWidth: 400, width: "100%", padding: 32, textAlign: "center" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--warm-white)", border: "1px solid var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+            <FolderOpen size={24} color="var(--gold)" />
+          </div>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)", marginBottom: 12 }}>
+            Protected Album
+          </h2>
+          <p style={{ color: "var(--brown)", fontSize: 14, marginBottom: 24 }}>
+            This album is password protected. Please enter the password to view.
+          </p>
+          <form onSubmit={(e) => { e.preventDefault(); fetchAlbum(password); }}>
+            <input
+              type="password"
+              className="input"
+              placeholder="Enter password..."
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+              style={{ marginBottom: 12, textAlign: "center" }}
+            />
+            {authError && <p style={{ color: "var(--blush)", fontSize: 12, marginBottom: 12 }}>{authError}</p>}
+            <button className="btn-gold" type="submit" style={{ width: "100%" }} disabled={loading}>
+              {loading ? "Verifying..." : "View Album"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !passwordRequired) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--cream)", padding: 32, textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--warm-white)", border: "1px solid var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
@@ -373,46 +476,148 @@ export default function SharePage() {
       {/* ── Lightbox ── */}
       {lightbox && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex" }}
           onClick={() => setLightbox(null)}
         >
-          <button
-            onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
-            style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+          {/* Main Content Area (Image + Nav) */}
+          <div 
+            style={{ 
+              flex: 1, 
+              display: "flex", 
+              alignItems: "center", 
+              justifyContent: "center",
+              position: "relative",
+              padding: "40px"
+            }}
           >
-            <X size={18} />
-          </button>
-
-          {lightbox.index > 0 && (
             <button
-              onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index - 1 }); }}
-              style={{ position: "absolute", left: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+              style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
             >
-              <ChevronLeft size={20} />
+              <X size={18} />
             </button>
-          )}
 
-          <img
-            src={lightbox.photos[lightbox.index].url}
-            alt={lightbox.photos[lightbox.index].originalName}
+            {lightbox.index > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index - 1 }); }}
+                style={{ position: "absolute", left: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronLeft size={20} />
+              </button>
+            )}
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <img
+                src={lightbox.photos[lightbox.index].url}
+                alt={lightbox.photos[lightbox.index].originalName}
+                onClick={(e) => e.stopPropagation()}
+                style={{ 
+                  maxWidth: "100%", 
+                  maxHeight: "85vh", 
+                  objectFit: "contain", 
+                  borderRadius: 8, 
+                  boxShadow: "0 20px 80px rgba(0,0,0,0.6)" 
+                }}
+              />
+              <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
+                {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
+              </div>
+            </div>
+
+            {lightbox.index < lightbox.photos.length - 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index + 1 }); }}
+                style={{ position: "absolute", right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronRight size={20} />
+              </button>
+            )}
+          </div>
+
+          {/* Comments Sidebar */}
+          <div 
+            style={{ 
+              width: 350, 
+              background: "var(--espresso)", 
+              borderLeft: "1px solid rgba(255,255,255,0.1)",
+              display: "flex", 
+              flexDirection: "column",
+              position: "relative"
+            }}
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 20px 80px rgba(0,0,0,0.6)" }}
-          />
+          >
+            <div style={{ padding: "24px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+              <h3 style={{ fontFamily: "var(--font-display)", color: "var(--warm-white)", fontSize: 18, display: "flex", alignItems: "center", gap: 10 }}>
+                <MessageSquare size={18} color="var(--gold)" />
+                Photo Notes
+              </h3>
+            </div>
 
-          {lightbox.index < lightbox.photos.length - 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index + 1 }); }}
-              style={{ position: "absolute", right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+            {/* Comments List */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {comments.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.3)" }}>
+                  <p style={{ fontSize: 13 }}>No notes yet.</p>
+                </div>
+              ) : (
+                comments.map((c) => (
+                  <div key={c.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--gold)", textTransform: "uppercase" }}>
+                        {c.author}
+                      </span>
+                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                        {new Date(c.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 1.5, background: "rgba(255,255,255,0.03)", padding: "10px 12px", borderRadius: 8 }}>
+                      {c.body}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Input area */}
+            <form 
+              onSubmit={submitComment}
+              style={{ padding: 20, borderTop: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.2)" }}
             >
-              <ChevronRight size={20} />
-            </button>
-          )}
-
-          <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
-            {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
+              <div style={{ position: "relative" }}>
+                <textarea
+                  placeholder="Leave a note..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  style={{ 
+                    width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 12, padding: "12px 40px 12px 14px", color: "#fff", fontSize: 13,
+                    resize: "none", height: 80, fontFamily: "inherit"
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submitComment(e as any);
+                    }
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!newComment.trim() || isSubmitting}
+                  style={{ 
+                    position: "absolute", right: 10, bottom: 10, 
+                    background: "transparent", border: "none", color: "var(--gold)",
+                    cursor: "pointer", padding: 8, opacity: newComment.trim() ? 1 : 0.3
+                  }}
+                >
+                  <Send size={18} />
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
+
+
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
@@ -462,6 +667,18 @@ function GalleryPhoto({
       >
         {selected && <Check size={12} color="#fff" />}
       </button>
+
+      {photo.comments && photo.comments.length > 0 && (
+        <div 
+          style={{ 
+            position: "absolute", bottom: 12, left: 12, 
+            width: 8, height: 8, borderRadius: "50%", 
+            background: "var(--gold)", border: "1.5px solid #fff",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+            zIndex: 5
+          }} 
+        />
+      )}
 
       {/* Zoom button */}
       <button

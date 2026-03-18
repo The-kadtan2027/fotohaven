@@ -15,6 +15,7 @@ interface Photo {
   size: number;
   url: string;
   storageKey: string;
+  comments?: any[];
 }
 
 interface Ceremony {
@@ -390,6 +391,18 @@ function PhotoCard({ photo }: { photo: Photo }) {
           transition: "opacity 0.3s ease",
         }}
       />
+      {photo.comments && photo.comments.length > 0 && (
+        <div 
+          title={`${photo.comments.length} note(s)`}
+          style={{ 
+            position: "absolute", top: 10, right: 10, 
+            width: 10, height: 10, borderRadius: "50%", 
+            background: "var(--gold)", border: "2px solid #fff",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+            zIndex: 5
+          }} 
+        />
+      )}
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "24px 8px 8px", background: "linear-gradient(transparent, rgba(26,18,8,0.5))", opacity: 0, transition: "opacity 0.2s" }}
         onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
         onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}

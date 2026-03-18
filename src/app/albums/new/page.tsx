@@ -22,6 +22,8 @@ export default function NewAlbumPage() {
   const [ceremonies, setCeremonies] = useState<string[]>([]);
   const [customCeremony, setCustomCeremony] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [password, setPassword] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState("");
 
   const addCeremony = (name: string) => {
     if (!name.trim() || ceremonies.includes(name.trim())) return;
@@ -43,7 +45,14 @@ export default function NewAlbumPage() {
       const res = await fetch("/api/albums", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, clientName, ceremonies, expiresAt: expiresAt || null }),
+        body: JSON.stringify({ 
+          title, 
+          clientName, 
+          ceremonies, 
+          expiresAt: expiresAt || null,
+          password: password || null,
+          notifyEmail: notifyEmail || null
+        }),
       });
       if (!res.ok) throw new Error("Failed to create album");
       const album = await res.json();
@@ -248,6 +257,41 @@ export default function NewAlbumPage() {
                     After this date, the share link will stop working.
                   </p>
                 </div>
+
+                <div>
+                  <label style={labelStyle}>
+                    Password Protection
+                    <span style={{ color: "var(--taupe)", fontWeight: 400 }}> — optional</span>
+                  </label>
+                  <input
+                    className="input"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Set a password for this album..."
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 4 }}>
+                    If set, anyone with the link must enter this password to view.
+                  </p>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>
+                    Notification Email
+                    <span style={{ color: "var(--taupe)", fontWeight: 400 }}> — optional</span>
+                  </label>
+                  <input
+                    className="input"
+                    type="email"
+                    placeholder="Email to notify on first view..."
+                    value={notifyEmail}
+                    onChange={(e) => setNotifyEmail(e.target.value)}
+                  />
+                  <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 4 }}>
+                    We'll email you as soon as the client opens the link.
+                  </p>
+                </div>
               </div>
 
               {/* Summary */}
@@ -260,8 +304,11 @@ export default function NewAlbumPage() {
                   <Row label="Photographer" value={clientName} />
                   <Row label="Ceremonies" value={ceremonies.join(", ")} />
                   {expiresAt && <Row label="Expires" value={new Date(expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })} />}
+                  {password && <Row label="Protected" value="Yes (Password set)" />}
+                  {notifyEmail && <Row label="Notify" value={notifyEmail} />}
                 </div>
               </div>
+
 
               {error && (
                 <p style={{ color: "var(--blush)", fontSize: 13, marginBottom: 16 }}>{error}</p>

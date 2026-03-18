@@ -1,9 +1,10 @@
-// src/app/api/upload/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPresignedUploadUrl, buildPhotoKey } from "@/lib/storage";
 import { UploadPhotoPayload, UploadPhotoResponse } from "@/types";
 import { v4 as uuidv4 } from "uuid";
+import { ceremonies, photos } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -29,9 +30,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify ceremony exists and get albumId
-    const ceremony = await db.ceremony.findUnique({
-      where: { id: body.ceremonyId },
-      select: { id: true, albumId: true },
+    const ceremony = await db.query.ceremonies.findFirst({
+      where: eq(ceremonies.id, body.ceremonyId),
+      columns: { id: true, albumId: true },
     });
 
     if (!ceremony) {
@@ -44,17 +45,16 @@ export async function POST(req: NextRequest) {
     const storageKey = buildPhotoKey(ceremony.albumId, ceremony.id, photoId, safeFilename);
 
     // Create the DB record immediately (status can be tracked later)
-    await db.photo.create({
-      data: {
-        id: photoId,
-        filename: safeFilename,
-        originalName: body.filename,
-        size: body.size,
-        mimeType: body.contentType,
-        storageKey,
-        ceremonyId: body.ceremonyId,
-      },
-    });
+    db.insert(photos).values({
+      id: photoId,
+      filename: safeFilename,
+      originalName: body.filename,
+      size: body.size,
+      mimeType: body.contentType,
+      storageKey,
+      ceremonyId: body.ceremonyId,
+      createdAt: new Date(),
+    }).run();
 
     // Return a presigned PUT URL — client uploads directly to R2
     const uploadUrl = await getPresignedUploadUrl(storageKey, body.contentType);

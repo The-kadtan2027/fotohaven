@@ -18,7 +18,7 @@
 
 ## Task: Per-photo comments
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** Photographer can leave a text note on individual photos. Client can see notes.
 
 ### Schema changes (`prisma/schema.prisma`)
@@ -69,17 +69,17 @@ interface Comment {
 ```
 
 ### Acceptance criteria
-- [ ] Photographer can type a comment in the lightbox and submit
-- [ ] Comment appears immediately below the photo (optimistic update)
-- [ ] Comment persists on page reload
-- [ ] Client dashboard shows a dot indicator on photos with comments
-- [ ] Comments cascade-delete when photo is deleted
+- [x] Photographer can type a comment in the lightbox and submit
+- [x] Comment appears immediately below the photo (optimistic update)
+- [x] Comment persists on page reload
+- [x] Client dashboard shows a dot indicator on photos with comments
+- [x] Comments cascade-delete when photo is deleted
 
 ---
 
 ## Task: Password-protected share links
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** Client can optionally set a password on an album. Photographer must enter it to view.
 
 ### Schema
@@ -103,17 +103,17 @@ No schema change needed. Add `bcryptjs` package: `npm install bcryptjs @types/bc
   before gallery renders. On submit, retry GET with password in Authorization header.
 
 ### Acceptance criteria
-- [ ] Albums without password work exactly as before (no regression)
-- [ ] Setting a password on creation stores a bcrypt hash (never plaintext)
-- [ ] Share link shows password prompt if album is protected
-- [ ] Correct password reveals the gallery
-- [ ] Wrong password shows error message, allows retry
+- [x] Albums without password work exactly as before (no regression)
+- [x] Setting a password on creation stores a bcrypt hash (never plaintext)
+- [x] Share link shows password prompt if album is protected
+- [x] Correct password reveals the gallery
+- [x] Wrong password shows error message, allows retry
 
 ---
 
 ## Task: Email notifications (Resend)
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** Client receives an email when their share link is first viewed.
 
 ### New dependency
@@ -146,10 +146,10 @@ firstViewedAt DateTime?
 - This ensures only the first view triggers the notification
 
 ### Acceptance criteria
-- [ ] Email sent only on first view, not every view
-- [ ] Email contains album title and a link back to the share URL
-- [ ] No crash if `RESEND_API_KEY` is not set (log warning, skip silently)
-- [ ] `notifyEmail` is optional — albums without it skip notification
+- [x] Email sent only on first view, not every view
+- [x] Email contains album title and a link back to the share URL
+- [x] No crash if `RESEND_API_KEY` is not set (log warning, skip silently)
+- [x] `notifyEmail` is optional — albums without it skip notification
 
 ---
 

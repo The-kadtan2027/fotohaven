@@ -44,4 +44,17 @@ export interface CreateAlbumPayload {
   clientName: string;
   ceremonies: string[];
   expiresAt: string | null;
+  password?: string | null;
+  notifyEmail?: string | null;
 }
+
+
+
+export interface Comment {
+  id: string;
+  body: string;
+  author: string;
+  photoId: string;
+  createdAt: string;
+}
+
