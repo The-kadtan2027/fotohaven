@@ -54,6 +54,8 @@ export default function AlbumPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [downloadingFinals, setDownloadingFinals] = useState(false);
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false);
 
   useEffect(() => {
     fetchAlbum();
@@ -218,6 +220,35 @@ export default function AlbumPage() {
       await fetchAlbum();
     } catch {
       alert("Failed to delete photo.");
+    }
+  };
+
+  const togglePhotoSelection = (id: string, selected: boolean) => {
+    if (selected) {
+      setSelectedPhotos(prev => [...prev, id]);
+    } else {
+      setSelectedPhotos(prev => prev.filter(p => p !== id));
+    }
+  };
+
+  const clearSelection = () => setSelectedPhotos([]);
+
+  const deleteSelectedPhotos = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedPhotos.length} photo(s)?`)) return;
+    setIsDeletingBatch(true);
+    try {
+      const res = await fetch("/api/photos/delete-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoIds: selectedPhotos })
+      });
+      if (!res.ok) throw new Error();
+      await fetchAlbum();
+      clearSelection();
+    } catch {
+      alert("Failed to delete photos.");
+    } finally {
+      setIsDeletingBatch(false);
     }
   };
 
@@ -439,7 +470,14 @@ export default function AlbumPage() {
               {activeCeremonyData.photos.length > 0 ? (
                 <div className="photo-grid">
                   {activeCeremonyData.photos.map((photo) => (
-                    <PhotoCard key={photo.id} photo={photo} onDelete={deletePhoto} />
+                    <PhotoCard 
+                      key={photo.id} 
+                      photo={photo} 
+                      onDelete={deletePhoto} 
+                      onSelect={togglePhotoSelection}
+                      isSelected={selectedPhotos.includes(photo.id)}
+                      showCheckbox={selectedPhotos.length > 0}
+                    />
                   ))}
                 </div>
               ) : (
@@ -453,6 +491,28 @@ export default function AlbumPage() {
         </main>
       </div>
 
+      {/* Selection Action Bar */}
+      {selectedPhotos.length > 0 && (
+        <div style={{
+          position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)",
+          background: "var(--espresso)", color: "#fff", padding: "12px 24px",
+          borderRadius: 100, display: "flex", alignItems: "center", gap: 16,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 100
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>
+            {selectedPhotos.length} photo{selectedPhotos.length === 1 ? "" : "s"} selected
+          </span>
+          <div style={{ width: 1, height: 16, background: "rgba(255,255,255,0.2)" }} />
+          <button onClick={clearSelection} style={{ background: "none", border: "none", color: "var(--sand)", cursor: "pointer", fontSize: 13 }}>
+            Cancel
+          </button>
+          <button onClick={deleteSelectedPhotos} disabled={isDeletingBatch} style={{ background: "var(--blush)", border: "none", color: "#fff", borderRadius: 100, padding: "6px 16px", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            {isDeletingBatch ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Trash2 size={14} />}
+            Delete
+          </button>
+        </div>
+      )}
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
@@ -465,10 +525,19 @@ function StatusIcon({ status }: { status: UploadStatus }) {
   return <div style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />;
 }
 
-function PhotoCard({ photo, onDelete }: { photo: Photo, onDelete?: (id: string) => void }) {
+function PhotoCard({ photo, onDelete, onSelect, isSelected, showCheckbox }: { photo: Photo, onDelete?: (id: string) => void, onSelect?: (id: string, selected: boolean) => void, isSelected?: boolean, showCheckbox?: boolean }) {
   const [loaded, setLoaded] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => {
+        if ((showCheckbox || hovered) && onSelect) {
+          onSelect(photo.id, !isSelected);
+        }
+      }}
       style={{
         aspectRatio: "1",
         borderRadius: 10,
@@ -491,6 +560,24 @@ function PhotoCard({ photo, onDelete }: { photo: Photo, onDelete?: (id: string) 
           transition: "opacity 0.3s ease",
         }}
       />
+      {(showCheckbox || hovered || isSelected) && onSelect && (
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(photo.id, !isSelected);
+          }}
+          style={{
+            position: "absolute", top: 8, left: 8, zIndex: 10,
+            width: 20, height: 20, borderRadius: 4,
+            background: isSelected ? "var(--gold)" : "rgba(255,255,255,0.8)",
+            border: isSelected ? "none" : "2px solid var(--taupe)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", opacity: (!isSelected && !hovered && showCheckbox) ? 0.5 : 1
+          }}
+        >
+          {isSelected && <Check size={14} color="#fff" strokeWidth={3} />}
+        </div>
+      )}
       {photo.comments && photo.comments.length > 0 && (
         <div 
           title={`${photo.comments.length} note(s)`}

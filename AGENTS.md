@@ -253,3 +253,37 @@ None needed. `onDelete: 'cascade'` is already configured for ceremonies → albu
 - [x] Photo is permanently removed from both the database and the `/data/uploads` folder
 - [x] Photographer can delete an entire album
 - [x] Deleting an album removes all of its associated photo files from the storage backend (no orphaned files left on disk)
+
+---
+
+## Task: Delete group of photos (multi-select)
+
+**Status:** Completed
+**Scope:** Photographer can select multiple photos in the album management view and delete them all at once.
+
+### Schema change
+None needed.
+
+### New API routes
+- `POST /api/photos/delete-batch` — `src/app/api/photos/delete-batch/route.ts`
+  - Expects a JSON body with an array of `photoIds: string[]`.
+  - Looks up the photo records to retrieve their `storageKey`s.
+  - Iterates and calls `deleteFile()` on each one.
+  - Deletes all matched photo records from the database in one query.
+
+### UI changes
+- `src/app/albums/[albumId]/page.tsx`
+  - Add a state array `selectedPhotos` to track selected IDs.
+  - Update `PhotoCard` to show a checkbox overlay (top-left) when in "selection mode" or on hover. 
+  - Clicking a photo checks/unchecks it.
+  - Show a floating action bar or banner when 1 or more photos are selected:
+    - Displaying "X photos selected"
+    - "Cancel Selection" button
+    - "Delete Selected" button (calls `confirm()`, then hits the new endpoint)
+  - After successful deletion, clear the selection state and refresh the album.
+
+### Acceptance criteria
+- [x] Photographer can select multiple photos from the album grid using checkboxes
+- [x] A delete button is visible when 1 or more photos are selected
+- [x] Deleting bulk removes all selected photos from both DB and `/data/uploads` folder
+- [x] Album UI refreshes to show the remaining photos
