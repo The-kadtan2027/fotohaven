@@ -1,16 +1,21 @@
-#!/data/data/com.termux/files/usr/bin/bash
-# infra/android/tailscale-setup.sh
+#!/bin/sh
+
+# tailscale-setup-alpine.sh
 #
-# Installs Tailscale + enables Funnel on Android (Termux).
+# Installs Tailscale + enables Funnel INSIDE Termux's Alpine (proot-distro).
 # Gives you a permanent public URL: https://devicename.tailXXXX.ts.net
 #
 # PREREQUISITES:
-#   - Termux installed from F-Droid (NOT Google Play)
+#   - Termux with proot-distro Alpine installed
 #   - FotoHaven already running at http://localhost:3000
 #   - A free Tailscale account (sign up at https://login.tailscale.com)
 #
-# USAGE:
-#   bash ~/fotohaven/infra/android/tailscale-setup.sh
+# USAGE (from bare Termux):
+#   startalpine -c "cd /data/data/com.termux/files/home/fotohaven && sh infra/android/tailscale-setup-alpine.sh"
+#
+# Or from inside Alpine:
+#   cd /data/data/com.termux/files/home/fotohaven
+#   sh infra/android/tailscale-setup-alpine.sh
 #
 # Safe to re-run — all steps are idempotent.
 
@@ -23,54 +28,62 @@ CYAN="\033[0;36m"
 RED="\033[0;31m"
 RESET="\033[0m"
 
-step() { echo -e "\n${BOLD}${CYAN}▶ $1${RESET}"; }
-ok()   { echo -e "${GREEN}✓ $1${RESET}"; }
-warn() { echo -e "${YELLOW}⚠ $1${RESET}"; }
-err()  { echo -e "${RED}✗ $1${RESET}"; }
+step() { printf "\n${BOLD}${CYAN}▶ %s${RESET}\n" "$1"; }
+ok()   { printf "${GREEN}✓ %s${RESET}\n" "$1"; }
+warn() { printf "${YELLOW}⚠ %s${RESET}\n" "$1"; }
+err()  { printf "${RED}✗ %s${RESET}\n" "$1"; }
 
-TS_SOCKET="/data/data/com.termux/files/usr/run/tailscaled.sock"
-TS_STATE="/data/data/com.termux/files/home/.config/tailscale"
+# Paths — accessible from both Alpine proot and bare Termux
+TERMUX_HOME="/data/data/com.termux/files/home"
+TS_SOCKET="/var/run/tailscaled.sock"
+TS_STATE="$TERMUX_HOME/.config/tailscale"
 
-echo -e "${BOLD}"
-echo "╔══════════════════════════════════════════════╗"
-echo "║   FotoHaven — Tailscale Funnel Setup         ║"
-echo "║   Permanent public URL for your phone server ║"
-echo "╚══════════════════════════════════════════════╝"
-echo -e "${RESET}"
+printf "${BOLD}\n"
+echo "╔══════════════════════════════════════════════════╗"
+echo "║   FotoHaven — Tailscale Funnel Setup (Alpine)    ║"
+echo "║   Permanent public URL for your phone server     ║"
+echo "╚══════════════════════════════════════════════════╝"
+printf "${RESET}\n"
 
-# ── Step 1: Install Go (needed to build Tailscale from source) ────────────────
+# ── Step 1: Install Go via apk ────────────────────────────────────────────────
 step "Installing Go compiler"
-if command -v go &>/dev/null; then
+if command -v go >/dev/null 2>&1; then
   ok "Go already installed: $(go version | cut -d' ' -f3)"
 else
-  pkg install -y golang
+  apk update
+  apk add --no-cache go
   ok "Go installed: $(go version | cut -d' ' -f3)"
 fi
 
-# ── Step 2: Build Tailscale binaries ──────────────────────────────────────────
+# ── Step 2: Install build dependencies ────────────────────────────────────────
+step "Installing build dependencies"
+apk add --no-cache git curl grep sed >/dev/null 2>&1
+ok "Build dependencies ready"
+
+# ── Step 3: Build Tailscale binaries ──────────────────────────────────────────
 step "Building Tailscale from source (this takes 3–5 minutes)"
 
-GOBIN="$PREFIX/bin"
-export GOBIN
+export GOBIN="/usr/local/bin"
+mkdir -p "$GOBIN"
 
-if command -v tailscale &>/dev/null && command -v tailscaled &>/dev/null; then
+if command -v tailscale >/dev/null 2>&1 && command -v tailscaled >/dev/null 2>&1; then
   ok "Tailscale already installed: $(tailscale version 2>/dev/null || echo 'unknown')"
 else
   warn "Compiling tailscale and tailscaled — grab a chai ☕"
   # CGO_ENABLED=0 skips C dependencies (fyne.io/systray needs X11/GTK
-  # which don't exist on Android). Pure Go build works perfectly.
+  # which don't exist in headless Alpine proot). Pure Go build works perfectly.
   CGO_ENABLED=0 go install tailscale.com/cmd/tailscale@latest
   CGO_ENABLED=0 go install tailscale.com/cmd/tailscaled@latest
   ok "Tailscale binaries installed to $GOBIN"
 fi
 
-# ── Step 3: Create state directory ────────────────────────────────────────────
+# ── Step 4: Create state directory ────────────────────────────────────────────
 step "Creating Tailscale state directory"
 mkdir -p "$TS_STATE"
 mkdir -p "$(dirname "$TS_SOCKET")"
 ok "State dir: $TS_STATE"
 
-# ── Step 4: Start tailscaled daemon ───────────────────────────────────────────
+# ── Step 5: Start tailscaled daemon ───────────────────────────────────────────
 step "Starting tailscaled daemon (userspace networking)"
 
 if pgrep -x "tailscaled" > /dev/null 2>&1; then
@@ -94,24 +107,24 @@ else
   fi
 fi
 
-# ── Step 5: Authenticate with Tailscale ───────────────────────────────────────
+# ── Step 6: Authenticate with Tailscale ───────────────────────────────────────
 step "Authenticating with Tailscale"
-echo -e "${YELLOW}A login URL will appear below — open it in a browser to authenticate.${RESET}"
-echo -e "${YELLOW}If already authenticated, this step will complete instantly.${RESET}"
+printf "${YELLOW}A login URL will appear below — open it in a browser to authenticate.${RESET}\n"
+printf "${YELLOW}If already authenticated, this step will complete instantly.${RESET}\n"
 echo ""
 
 tailscale --socket="$TS_SOCKET" up
 
 ok "Authenticated with Tailscale"
 
-# ── Step 6: Enable HTTPS certificates ────────────────────────────────────────
+# ── Step 7: Enable HTTPS certificates ────────────────────────────────────────
 step "Enabling HTTPS certificates"
 tailscale --socket="$TS_SOCKET" cert 2>/dev/null || true
 ok "HTTPS certificates configured"
 
-# ── Step 7: Enable Funnel ─────────────────────────────────────────────────────
+# ── Step 8: Enable Funnel ─────────────────────────────────────────────────────
 step "Enabling Tailscale Funnel on port 3000"
-echo -e "${YELLOW}Funnel exposes your app to the public internet via Tailscale's relay.${RESET}"
+printf "${YELLOW}Funnel exposes your app to the public internet via Tailscale's relay.${RESET}\n"
 echo ""
 
 # Enable funnel for port 3000 — this maps external :443 → local :3000
@@ -125,7 +138,7 @@ if [ -n "$DEVICE_NAME" ]; then
   FUNNEL_URL="https://$DEVICE_NAME"
   ok "Funnel active!"
   echo ""
-  echo -e "${BOLD}${GREEN}  Your permanent public URL: ${FUNNEL_URL}${RESET}"
+  printf "${BOLD}${GREEN}  Your permanent public URL: %s${RESET}\n" "$FUNNEL_URL"
   echo ""
 else
   FUNNEL_URL="(could not detect — check 'tailscale status')"
@@ -136,12 +149,11 @@ fi
 # Kill the foreground funnel — we'll set it up properly via boot script
 kill $FUNNEL_PID 2>/dev/null || true
 
-# ── Step 8: Update .env.local ─────────────────────────────────────────────────
+# ── Step 9: Update .env.local ─────────────────────────────────────────────────
 step "Updating FotoHaven configuration"
 
-ENV_FILE="$HOME/fotohaven/.env.local"
+ENV_FILE="$TERMUX_HOME/fotohaven/.env.local"
 if [ -f "$ENV_FILE" ] && [ -n "$DEVICE_NAME" ]; then
-  # Update NEXT_PUBLIC_APP_URL if it exists, otherwise append
   if grep -q "NEXT_PUBLIC_APP_URL" "$ENV_FILE"; then
     sed -i "s|NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=\"$FUNNEL_URL\"|" "$ENV_FILE"
     ok "Updated NEXT_PUBLIC_APP_URL in .env.local"
@@ -153,39 +165,43 @@ else
   warn "Could not update .env.local — set NEXT_PUBLIC_APP_URL manually to: $FUNNEL_URL"
 fi
 
-# ── Step 9: Create boot integration script ────────────────────────────────────
+# ── Step 10: Create boot integration script ───────────────────────────────────
 step "Creating Tailscale boot script"
 
-BOOT_SCRIPT="$HOME/.termux/boot/start-tailscale.sh"
+# Boot script lives in Termux's boot dir but launches Alpine to run tailscale
+BOOT_SCRIPT="$TERMUX_HOME/.termux/boot/start-tailscale.sh"
 mkdir -p "$(dirname "$BOOT_SCRIPT")"
 
 cat > "$BOOT_SCRIPT" << 'BOOT'
 #!/data/data/com.termux/files/usr/bin/bash
-# Auto-start Tailscale Funnel on phone reboot
+# Auto-start Tailscale Funnel on phone reboot (via Alpine proot)
 # Requires: Termux:Boot app installed from F-Droid
-
-TS_SOCKET="/data/data/com.termux/files/usr/run/tailscaled.sock"
-TS_STATE="/data/data/com.termux/files/home/.config/tailscale"
 
 # Wait for network
 sleep 15
 
-# Start tailscaled daemon
-if ! pgrep -x "tailscaled" > /dev/null 2>&1; then
-  tailscaled \
-    --tun=userspace-networking \
-    --socket="$TS_SOCKET" \
-    --statedir="$TS_STATE" \
-    --state="$TS_STATE/tailscaled.state" \
-    > /dev/null 2>&1 &
-  sleep 5
-fi
+# Run tailscaled + funnel inside Alpine
+proot-distro login alpine -- sh -c '
+  TS_SOCKET="/var/run/tailscaled.sock"
+  TS_STATE="/data/data/com.termux/files/home/.config/tailscale"
 
-# Bring up the Tailscale connection
-tailscale --socket="$TS_SOCKET" up
+  # Start tailscaled daemon
+  if ! pgrep -x "tailscaled" > /dev/null 2>&1; then
+    tailscaled \
+      --tun=userspace-networking \
+      --socket="$TS_SOCKET" \
+      --statedir="$TS_STATE" \
+      --state="$TS_STATE/tailscaled.state" \
+      > /dev/null 2>&1 &
+    sleep 5
+  fi
 
-# Enable Funnel (proxies external :443 → local :3000)
-tailscale --socket="$TS_SOCKET" funnel 3000 &
+  # Bring up the Tailscale connection
+  tailscale --socket="$TS_SOCKET" up
+
+  # Enable Funnel (proxies external :443 → local :3000)
+  tailscale --socket="$TS_SOCKET" funnel 3000 &
+'
 BOOT
 
 chmod +x "$BOOT_SCRIPT"
@@ -194,9 +210,9 @@ warn "Install 'Termux:Boot' from F-Droid for this to trigger on phone reboot"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}${GREEN}"
+printf "${BOLD}${GREEN}\n"
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║   Tailscale Funnel setup complete!                      ║"
+echo "║   Tailscale Funnel setup complete! (Alpine)             ║"
 echo "║                                                         ║"
 echo "║   Your permanent public URL:                            ║"
 echo "║   $FUNNEL_URL"
@@ -209,16 +225,19 @@ echo "║                                                         ║"
 echo "║   2. Test from another device:                          ║"
 echo "║      Open $FUNNEL_URL in a browser"
 echo "║                                                         ║"
-echo "║   3. Start the funnel (runs in background):             ║"
+echo "║   3. Start the funnel (from inside Alpine):             ║"
 echo "║      tailscale --socket=$TS_SOCKET funnel 3000 &"
 echo "║                                                         ║"
 echo "║   The URL never changes — share links work forever! 🎉  ║"
 echo "╚══════════════════════════════════════════════════════════╝"
-echo -e "${RESET}"
+printf "${RESET}\n"
 echo ""
 echo "────────────────────────────────────────────────────────────"
-echo "  Useful commands:"
+echo "  Useful commands (run inside Alpine):"
 echo "  tailscale --socket=$TS_SOCKET status     → connection info"
 echo "  tailscale --socket=$TS_SOCKET funnel 3000 &  → start funnel"
 echo "  pgrep tailscaled                         → check daemon"
+echo ""
+echo "  To enter Alpine from Termux:"
+echo "  proot-distro login alpine"
 echo "────────────────────────────────────────────────────────────"

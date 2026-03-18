@@ -1,24 +1,19 @@
 Bug report:
-- Where:  browser console logs
-- What happens: Error occurred when i tried to click on copy link button in albums page and main page
-- What should happen: Success
-- Error message: page-7157aac92b0096d6.js:1 Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'writeText')
-    at m (page-7157aac92b0096d6.js:1:1714)
-    at onClick (page-7157aac92b0096d6.js:1:5548)
-    at uB (4bd1b696-f21fca8ea5dcfed5.js:1:131447)
-    at 4bd1b696-f21fca8ea5dcfed5.js:1:137623
-    at nC (4bd1b696-f21fca8ea5dcfed5.js:1:18576)
-    at uK (4bd1b696-f21fca8ea5dcfed5.js:1:132754)
-    at sG (4bd1b696-f21fca8ea5dcfed5.js:1:158334)
-    at sY (4bd1b696-f21fca8ea5dcfed5.js:1:158156)
-m @ page-7157aac92b0096d6.js:1
-onClick @ page-7157aac92b0096d6.js:1
-uB @ 4bd1b696-f21fca8ea5dcfed5.js:1
-(anonymous) @ 4bd1b696-f21fca8ea5dcfed5.js:1
-nC @ 4bd1b696-f21fca8ea5dcfed5.js:1
-uK @ 4bd1b696-f21fca8ea5dcfed5.js:1
-sG @ 4bd1b696-f21fca8ea5dcfed5.js:1
-sY @ 4bd1b696-f21fca8ea5dcfed5.js:1
+- Where: fotohaven/infra/android/tailscale-setup.sh
+- What happens: Error occurred when i tried to run the script
+- What should happen: Success ⚠ Compiling tailscale and tailscaled — grab a chai ☕
+- Error message: # fyne.io/systray
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:86:2: undefined: setInternalLoop
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:89:2: undefined: nativeLoop
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:97:9: undefined: nativeStart
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:98:3: undefined: nativeEnd
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:131:2: undefined: registerSystray
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:144:2: undefined: resetMenu
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:149:14: undefined: quit
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:182:2: undefined: addSeparator
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:187:2: undefined: addSeparator
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:241:2: undefined: hideMenuItem
+../go/pkg/mod/fyne.io/systray@v1.11.1-0.20250812065214-4856ac3adc3c/systray.go:241:2: too many errors
 
 Before fixing:
 1. Read the relevant file(s) in full — do not guess at their contents.
@@ -37,7 +32,7 @@ Show me the exact before/after diff of what you changed.
 
 
 
-I want to implement: delete a photo or group of photos from album feature, what i observed is the once we uplodad the photo it is stored in the /data/uploads folder but i am not able to delete it from the app, also i want to implement the delete feature for photos as well
+I want to implement: How we can expose our application to the internet, using which we can share the photos with our clients. as you know our goal is to use our own server from an android device, so we need to use some kind of dynamic dns service to expose our application to the internet. as this is an experiment, i want to use a free dynamic dns service. lets plan this out and implement it. 
 
 Before writing any code:
 1. Read CLAUDE.md — confirm the current data models and which files you will touch.
@@ -76,3 +71,22 @@ Wait for my confirmation before resuming work.
 
 
 
+
+Phase 1 — Install Tailscale in Termux (on the phone)
+  1. pkg install golang
+  2. go install tailscale.com/cmd/tailscale{,d}@latest
+  3. Start tailscaled: tailscaled --tun=userspace-networking --socket=... &
+  4. tailscale up  (authenticate via browser link)
+
+Phase 2 — Enable Funnel
+  5. tailscale funnel 3000
+  6. Note your permanent URL: https://devicename.tailXXXX.ts.net
+
+Phase 3 — Configure FotoHaven
+  7. Edit .env.local: NEXT_PUBLIC_APP_URL="https://devicename.tailXXXX.ts.net"
+  8. pm2 restart fotohaven  (NO rebuild needed — server-side only)
+  9. Verify: open the URL on your PC browser, test share links
+
+Phase 4 — Auto-start on boot
+  10. Add tailscaled + tailscale funnel to boot script
+  11. Update infra docs (cloudflared-config.yml → add tailscale alternative)

@@ -100,6 +100,7 @@ fotohaven/
 │       ├── termux-setup.sh         # One-shot bootstrap script
 │       ├── cloudflared-config.yml  # Cloudflare Tunnel config
 │       ├── tailscale-setup.sh      # Tailscale Funnel setup (alternative tunnel)
+│       ├── tailscale-setup-alpine.sh # Tailscale setup for Alpine proot
 │       ├── health-check.sh         # Server status checker
 │       └── backup.sh               # DB + photo backup
 ├── drizzle.config.js               # Drizzle Kit configuration
