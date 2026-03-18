@@ -153,7 +153,18 @@ export default function AlbumPage() {
   const copyShareLink = async () => {
     if (!album) return;
     const url = `${window.location.origin}/share/${album.shareToken}`;
-    await navigator.clipboard.writeText(url);
+    if (navigator?.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      textArea.style.position = "absolute";
+      textArea.style.left = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      textArea.remove();
+    }
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2500);
   };

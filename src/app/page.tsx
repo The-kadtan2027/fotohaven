@@ -30,7 +30,19 @@ export default function Home() {
     `${window.location.origin}/share/${token}`;
 
   const copyLink = async (token: string) => {
-    await navigator.clipboard.writeText(shareUrl(token));
+    const url = shareUrl(token);
+    if (navigator?.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      textArea.style.position = "absolute";
+      textArea.style.left = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      textArea.remove();
+    }
     alert("Share link copied to clipboard!");
   };
 
