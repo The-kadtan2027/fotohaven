@@ -287,3 +287,34 @@ None needed.
 - [x] A delete button is visible when 1 or more photos are selected
 - [x] Deleting bulk removes all selected photos from both DB and `/data/uploads` folder
 - [x] Album UI refreshes to show the remaining photos
+
+---
+
+## Task: Expose app to internet (Tailscale Funnel)
+
+**Status:** Completed
+**Scope:** Provide a free, permanent public URL for FotoHaven running on Android/Termux via Tailscale Funnel. Keep Cloudflare Tunnel as an alternative option.
+
+### Schema change
+None.
+
+### New files
+- `infra/android/tailscale-setup.sh` — One-shot setup script: installs Go, builds Tailscale from source, authenticates, enables Funnel, updates `.env.local`, creates boot script
+
+### Modified files
+- `README.md` — Step 7 rewritten with comparison table + Option A (Cloudflare) / Option B (Tailscale). Step 8 updated with dual boot script docs.
+- `AGENTS.md` — This task spec added
+
+### Key technical details
+- `NEXT_PUBLIC_APP_URL` is only used server-side in `src/lib/storage.ts` — changing `.env.local` + `pm2 restart` is sufficient (no rebuild needed)
+- Tailscale runs in Termux userspace (`--tun=userspace-networking`), no root required
+- Funnel maps external `:443` → local `:3000` automatically
+- Boot script at `~/.termux/boot/start-tailscale.sh` auto-starts daemon + funnel on reboot
+
+### Acceptance criteria
+- [x] Setup script installs and configures Tailscale Funnel end-to-end
+- [x] README documents both Cloudflare Tunnel and Tailscale Funnel as options
+- [x] Boot script created for auto-start on phone reboot
+- [x] `npx tsc --noEmit` passes with zero errors
+- [x] Existing Cloudflare Tunnel config preserved (no regression)
+

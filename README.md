@@ -57,7 +57,7 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 | Email      | Resend                         | Simple API, generous free tier                        |
 | Auth       | bcryptjs (honour-system)       | Password-hashed album links, no user accounts         |
 | Process    | PM2                            | Keeps Node alive, restarts on crash, survives reboots |
-| Tunnel     | Cloudflare Tunnel              | Public URL without port-forwarding or static IP       |
+| Tunnel     | Cloudflare Tunnel / Tailscale Funnel | Public URL without port-forwarding or static IP       |
 | Fonts      | Cormorant Garamond + DM Sans   | Luxury editorial aesthetic                            |
 
 ---
@@ -99,6 +99,7 @@ fotohaven/
 │   └── android/
 │       ├── termux-setup.sh         # One-shot bootstrap script
 │       ├── cloudflared-config.yml  # Cloudflare Tunnel config
+│       ├── tailscale-setup.sh      # Tailscale Funnel setup (alternative tunnel)
 │       ├── health-check.sh         # Server status checker
 │       └── backup.sh               # DB + photo backup
 ├── drizzle.config.js               # Drizzle Kit configuration
@@ -336,7 +337,21 @@ curl http://localhost:3000
 
 ---
 
-### Step 7 — Expose to the internet (Cloudflare Tunnel)
+### Step 7 — Expose to the internet
+
+You need a tunnel to make your phone server accessible from outside your home network. Two options:
+
+| | Option A: Cloudflare Tunnel | Option B: Tailscale Funnel |
+|---|---|---|
+| **Best for** | Custom domain, production use | Quick setup, educational/personal use |
+| **Cost** | Free | Free (Personal plan) |
+| **Requires** | Cloudflare account + domain (or use quick tunnel) | Tailscale account (Google/GitHub login) |
+| **URL stability** | ✅ Permanent (with domain) / ⚠️ Random (quick tunnel) | ✅ Permanent always |
+| **HTTPS** | ✅ Automatic | ✅ Automatic |
+| **Bandwidth** | Unlimited | Undisclosed limits (fine for photo sharing) |
+| **Setup time** | ~5 min | ~15 min (builds from source) |
+
+#### Option A — Cloudflare Tunnel
 
 Cloudflare Tunnel creates an encrypted outbound connection from your phone to Cloudflare's global edge network. No port forwarding, no static IP, no router settings.
 
@@ -385,6 +400,62 @@ Your app is now live at `https://fotohaven.yourdomain.com` 🎉
 > **Quick test with no domain:** `cloudflared tunnel --url http://localhost:3000`
 > Instantly prints a `*.trycloudflare.com` URL — share it and it works immediately.
 
+#### Option B — Tailscale Funnel (recommended for experiments)
+
+Tailscale Funnel gives you a **permanent public URL** (`https://devicename.tailXXXX.ts.net`) with zero configuration. No domain purchase needed. URL never changes across restarts — share links work forever.
+
+**Automated setup** — run the one-shot script:
+```bash
+bash ~/fotohaven/infra/android/tailscale-setup.sh
+```
+
+This script:
+1. Installs Go compiler (needed to build Tailscale for ARM)
+2. Builds `tailscale` and `tailscaled` from source (~3–5 min)
+3. Starts the daemon in userspace mode (no root needed)
+4. Authenticates via browser link
+5. Enables Funnel (proxies external `:443` → local `:3000`)
+6. Updates `.env.local` with your permanent URL
+7. Creates a boot script for auto-start
+
+**Manual setup** — if you prefer step by step:
+
+```bash
+# Install Go
+pkg install -y golang
+
+# Build Tailscale
+go install tailscale.com/cmd/tailscale@latest
+go install tailscale.com/cmd/tailscaled@latest
+
+# Start daemon (userspace, no root)
+tailscaled --tun=userspace-networking \
+  --socket=/data/data/com.termux/files/usr/run/tailscaled.sock \
+  --statedir=/data/data/com.termux/files/home/.config/tailscale &
+
+# Authenticate (opens a URL — log in with Google/GitHub)
+tailscale --socket=/data/data/com.termux/files/usr/run/tailscaled.sock up
+
+# Enable Funnel — maps your public URL to localhost:3000
+tailscale --socket=/data/data/com.termux/files/usr/run/tailscaled.sock funnel 3000 &
+
+# Check your URL
+tailscale --socket=/data/data/com.termux/files/usr/run/tailscaled.sock status
+# → Your URL is: https://devicename.tailXXXX.ts.net
+```
+
+After setup, update your environment:
+```bash
+# Edit .env.local — set your permanent URL
+nano ~/fotohaven/.env.local
+# NEXT_PUBLIC_APP_URL="https://devicename.tailXXXX.ts.net"
+
+# Restart (NO rebuild needed — this is a server-side variable)
+pm2 restart fotohaven
+```
+
+> **Note on bandwidth:** Tailscale says Funnel is "a funnel, not a hose." For occasional photo sharing with individual photographers (not serving thousands of users), this is perfectly fine. If you need higher throughput, use Cloudflare Tunnel (Option A).
+
 ---
 
 ### Step 8 — Auto-start on reboot
@@ -398,6 +469,8 @@ pm2 save
 
 Open the **Termux:Boot** app once (just launch and close it). This registers the boot trigger.
 
+**If using Cloudflare Tunnel (Option A):**
+
 The bootstrap script already created `~/.termux/boot/start-fotohaven.sh`. Verify:
 ```bash
 cat ~/.termux/boot/start-fotohaven.sh
@@ -410,6 +483,25 @@ cd ~/fotohaven
 sleep 10   # wait for WiFi
 pm2 resurrect
 cloudflared tunnel --config ~/fotohaven/infra/android/cloudflared-config.yml run &
+```
+
+**If using Tailscale Funnel (Option B):**
+
+The Tailscale setup script creates `~/.termux/boot/start-tailscale.sh` automatically. Verify:
+```bash
+cat ~/.termux/boot/start-tailscale.sh
+```
+
+Should contain:
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+TS_SOCKET="/data/data/com.termux/files/usr/run/tailscaled.sock"
+TS_STATE="/data/data/com.termux/files/home/.config/tailscale"
+sleep 15
+tailscaled --tun=userspace-networking --socket="$TS_SOCKET" --statedir="$TS_STATE" --state="$TS_STATE/tailscaled.state" &
+sleep 5
+tailscale --socket="$TS_SOCKET" up
+tailscale --socket="$TS_SOCKET" funnel 3000 &
 ```
 
 **8c — Critical: Disable battery optimisation**
