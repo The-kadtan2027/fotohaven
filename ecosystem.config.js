@@ -8,7 +8,7 @@ module.exports = {
       name: "fotohaven",
       script: "node_modules/.bin/next",
       args: "start",
-      cwd: "./",
+      cwd: process.env.APP_DIR || "/data/data/com.termux/files/home/fotohaven",
 
       // Restart policy
       autorestart: true,
