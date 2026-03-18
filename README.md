@@ -99,6 +99,7 @@ fotohaven/
 │   └── android/
 │       ├── termux-setup.sh         # One-shot bootstrap script
 │       ├── cloudflared-config.yml  # Cloudflare Tunnel config
+│       ├── ubuntu-proot-setup.sh   # Ubuntu proot migration script
 │       ├── tailscale-setup.sh      # Tailscale Funnel setup (alternative tunnel)
 │       ├── tailscale-setup-alpine.sh # Tailscale setup for Alpine proot
 │       ├── health-check.sh         # Server status checker
