@@ -38,21 +38,27 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Multi-ceremony albums** — organise into Mehndi, Sangeet, Wedding, Reception, etc.
 - **Drag-and-drop upload** — browser uploads directly to storage (R2 or local phone disk)
 - **Shareable links** — token-based URLs with optional expiry date
+- **Password-protected links** — bcrypt-hashed album passwords with a client-side challenge screen
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
-- **Bulk ZIP download** — per-ceremony or everything, generated in the browser
+- **Bulk ZIP download** — per-ceremony, selected photos, or everything, generated in the browser
+- **Per-photo comments** — photographer and client can annotate individual photos with notes
+- **Email notifications** — photographer receives an email on first gallery view (via Resend)
+- **Upload-back flow** — photographer can upload edited finals back into the album via share link; client downloads them in a separate "Delivered Finals" tab
 
 ---
 
 ## Tech Stack
 
-| Layer      | Choice                       | Why                                                   |
-|------------|------------------------------|-------------------------------------------------------|
-| Framework  | Next.js 14 (App Router)      | API routes + React UI in one repo                     |
-| Database   | SQLite via Prisma            | Single file, zero config, perfect for a phone         |
-| Storage    | Cloudflare R2 or local disk  | R2 for cloud; phone SD card for fully-offline hosting |
-| Process    | PM2                          | Keeps Node alive, restarts on crash, survives reboots |
-| Tunnel     | Cloudflare Tunnel            | Public URL without port-forwarding or static IP       |
-| Fonts      | Cormorant Garamond + DM Sans | Luxury editorial aesthetic                            |
+| Layer      | Choice                         | Why                                                   |
+|------------|--------------------------------|-------------------------------------------------------|
+| Framework  | Next.js 15 (App Router)        | API routes + React UI in one repo                     |
+| Database   | SQLite via Drizzle ORM         | Single file, zero config, ARM-native, no engine       |
+| Storage    | Cloudflare R2 or local disk    | R2 for cloud; phone SD card for fully-offline hosting |
+| Email      | Resend                         | Simple API, generous free tier                        |
+| Auth       | bcryptjs (honour-system)       | Password-hashed album links, no user accounts         |
+| Process    | PM2                            | Keeps Node alive, restarts on crash, survives reboots |
+| Tunnel     | Cloudflare Tunnel              | Public URL without port-forwarding or static IP       |
+| Fonts      | Cormorant Garamond + DM Sans   | Luxury editorial aesthetic                            |
 
 ---
 
@@ -60,34 +66,43 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 
 ```
 fotohaven/
-├── prisma/
-│   └── schema.prisma              # Album, Ceremony, Photo models
+├── drizzle/                        # Generated SQL migrations
+│   ├── 0000_clumsy_mad_thinker.sql
+│   └── meta/
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx
 │   │   ├── globals.css
-│   │   ├── page.tsx               # Dashboard
+│   │   ├── page.tsx                # Dashboard
 │   │   ├── albums/
-│   │   │   ├── new/page.tsx       # Create album (3-step form)
-│   │   │   └── [albumId]/page.tsx # Album manager + uploader
-│   │   ├── share/[token]/page.tsx # Photographer gallery + download
+│   │   │   ├── new/page.tsx        # Create album (3-step form)
+│   │   │   └── [albumId]/page.tsx  # Album manager + uploader + Finals download
+│   │   ├── share/[token]/page.tsx  # Client gallery + Originals/Finals tabs + Upload Returns
 │   │   └── api/
 │   │       ├── albums/route.ts
 │   │       ├── albums/[albumId]/route.ts
 │   │       ├── upload/route.ts
-│   │       └── share/[token]/route.ts
+│   │       ├── upload/local/route.ts   # Local-storage upload handler
+│   │       ├── files/[...key]/route.ts # Local file serving
+│   │       ├── comments/route.ts       # Per-photo comments (GET / POST)
+│   │       └── share/
+│   │           └── [token]/
+│   │               ├── route.ts        # Gallery data + password + email trigger
+│   │               └── upload/route.ts # Photographer returns (isReturn: true)
 │   ├── lib/
-│   │   ├── db.ts                  # Prisma singleton
-│   │   └── storage.ts             # R2/S3 abstraction
+│   │   ├── schema.ts               # Drizzle table definitions (single source of truth)
+│   │   ├── db.ts                   # Drizzle + better-sqlite3 client
+│   │   ├── storage.ts              # R2 / local storage abstraction
+│   │   └── email.ts                # Resend email utility
 │   └── types/index.ts
 ├── infra/
 │   └── android/
-│       ├── termux-setup.sh        # One-shot bootstrap script
-│       ├── cloudflared-config.yml # Cloudflare Tunnel config
-│       ├── health-check.sh        # Server status checker
-│       ├── backup.sh              # DB + photo backup
-│       └── local-storage-adapter.ts  # Swap R2 for phone disk
-├── ecosystem.config.js            # PM2 process config
+│       ├── termux-setup.sh         # One-shot bootstrap script
+│       ├── cloudflared-config.yml  # Cloudflare Tunnel config
+│       ├── health-check.sh         # Server status checker
+│       └── backup.sh               # DB + photo backup
+├── drizzle.config.js               # Drizzle Kit configuration
+├── ecosystem.config.js             # PM2 process config
 ├── .env.example
 └── package.json
 ```
@@ -96,12 +111,12 @@ fotohaven/
 
 ## Hosting Options
 
-| Option                   | Cost           | Difficulty | Best for                                |
-|--------------------------|----------------|------------|-----------------------------------------|
-| **Android phone** (this guide) | ₹0       | Medium     | Learning, personal use, always-on home server |
-| Vercel + Neon            | Free → ~₹1600/mo | Easy     | Production, public-facing               |
-| VPS (Hetzner)            | ~₹500/mo       | Medium     | Production with full control            |
-| Raspberry Pi             | One-time ~₹3000 | Medium    | Dedicated home server                   |
+| Option                   | Cost             | Difficulty | Best for                                |
+|--------------------------|------------------|------------|-----------------------------------------|
+| **Android phone** (this guide) | ₹0         | Medium     | Learning, personal use, always-on home server |
+| Vercel + Neon            | Free → ~₹1600/mo | Easy       | Production, public-facing               |
+| VPS (Hetzner)            | ~₹500/mo         | Medium     | Production with full control            |
+| Raspberry Pi             | One-time ~₹3000  | Medium     | Dedicated home server                   |
 
 ---
 
@@ -125,6 +140,7 @@ The goal: plug it in, point a domain at it, forget about it.
 | Cloudflare account | Free — [dash.cloudflare.com](https://dash.cloudflare.com) |
 | Domain name (optional) | ~₹800/yr from Namecheap; or use free `*.trycloudflare.com` |
 | F-Droid app | [f-droid.org](https://f-droid.org) — open-source app store |
+
 
 > **No rooting required.** Everything runs inside Termux's userspace.
 
@@ -155,10 +171,10 @@ pkg update -y
 bash ~/fotohaven/infra/android/termux-setup.sh
 
 # Or run directly from GitHub (replace with your repo URL):
-curl -fsSL https://raw.githubusercontent.com/yourname/fotohaven/main/infra/android/termux-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/The-kadtan2027/fotohaven/main/infra/android/termux-setup.sh | bash
 ```
 
-The script installs: `nodejs`, `git`, `curl`, `wget`, `openssh`, `pm2`, `cloudflared` (ARM64), requests storage permission, installs npm deps, runs Prisma, builds Next.js, and sets up the reboot boot script.
+The script installs: `nodejs`, `git`, `curl`, `wget`, `openssh`, `pm2`, `cloudflared` (ARM64), requests storage permission, installs npm deps, runs `drizzle-kit push`, builds Next.js, and sets up the reboot boot script.
 
 > To do it manually step-by-step, read `infra/android/termux-setup.sh` — every command is documented inline.
 
@@ -170,7 +186,7 @@ The script installs: `nodejs`, `git`, `curl`, `wget`, `openssh`, `pm2`, `cloudfl
 
 ```bash
 cd ~
-git clone https://github.com/yourname/fotohaven.git
+git clone https://github.com/The-kadtan2027/fotohaven.git
 cd fotohaven
 ```
 
@@ -207,8 +223,8 @@ nano .env.local
 ```
 
 ```env
-# Database — SQLite file on the phone
-DATABASE_URL="file:./prisma/dev.db"
+# Database — SQLite file (Drizzle ORM)
+DATABASE_URL="file:./local.db"
 
 # Your public URL (set after Step 7 when you have a domain/tunnel URL)
 NEXT_PUBLIC_APP_URL="https://fotohaven.yourdomain.com"
@@ -224,6 +240,9 @@ R2_PUBLIC_URL="https://pub-xxxx.r2.dev"
 
 # Option B — Local phone storage:
 # LOCAL_UPLOAD_PATH="/data/data/com.termux/files/home/storage/shared/fotohaven-uploads"
+
+# Email notifications (optional — get key at resend.com)
+RESEND_API_KEY=""
 
 # App secret (generate below)
 APP_SECRET="paste_generated_secret_here"
@@ -270,9 +289,6 @@ Photos saved directly to phone disk. No cloud account needed. Good for LAN-only 
 
 ```bash
 mkdir -p ~/storage/shared/fotohaven-uploads
-
-# Swap storage adapter:
-cp infra/android/local-storage-adapter.ts src/lib/storage.ts
 ```
 
 Add to `.env.local`:
@@ -289,9 +305,8 @@ Photos appear in your phone's **Files app** under Internal Storage → fotohaven
 ```bash
 cd ~/fotohaven
 
-# Initialise the database
-npx prisma generate
-npx prisma db push
+# Initialise the database (Drizzle)
+npm run db:push
 
 # Build for production
 npm run build
@@ -427,8 +442,8 @@ crontab -e
 
 | What | Where |
 |------|-------|
-| SQLite database | `prisma/dev.db` — all albums, ceremonies, photo metadata |
-| `.env.local` | Config + secrets (encrypted if `BACKUP_PASSWORD` is set) |
+| SQLite database | `local.db` — all albums, ceremonies, photo metadata |
+| `.env.local` | Config + secrets |
 | Local photos | Only if using local storage mode; R2 photos are already in cloud |
 
 ---
@@ -450,7 +465,7 @@ pm2 monit                      # live CPU/memory dashboard
 cd ~/fotohaven
 git pull
 npm install
-npx prisma db push
+npm run db:push
 npm run build
 pm2 reload fotohaven           # zero-downtime reload
 ```
@@ -462,7 +477,7 @@ pm2 reload fotohaven           # zero-downtime reload
 **App won't start**
 ```bash
 pm2 logs fotohaven --err --lines 50
-# Look for: missing env vars, port in use, Prisma errors
+# Look for: missing env vars, port in use, schema drift
 ```
 
 **"EACCES: permission denied"**
@@ -498,53 +513,55 @@ pm2 start ecosystem.config.js
 - Increase `sleep 10` to `sleep 20` in the boot script if WiFi takes longer to connect
 - Verify battery optimisation is disabled
 
+**Schema out of sync after update**
+```bash
+npm run db:push   # applies any new columns / tables to local.db
+```
+
 ---
 
 ## Standard Setup (PC / VPS)
 
 **Local development:**
 ```bash
-git clone https://github.com/yourname/fotohaven.git
+git clone https://github.com/The-kadtan2027/fotohaven.git
 cd fotohaven
 npm install
-cp .env.example .env.local  # fill in R2 credentials
+cp .env.example .env.local  # fill in DATABASE_URL and optionally R2 credentials
 npm run db:push
-npm run db:generate
 npm run dev
 # → http://localhost:3000
 ```
 
-**Deploy to Vercel:**
+**Useful dev commands:**
 ```bash
-npm i -g vercel
-vercel
-# Add env vars in Vercel dashboard → Settings → Environment Variables
+npm run db:generate   # generate a new migration from schema changes
+npm run db:push       # apply schema to local.db directly (dev workflow)
+npm run db:studio     # open Drizzle Studio GUI for DB browsing
+npm run lint
 ```
 
-Switch SQLite to Postgres for Vercel (SQLite doesn't work on serverless):
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-```
-Use [Neon](https://neon.tech) or [Supabase](https://supabase.com) — both have free tiers.
+> **Note on Vercel:** SQLite doesn't work on serverless. For Vercel deployment, switch to a Postgres provider (Neon, Supabase) and update `src/lib/db.ts` to use `drizzle-orm/postgres-js`.
 
 ---
 
 ## User Flow
 
-**Client (you)**
+**Client (album owner)**
 1. Dashboard → all your albums
-2. New Album → 3-step form: name + photographer → ceremonies → expiry
+2. New Album → 3-step form: name + photographer → ceremonies → settings (expiry, password, notify email)
 3. Open album → drag photos into ceremony folder → upload
-4. Share Link → send URL to photographer
+4. Share Link → copy and send to photographer
+5. Receive email when photographer first opens the gallery
 
-**Photographer**
+**Photographer (share link recipient)**
 1. Opens share link — no account needed
-2. Browses gallery organised by ceremony
-3. Selects photos (checkbox or "Select All")
-4. Downloads ZIP — per ceremony or everything
+2. Enters password if the album is protected
+3. Browses gallery organised by ceremony
+4. Selects photos (checkbox or "Select All"), adds per-photo notes
+5. Downloads ZIP — per ceremony, selected, or everything
+6. Uploads edited finals via **Upload Returns** dropzone at the bottom of the page
+7. Client sees finals appear in the **Delivered Finals** tab and can download them as a separate ZIP
 
 ---
 
@@ -552,35 +569,58 @@ Use [Neon](https://neon.tech) or [Supabase](https://supabase.com) — both have 
 
 **`POST /api/albums`** — create album
 ```json
-{ "title": "Sharma Wedding", "clientName": "Rahul Mehta Photography",
-  "ceremonies": ["Mehndi", "Sangeet", "Wedding"], "expiresAt": "2025-06-30" }
+{
+  "title": "Sharma Wedding",
+  "clientName": "Rahul Mehta Photography",
+  "ceremonies": ["Mehndi", "Sangeet", "Wedding"],
+  "expiresAt": "2025-06-30",
+  "password": "optional-plain-text",
+  "notifyEmail": "photographer@example.com"
+}
 ```
 
 **`GET /api/albums`** — list all albums with counts
 
 **`GET /api/albums/:albumId`** — full album with photos and presigned URLs
 
-**`POST /api/upload`** — get presigned upload URL
+**`DELETE /api/albums/:albumId`** — delete album and cascade all data
+
+**`POST /api/upload`** — get presigned upload URL (admin use)
 ```json
-{ "ceremonyId": "uuid", "filename": "DSC_0042.jpg",
-  "contentType": "image/jpeg", "size": 8420000 }
+{ "ceremonyId": "uuid", "filename": "DSC_0042.jpg", "contentType": "image/jpeg", "size": 8420000 }
 ```
 Returns `{ photoId, uploadUrl, storageKey }` — client PUTs file directly to `uploadUrl`.
 
-**`GET /api/share/:token`** — photographer view. Returns `410` if expired.
+**`GET /api/share/:token`** — photographer/client gallery view.
+- Returns `401 { passwordRequired: true }` if album is password-protected and no `Authorization: Bearer <pass>` header was sent.
+- Sets `firstViewedAt` and triggers Resend notification on first successful load.
+- Returns `410` if link has expired.
+
+**`POST /api/share/:token/upload`** — photographer uploads finals (no account required)
+```json
+{ "ceremonyId": "uuid", "filename": "edited_DSC_0042.jpg", "contentType": "image/jpeg", "size": 9100000 }
+```
+Creates a photo record with `isReturn: true`. Returns same presigned URL flow as `/api/upload`.
+
+**`GET /api/comments?photoId=uuid`** — list comments for a photo
+
+**`POST /api/comments`** — add a comment
+```json
+{ "photoId": "uuid", "body": "Please crop tighter on the left", "author": "photographer" }
+```
 
 ---
 
 ## Roadmap
 
-- [ ] Per-photo comments — photographer annotates photos in the gallery
-- [ ] Upload-back flow — photographer delivers edited finals into the same album
-- [ ] Password-protected links
-- [ ] Email notifications via Resend
+- [x] Per-photo comments — photographer and client annotate photos in the gallery
+- [x] Password-protected share links — bcrypt-hashed, challenge screen on the client side
+- [x] Email notifications — first-view alert via Resend
+- [x] Upload-back flow — photographer delivers edited finals; client downloads from separate tab
+- [ ] Health dashboard — phone stats (CPU, RAM, disk, tunnel status) at `/admin/health`
 - [ ] WhatsApp notifications via Twilio/WATI
 - [ ] AI duplicate detection before upload
 - [ ] Watermarked previews — low-res gallery, full-res on download
-- [ ] Health dashboard — phone stats + tunnel status in a browser tab
 - [ ] Print ordering — Canvera / Zoomin for Indian photo labs
 - [ ] Two-phone redundancy — run on backup phone for uptime
 
