@@ -155,7 +155,7 @@ firstViewedAt DateTime?
 
 ## Task: Upload-back flow
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** Photographer can upload edited finals back into the album. Client can download them.
 
 ### Schema change
@@ -178,10 +178,10 @@ returnOf      String?                    // photoId of the original (optional li
   that have returned photos
 
 ### Acceptance criteria
-- [ ] Photographer can upload from the share page without any account
-- [ ] Returned photos appear in a separate "Finals" section
-- [ ] Client can download returned photos as ZIP
-- [ ] Original and returned photos don't mix in the gallery
+- [x] Photographer can upload from the share page without any account
+- [x] Returned photos appear in a separate "Finals" section
+- [x] Client can download returned photos as ZIP
+- [x] Original and returned photos don't mix in the gallery
 
 ---
 

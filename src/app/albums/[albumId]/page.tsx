@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useDropzone } from "react-dropzone";
 import {
   ArrowLeft, Share2, Upload, Check, X, Image as ImageIcon,
-  FolderOpen, Loader2, Copy, ExternalLink, Trash2,
+  FolderOpen, Loader2, Copy, ExternalLink, Trash2, PackageCheck,
 } from "lucide-react";
 
 interface Photo {
@@ -16,6 +16,7 @@ interface Photo {
   url: string;
   storageKey: string;
   comments?: any[];
+  isReturn?: boolean;
 }
 
 interface Ceremony {
@@ -52,6 +53,7 @@ export default function AlbumPage() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [downloadingFinals, setDownloadingFinals] = useState(false);
 
   useEffect(() => {
     fetchAlbum();
@@ -156,6 +158,35 @@ export default function AlbumPage() {
     setTimeout(() => setLinkCopied(false), 2500);
   };
 
+  const downloadFinals = async (ceremony: Ceremony) => {
+    const finals = ceremony.photos.filter((p) => p.isReturn);
+    if (!finals.length) return;
+    setDownloadingFinals(true);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const folder = zip.folder(`${ceremony.name} — Finals`)!;
+      await Promise.all(
+        finals.map(async (photo) => {
+          const res = await fetch(photo.url);
+          const blob = await res.blob();
+          folder.file(photo.originalName, blob);
+        })
+      );
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${ceremony.name} — Finals.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed.");
+    } finally {
+      setDownloadingFinals(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)" }}>
@@ -223,33 +254,42 @@ export default function AlbumPage() {
             <p style={{ fontSize: 12, color: "var(--brown)" }}>{totalPhotos} photos total</p>
           </div>
 
-          {album.ceremonies.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setActiveCeremony(c.id)}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 20px",
-                background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
-                border: "none",
-                borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                textAlign: "left",
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
-                <FolderOpen size={14} />
-                {c.name}
-              </span>
-              <span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>
-                {c.photos.length}
-              </span>
-            </button>
-          ))}
+          {album.ceremonies.map((c) => {
+            const origCount = c.photos.filter((p) => !p.isReturn).length;
+            const finCount = c.photos.filter((p) => p.isReturn).length;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setActiveCeremony(c.id)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 20px",
+                  background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
+                  border: "none",
+                  borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
+                  <FolderOpen size={14} />
+                  {c.name}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {finCount > 0 && (
+                    <span title={`${finCount} finals`} style={{ fontSize: 9, background: "rgba(201,150,58,0.2)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>FINALS</span>
+                  )}
+                  <span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>
+                    {origCount}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </aside>
 
         {/* Main content */}
@@ -263,9 +303,26 @@ export default function AlbumPage() {
                     {activeCeremonyData.name}
                   </h2>
                   <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2 }}>
-                    {activeCeremonyData.photos.length} photos uploaded
+                    {activeCeremonyData.photos.filter((p) => !p.isReturn).length} photos uploaded
+                    {activeCeremonyData.photos.filter((p) => p.isReturn).length > 0 && (
+                      <span style={{ color: "var(--gold)", marginLeft: 8 }}>
+                        · {activeCeremonyData.photos.filter((p) => p.isReturn).length} finals delivered
+                      </span>
+                    )}
                   </p>
                 </div>
+                {activeCeremonyData.photos.some((p) => p.isReturn) && (
+                  <button
+                    className="btn-gold"
+                    onClick={() => downloadFinals(activeCeremonyData)}
+                    disabled={downloadingFinals}
+                    style={{ fontSize: 12 }}
+                  >
+                    {downloadingFinals
+                      ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
+                      : <><PackageCheck size={12} /> Download Finals</>}
+                  </button>
+                )}
               </div>
 
               {/* Drop zone */}

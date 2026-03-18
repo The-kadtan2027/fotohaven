@@ -15,6 +15,16 @@ export interface Photo {
   width: number | null;
   height: number | null;
   ceremonyId: string;
+  isReturn?: boolean;
+  returnOf?: string | null;
+}
+
+export interface ReturnUploadPayload {
+  ceremonyId: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  returnOf?: string; // optional link to original photoId
 }
 
 export interface Album {

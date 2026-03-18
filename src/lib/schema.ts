@@ -32,6 +32,8 @@ export const photos = sqliteTable('Photo', {
   width:        integer('width'),
   height:       integer('height'),
   ceremonyId:   text('ceremonyId').notNull().references(() => ceremonies.id, { onDelete: 'cascade' }),
+  isReturn:     integer('isReturn', { mode: 'boolean' }).notNull().default(false),
+  returnOf:     text('returnOf'),
   createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
 

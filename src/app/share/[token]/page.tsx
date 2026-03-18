@@ -1,11 +1,12 @@
 "use client";
 // src/app/share/[token]/page.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { useDropzone } from "react-dropzone";
 import {
   Download, FolderOpen, Image as ImageIcon,
   Loader2, X, ZoomIn, ChevronLeft, ChevronRight, Check,
-  MessageSquare, Send
+  MessageSquare, Send, Upload, PackageCheck,
 } from "lucide-react";
 import { Comment } from "@/types";
 
@@ -17,6 +18,16 @@ interface Photo {
   storageKey: string;
   mimeType: string;
   comments?: any[];
+  isReturn?: boolean;
+  returnOf?: string | null;
+}
+
+type ReturnUploadStatus = "pending" | "uploading" | "done" | "error";
+interface ReturnUploadItem {
+  file: File;
+  ceremonyId: string;
+  status: ReturnUploadStatus;
+  error?: string;
 }
 
 interface Ceremony {
@@ -41,8 +52,9 @@ export default function SharePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
+  const [galleryTab, setGalleryTab] = useState<"originals" | "finals">("originals");
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null);
-  const [downloading, setDownloading] = useState<string | null>(null); // ceremonyId or "all"
+  const [downloading, setDownloading] = useState<string | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -50,6 +62,8 @@ export default function SharePage() {
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [returnUploads, setReturnUploads] = useState<ReturnUploadItem[]>([]);
+  const [isReturning, setIsReturning] = useState(false);
 
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
@@ -206,6 +220,114 @@ export default function SharePage() {
     }
   };
 
+  // --- Upload Returns ---
+  const onReturnDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      if (!activeCeremony) return;
+      const items: ReturnUploadItem[] = acceptedFiles.map((file) => ({
+        file,
+        ceremonyId: activeCeremony,
+        status: "pending",
+      }));
+      setReturnUploads((prev) => [...prev, ...items]);
+    },
+    [activeCeremony]
+  );
+
+  const { getRootProps: getReturnRootProps, getInputProps: getReturnInputProps, isDragActive: isReturnDragActive } =
+    useDropzone({
+      onDrop: onReturnDrop,
+      accept: { "image/*": [".jpg", ".jpeg", ".png", ".webp", ".heic"] },
+      multiple: true,
+    });
+
+  const uploadReturns = async () => {
+    const pending = returnUploads.filter((u) => u.status === "pending");
+    if (!pending.length) return;
+    setIsReturning(true);
+
+    for (const item of pending) {
+      const idx = returnUploads.findIndex((u) => u.file === item.file && u.ceremonyId === item.ceremonyId);
+
+      setReturnUploads((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], status: "uploading" };
+        return next;
+      });
+
+      try {
+        const metaRes = await fetch(`/api/share/${token}/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ceremonyId: item.ceremonyId,
+            filename: item.file.name,
+            contentType: item.file.type,
+            size: item.file.size,
+          }),
+        });
+        if (!metaRes.ok) throw new Error("Failed to get upload URL");
+        const { uploadUrl } = await metaRes.json();
+
+        const uploadRes = await fetch(uploadUrl, {
+          method: "PUT",
+          body: item.file,
+          headers: { "Content-Type": item.file.type },
+        });
+        if (!uploadRes.ok) throw new Error("Upload to storage failed");
+
+        setReturnUploads((prev) => {
+          const next = [...prev];
+          next[idx] = { ...next[idx], status: "done" };
+          return next;
+        });
+      } catch (err) {
+        setReturnUploads((prev) => {
+          const next = [...prev];
+          next[idx] = { ...next[idx], status: "error", error: String(err) };
+          return next;
+        });
+      }
+    }
+
+    setIsReturning(false);
+    await fetchAlbum();
+    setGalleryTab("finals");
+    setTimeout(() => setReturnUploads((prev) => prev.filter((u) => u.status !== "done")), 2000);
+  };
+
+  const downloadFinals = async () => {
+    if (!album) return;
+    setDownloading("finals");
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      for (const ceremony of album.ceremonies) {
+        const finals = ceremony.photos.filter((p) => p.isReturn);
+        if (!finals.length) continue;
+        const folder = zip.folder(`${ceremony.name} — Finals`)!;
+        await Promise.all(
+          finals.map(async (photo) => {
+            const res = await fetch(photo.url);
+            const blob = await res.blob();
+            folder.file(photo.originalName, blob);
+          })
+        );
+      }
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${album.title} — Delivered Finals.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed. Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  };
+
   // Lightbox keyboard navigation
   useEffect(() => {
     if (!lightbox) return;
@@ -321,8 +443,12 @@ export default function SharePage() {
   if (!album) return null;
 
   const activeCeremonyData = album.ceremonies.find((c) => c.id === activeCeremony);
-  const totalPhotos = album.ceremonies.reduce((s, c) => s + c.photos.length, 0);
+  const totalPhotos = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => !p.isReturn).length, 0);
+  const totalFinals = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => p.isReturn).length, 0);
   const allPhotos = album.ceremonies.flatMap((c) => c.photos);
+  const activeCeremonyOriginals = activeCeremonyData?.photos.filter((p) => !p.isReturn) ?? [];
+  const activeCeremonyFinals = activeCeremonyData?.photos.filter((p) => p.isReturn) ?? [];
+  const activeTabPhotos = galleryTab === "originals" ? activeCeremonyOriginals : activeCeremonyFinals;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
@@ -340,7 +466,7 @@ export default function SharePage() {
             {album.title}
           </h1>
           <p style={{ color: "rgba(250,247,242,0.55)", fontSize: 15, marginBottom: 32 }}>
-            Shared by {album.clientName} · {totalPhotos} photos · {album.ceremonies.length} ceremonies
+            Shared by {album.clientName} · {totalPhotos} photos · {totalFinals > 0 ? `${totalFinals} finals · ` : ""}{album.ceremonies.length} ceremonies
           </p>
 
           {/* Download actions */}
@@ -372,6 +498,23 @@ export default function SharePage() {
                 ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Zipping all…</>
                 : <><Download size={14} /> Download All Photos</>}
             </button>
+            {totalFinals > 0 && (
+              <button
+                onClick={downloadFinals}
+                disabled={!!downloading}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  padding: "10px 20px", background: "rgba(201,150,58,0.25)",
+                  color: "var(--gold)", border: "1px solid rgba(201,150,58,0.4)",
+                  borderRadius: 8, fontSize: 13, cursor: "pointer", transition: "all 0.2s",
+                  fontFamily: "var(--font-body)",
+                }}
+              >
+                {downloading === "finals"
+                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
+                  : <><PackageCheck size={14} /> Download Finals ({totalFinals})</>}
+              </button>
+            )}
             {selectedPhotos.size > 0 && (
               <button
                 onClick={() => setSelectedPhotos(new Set())}
@@ -392,24 +535,33 @@ export default function SharePage() {
           <p style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
             Ceremonies
           </p>
-          {album.ceremonies.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setActiveCeremony(c.id)}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "10px 12px", background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
-                border: "none", borderRadius: 8, cursor: "pointer", transition: "all 0.15s", marginBottom: 2,
-                borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
-                <FolderOpen size={13} />
-                {c.name}
-              </span>
-              <span style={{ fontSize: 11, color: "var(--taupe)" }}>{c.photos.length}</span>
-            </button>
-          ))}
+          {album.ceremonies.map((c) => {
+            const origCount = c.photos.filter((p) => !p.isReturn).length;
+            const finCount = c.photos.filter((p) => p.isReturn).length;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setActiveCeremony(c.id)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 12px", background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
+                  border: "none", borderRadius: 8, cursor: "pointer", transition: "all 0.15s", marginBottom: 2,
+                  borderLeft: activeCeremony === c.id ? "3px solid var(--gold)" : "3px solid transparent",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
+                  <FolderOpen size={13} />
+                  {c.name}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {finCount > 0 && (
+                    <span style={{ fontSize: 9, background: "rgba(201,150,58,0.2)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>FINALS</span>
+                  )}
+                  <span style={{ fontSize: 11, color: "var(--taupe)" }}>{origCount}</span>
+                </div>
+              </button>
+            );
+          })}
         </aside>
 
         {/* Gallery */}
@@ -423,7 +575,7 @@ export default function SharePage() {
                     {activeCeremonyData.name}
                   </h2>
                   <p style={{ fontSize: 13, color: "var(--brown)" }}>
-                    {activeCeremonyData.photos.length} photos
+                    {activeCeremonyOriginals.length} original{activeCeremonyOriginals.length !== 1 ? "s" : ""}{activeCeremonyFinals.length > 0 ? ` · ${activeCeremonyFinals.length} finals` : ""}
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -450,24 +602,120 @@ export default function SharePage() {
                 </div>
               </div>
 
-              {activeCeremonyData.photos.length === 0 ? (
+              {/* Originals / Finals tab switcher */}
+              {activeCeremonyFinals.length > 0 && (
+                <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--warm-white)", padding: 4, borderRadius: 10, width: "fit-content", border: "1px solid var(--sand)" }}>
+                  {(["originals", "finals"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setGalleryTab(tab)}
+                      style={{
+                        padding: "7px 16px", fontSize: 12, fontWeight: 500, borderRadius: 7, border: "none",
+                        cursor: "pointer", transition: "all 0.15s",
+                        background: galleryTab === tab ? (tab === "finals" ? "var(--gold)" : "var(--espresso)") : "transparent",
+                        color: galleryTab === tab ? "#fff" : "var(--taupe)",
+                        display: "flex", alignItems: "center", gap: 6,
+                      }}
+                    >
+                      {tab === "finals" ? <PackageCheck size={12} /> : <ImageIcon size={12} />}
+                      {tab === "originals" ? `Originals (${activeCeremonyOriginals.length})` : `Delivered Finals (${activeCeremonyFinals.length})`}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {activeTabPhotos.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "80px 20px", color: "var(--taupe)" }}>
                   <ImageIcon size={36} style={{ marginBottom: 12, opacity: 0.4 }} />
-                  <p style={{ fontSize: 14 }}>No photos in this ceremony yet.</p>
+                  <p style={{ fontSize: 14 }}>
+                    {galleryTab === "finals" ? "No finals delivered yet." : "No photos in this ceremony yet."}
+                  </p>
                 </div>
               ) : (
                 <div className="photo-grid">
-                  {activeCeremonyData.photos.map((photo, idx) => (
+                  {activeTabPhotos.map((photo, idx) => (
                     <GalleryPhoto
                       key={photo.id}
                       photo={photo}
                       selected={selectedPhotos.has(photo.id)}
                       onSelect={() => toggleSelect(photo.id)}
-                      onZoom={() => setLightbox({ photos: activeCeremonyData.photos, index: idx })}
+                      onZoom={() => setLightbox({ photos: activeTabPhotos, index: idx })}
                     />
                   ))}
                 </div>
               )}
+
+              {/* ── Upload Returns (Photographer dropzone) ── */}
+              <div style={{ marginTop: 56, borderTop: "1px dashed var(--sand)", paddingTop: 40 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <PackageCheck size={18} color="var(--gold)" />
+                  <h3 style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--espresso)" }}>Upload Returns</h3>
+                </div>
+                <p style={{ fontSize: 13, color: "var(--brown)", marginBottom: 20 }}>
+                  Photographer: drop edited finals here to deliver them back to the client.
+                </p>
+
+                <div
+                  {...getReturnRootProps()}
+                  style={{
+                    border: `2px dashed ${isReturnDragActive ? "var(--gold)" : "var(--sand)"}`,
+                    borderRadius: 16, padding: "28px 24px", textAlign: "center",
+                    background: isReturnDragActive ? "rgba(201,150,58,0.04)" : "var(--warm-white)",
+                    cursor: "pointer", transition: "all 0.2s ease", marginBottom: 16,
+                  }}
+                >
+                  <input {...getReturnInputProps()} />
+                  <div style={{ width: 44, height: 44, borderRadius: "50%", background: isReturnDragActive ? "var(--gold)" : "var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" }}>
+                    <Upload size={18} color={isReturnDragActive ? "#fff" : "var(--brown)"} />
+                  </div>
+                  <p style={{ fontSize: 14, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>
+                    {isReturnDragActive ? "Drop finals here" : "Drag & drop edited finals"}
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--brown)" }}>
+                    or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 50MB
+                  </p>
+                </div>
+
+                {returnUploads.length > 0 && (
+                  <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: "var(--espresso)" }}>
+                        Queue ({returnUploads.filter((u) => u.status === "pending").length} pending)
+                      </p>
+                      <button
+                        className="btn-gold"
+                        onClick={uploadReturns}
+                        disabled={isReturning || returnUploads.every((u) => u.status !== "pending")}
+                        style={{ fontSize: 12, padding: "8px 16px" }}
+                      >
+                        {isReturning
+                          ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Uploading…</>
+                          : <><Upload size={12} /> Upload All</>}
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {returnUploads.map((u, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--warm-white)", borderRadius: 8 }}>
+                          {u.status === "uploading" && <Loader2 size={13} color="var(--gold)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />}
+                          {u.status === "done" && <Check size={13} color="var(--sage)" style={{ flexShrink: 0 }} />}
+                          {u.status === "error" && <X size={13} color="var(--blush)" style={{ flexShrink: 0 }} />}
+                          {u.status === "pending" && <div style={{ width: 13, height: 13, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />}
+                          <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.file.name}</span>
+                          <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(u.file.size / 1024 / 1024).toFixed(1)} MB</span>
+                          {u.status !== "uploading" && (
+                            <button
+                              onClick={() => setReturnUploads((prev) => prev.filter((_, j) => j !== i))}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}
+                            >
+                              <X size={11} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </main>
