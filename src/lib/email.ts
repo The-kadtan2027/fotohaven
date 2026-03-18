@@ -1,13 +1,13 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 export async function sendViewNotification(
   albumTitle: string,
   recipientEmail: string,
   shareUrl: string
 ) {
-  if (!process.env.RESEND_API_KEY) {
+  if (!resend) {
     console.warn("[EMAIL] RESEND_API_KEY not set. Skipping notification.");
     return;
   }
