@@ -34,7 +34,7 @@ ok "Packages up to date"
 
 # ── Step 2: Core dependencies ──────────────────────────────────────────────────
 step "Installing core dependencies"
-pkg install -y nodejs git curl wget nano openssh
+pkg install -y nodejs git curl wget nano openssh python make clang
 ok "Node $(node -v), Git $(git --version | cut -d' ' -f3) installed"
 
 # ── Step 3: Storage access ─────────────────────────────────────────────────────
@@ -81,6 +81,12 @@ fi
 # ── Step 7: Install npm dependencies ──────────────────────────────────────────
 step "Installing npm dependencies"
 cd "$HOME/fotohaven"
+
+# Termux workaround: node-gyp tries to find the Android NDK when compiling
+# C++ modules (like better-sqlite3) on OS=android. We pass an empty string
+# to prevent it from crashing with "Undefined variable android_ndk_path".
+export npm_config_android_ndk_path=""
+
 npm install
 ok "npm dependencies installed"
 
@@ -95,15 +101,15 @@ else
   ok ".env.local already exists"
 fi
 
-# ── Step 9: Prisma DB bootstrap ───────────────────────────────────────────────
+# ── Step 9: Drizzle DB bootstrap ──────────────────────────────────────────────
 step "Bootstrapping database"
-# Prisma's schema engine on Android/Termux has a known issue with relative
-# file:// paths — it leaks the binary path to stdout, breaking JSON IPC.
-# Fix: write an absolute DATABASE_URL to .env before running db push.
-DB_PATH="$HOME/fotohaven/prisma/dev.db"
+# Write an absolute DATABASE_URL to .env for local script execution
+DB_PATH="$HOME/fotohaven/local.db"
 echo "DATABASE_URL=\"file:${DB_PATH}\"" > .env
-npx prisma generate
-npx prisma db push
+
+# Push the connection and schema
+npm run db:push
+
 ok "SQLite database created at ${DB_PATH}"
 
 # ── Step 10: Build Next.js ─────────────────────────────────────────────────────

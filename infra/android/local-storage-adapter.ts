@@ -27,8 +27,8 @@ const UPLOAD_BASE =
   process.env.LOCAL_UPLOAD_PATH ||
   "/data/data/com.termux/files/home/storage/shared/fotohaven";
 
-const APP_BASE_URL =
-  process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+// Use relative paths instead of absolute URLs so the app works on any IP (LAN or Tailscale)
+const APP_BASE_URL = "";
 
 /**
  * Ensure a directory exists (recursive mkdir)

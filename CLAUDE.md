@@ -137,10 +137,4 @@ pm2 start ecosystem.config.js
 
 ---
 
-### prisma-android-fix.js — current status
-  The postinstall script handles Steps 1 correctly (download + copy + chmod).
-  It does NOT handle Step 2 (patchelf) because patchelf is only available
-  inside Alpine, not in bare Termux.
-  TODO: add a separate script `infra/android/prisma-alpine-patch.sh` that
-  runs the patchelf commands and is executed manually after npm install:
-    startalpine -c "cd /data/data/com.termux/files/home/fotohaven && sh infra/android/prisma-alpine-patch.sh"
+

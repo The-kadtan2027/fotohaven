@@ -127,8 +127,8 @@ fi
 tailscale --socket="$TS_SOCKET" up
 tailscale --socket="$TS_SOCKET" funnel 3000 &
 
-# 2. Start PM2 inside Ubuntu proot
-proot-distro login ubuntu --shared-tmp -- bash -c "cd /root/fotohaven && pm2 start ecosystem.config.js"
+# 2. Start PM2 inside Ubuntu proot (with explicit bind mount for Android storage)
+proot-distro login ubuntu --shared-tmp --bind /storage/emulated/0:/storage/emulated/0 -- bash -c "cd /root/fotohaven && pm2 start ecosystem.config.js"
 BOOT
 
 chmod +x "$BOOT_SCRIPT"
@@ -149,7 +149,7 @@ echo "║                                                          ║"
 echo "║   What to do next:                                       ║"
 echo "║                                                          ║"
 echo "║   1. Start the app manually for the first time:          ║"
-echo "║      proot-distro login ubuntu --shared-tmp -- bash -c \"cd /root/fotohaven && pm2 start ecosystem.config.js && pm2 save\""
+echo "║      proot-distro login ubuntu --shared-tmp --bind /storage/emulated/0:/storage/emulated/0 -- bash -c \"cd /root/fotohaven && pm2 start ecosystem.config.js && pm2 save\""
 echo "║                                                          ║"
 echo "║   2. Start Tailscale Funnel in Termux (if not running):  ║"
 echo "║      tailscale --socket=$TERMUX_HOME/../usr/run/tailscaled.sock funnel 3000 &"
