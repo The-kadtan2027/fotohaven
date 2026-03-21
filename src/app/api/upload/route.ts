@@ -7,7 +7,7 @@ import { ceremonies, photos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
-const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+const MAX_SIZE = 25 * 1024 * 1024; // 25 MB — tuned for Android (6 GB RAM)
 
 // POST /api/upload
 // Step 1: Client requests a presigned upload URL

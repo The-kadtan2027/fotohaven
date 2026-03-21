@@ -27,6 +27,7 @@ interface ReturnUploadItem {
   file: File;
   ceremonyId: string;
   status: ReturnUploadStatus;
+  progress: number;
   error?: string;
 }
 
@@ -228,6 +229,7 @@ export default function SharePage() {
         file,
         ceremonyId: activeCeremony,
         status: "pending",
+        progress: 0,
       }));
       setReturnUploads((prev) => [...prev, ...items]);
     },
@@ -241,17 +243,67 @@ export default function SharePage() {
       multiple: true,
     });
 
+  // ── Upload helper: XHR with progress tracking + retry ──
+  // Strict concurrency = 1: upload one file at a time to prevent OOM on 6 GB device.
+  const xhrUploadWithProgress = (
+    url: string,
+    file: File,
+    onProgress: (pct: number) => void,
+    retries = 3
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      let attempt = 0;
+
+      const tryUpload = () => {
+        attempt++;
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        xhr.setRequestHeader("Content-Type", file.type);
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            onProgress(100);
+            resolve();
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => {
+          if (attempt < retries) {
+            const delay = Math.pow(2, attempt - 1) * 1000;
+            console.warn(`[Upload] Retry ${attempt}/${retries} after ${delay}ms`);
+            setTimeout(tryUpload, delay);
+          } else {
+            reject(new Error(`Upload failed after ${retries} retries`));
+          }
+        };
+
+        xhr.send(file);
+      };
+
+      tryUpload();
+    });
+  };
+
   const uploadReturns = async () => {
     const pending = returnUploads.filter((u) => u.status === "pending");
     if (!pending.length) return;
     setIsReturning(true);
 
+    // Strict sequential: one file at a time (concurrency = 1)
     for (const item of pending) {
       const idx = returnUploads.findIndex((u) => u.file === item.file && u.ceremonyId === item.ceremonyId);
 
       setReturnUploads((prev) => {
         const next = [...prev];
-        next[idx] = { ...next[idx], status: "uploading" };
+        next[idx] = { ...next[idx], status: "uploading", progress: 0 };
         return next;
       });
 
@@ -269,16 +321,22 @@ export default function SharePage() {
         if (!metaRes.ok) throw new Error("Failed to get upload URL");
         const { uploadUrl } = await metaRes.json();
 
-        const uploadRes = await fetch(uploadUrl, {
-          method: "PUT",
-          body: item.file,
-          headers: { "Content-Type": item.file.type },
-        });
-        if (!uploadRes.ok) throw new Error("Upload to storage failed");
+        // Upload via XHR with real progress + retry
+        await xhrUploadWithProgress(
+          uploadUrl,
+          item.file,
+          (pct) => {
+            setReturnUploads((prev) => {
+              const next = [...prev];
+              next[idx] = { ...next[idx], progress: pct };
+              return next;
+            });
+          }
+        );
 
         setReturnUploads((prev) => {
           const next = [...prev];
-          next[idx] = { ...next[idx], status: "done" };
+          next[idx] = { ...next[idx], status: "done", progress: 100 };
           return next;
         });
       } catch (err) {
@@ -674,7 +732,7 @@ export default function SharePage() {
                     {isReturnDragActive ? "Drop finals here" : "Drag & drop edited finals"}
                   </p>
                   <p style={{ fontSize: 12, color: "var(--brown)" }}>
-                    or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 50MB
+                    or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 25MB
                   </p>
                 </div>
 
@@ -697,20 +755,32 @@ export default function SharePage() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {returnUploads.map((u, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--warm-white)", borderRadius: 8 }}>
-                          {u.status === "uploading" && <Loader2 size={13} color="var(--gold)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />}
-                          {u.status === "done" && <Check size={13} color="var(--sage)" style={{ flexShrink: 0 }} />}
-                          {u.status === "error" && <X size={13} color="var(--blush)" style={{ flexShrink: 0 }} />}
-                          {u.status === "pending" && <div style={{ width: 13, height: 13, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />}
-                          <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.file.name}</span>
-                          <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(u.file.size / 1024 / 1024).toFixed(1)} MB</span>
-                          {u.status !== "uploading" && (
-                            <button
-                              onClick={() => setReturnUploads((prev) => prev.filter((_, j) => j !== i))}
-                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}
-                            >
-                              <X size={11} />
-                            </button>
+                        <div key={i} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px" }}>
+                            {u.status === "uploading" && <Loader2 size={13} color="var(--gold)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />}
+                            {u.status === "done" && <Check size={13} color="var(--sage)" style={{ flexShrink: 0 }} />}
+                            {u.status === "error" && <X size={13} color="var(--blush)" style={{ flexShrink: 0 }} />}
+                            {u.status === "pending" && <div style={{ width: 13, height: 13, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />}
+                            <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.file.name}</span>
+                            {u.status === "uploading" && (
+                              <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>
+                                {u.progress}%
+                              </span>
+                            )}
+                            <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(u.file.size / 1024 / 1024).toFixed(1)} MB</span>
+                            {u.status !== "uploading" && (
+                              <button
+                                onClick={() => setReturnUploads((prev) => prev.filter((_, j) => j !== i))}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                          {u.status === "uploading" && (
+                            <div style={{ height: 3, background: "var(--sand)", borderRadius: "0 0 8px 8px" }}>
+                              <div style={{ height: "100%", width: `${u.progress}%`, background: "var(--gold)", borderRadius: "0 0 8px 8px", transition: "width 0.3s ease" }} />
+                            </div>
                           )}
                         </div>
                       ))}

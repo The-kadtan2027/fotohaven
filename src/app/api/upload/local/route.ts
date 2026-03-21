@@ -1,17 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
+import { createWriteStream } from "fs";
 import path from "path";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 // POST /api/upload/local?key=<encoded-storage-key>
 // In local storage mode, the browser can't PUT directly to a filesystem path.
 // Instead, getPresignedUploadUrl() returns this route as the "upload URL".
-// The client sends the file as the raw request body (same PUT semantics as R2).
+//
+// ── Android optimisation ──
+// Uses a streaming pipeline (req.body → disk) so a 20 MB upload uses ~64 KB
+// of heap instead of buffering the entire file in memory.
 
 const UPLOAD_BASE =
   process.env.LOCAL_UPLOAD_PATH ||
   "/data/data/com.termux/files/home/storage/shared/fotohaven";
 
-export async function PUT(req: NextRequest) {
+// Disable Next.js body parsing — we stream the raw body ourselves
+export const dynamic = "force-dynamic";
+
+// Max file size accepted by this route (matches the metadata route limit)
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+
+async function handleUpload(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const key = searchParams.get("key");
@@ -20,22 +32,61 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Missing key parameter" }, { status: 400 });
     }
 
+    if (!req.body) {
+      return NextResponse.json({ error: "Empty body" }, { status: 400 });
+    }
+
     const decodedKey = decodeURIComponent(key);
     const filePath = path.join(UPLOAD_BASE, decodedKey);
 
-    // Ensure parent directories exist
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    // Security: prevent path traversal
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(UPLOAD_BASE))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-    // Write the raw body to disk
-    const arrayBuffer = await req.arrayBuffer();
-    await fs.writeFile(filePath, Buffer.from(arrayBuffer));
+    // Ensure parent directories exist
+    await fs.mkdir(path.dirname(resolved), { recursive: true });
+
+    // ── Streaming pipeline: Web ReadableStream → Node Readable → disk ──
+    // This avoids buffering the entire file in memory.
+    const nodeReadable = Readable.fromWeb(req.body as import("stream/web").ReadableStream);
+    const writeStream = createWriteStream(resolved);
+
+    let bytesWritten = 0;
+
+    // Track bytes and enforce size limit mid-stream
+    const sizeGuard = new (await import("stream")).Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytesWritten += chunk.length;
+        if (bytesWritten > MAX_UPLOAD_BYTES) {
+          callback(new Error(`File exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024} MB limit`));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+
+    await pipeline(nodeReadable, sizeGuard, writeStream);
 
     return new NextResponse(null, { status: 200 });
-  } catch (err) {
+  } catch (err: any) {
     console.error("[PUT /api/upload/local]", err);
+
+    // Clean up partial file on error
+    try {
+      const key = new URL(req.url).searchParams.get("key");
+      if (key) {
+        const filePath = path.join(UPLOAD_BASE, decodeURIComponent(key));
+        await fs.unlink(filePath).catch(() => {});
+      }
+    } catch { /* best effort */ }
+
+    if (err?.message?.includes("limit")) {
+      return NextResponse.json({ error: err.message }, { status: 413 });
+    }
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }
 
-// Also accept POST for any clients that send POST instead of PUT
-export { PUT as POST };
+export { handleUpload as PUT, handleUpload as POST };

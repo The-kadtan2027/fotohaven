@@ -32,7 +32,8 @@ Show me the exact before/after diff of what you changed.
 
 
 
-I want to implement: How we can expose our application to the internet, using which we can share the photos with our clients. as you know our goal is to use our own server from an android device, so we need to use some kind of dynamic dns service to expose our application to the internet. as this is an experiment, i want to use a free dynamic dns service. lets plan this out and implement it. 
+I want to implement: The code should be able to run on android device using termux. and it must be well optimized to handle large sized photos max 20mb each. and it should be able to run on a low end android device with 6gb ram with root access. 
+also the web app is exposed through cloudflare tunnel, so it should able to handle the big uploads and downloads.
 
 Before writing any code:
 1. Read CLAUDE.md — confirm the current data models and which files you will touch.

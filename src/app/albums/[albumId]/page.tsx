@@ -91,17 +91,68 @@ export default function AlbumPage() {
     multiple: true,
   });
 
+  // ── Upload helper: XHR with progress tracking + retry ──
+  // Strict concurrency = 1: upload one file at a time to prevent OOM on 6 GB device.
+  const xhrUploadWithProgress = (
+    url: string,
+    file: File,
+    onProgress: (pct: number) => void,
+    retries = 3
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      let attempt = 0;
+
+      const tryUpload = () => {
+        attempt++;
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        xhr.setRequestHeader("Content-Type", file.type);
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            onProgress(100);
+            resolve();
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => {
+          if (attempt < retries) {
+            // Exponential backoff: 1s, 2s, 4s
+            const delay = Math.pow(2, attempt - 1) * 1000;
+            console.warn(`[Upload] Retry ${attempt}/${retries} after ${delay}ms`);
+            setTimeout(tryUpload, delay);
+          } else {
+            reject(new Error(`Upload failed after ${retries} retries`));
+          }
+        };
+
+        xhr.send(file);
+      };
+
+      tryUpload();
+    });
+  };
+
   const uploadAll = async () => {
     const pending = uploads.filter((u) => u.status === "pending");
     if (!pending.length) return;
     setIsUploading(true);
 
+    // Strict sequential: one file at a time (concurrency = 1)
     for (const item of pending) {
       const idx = uploads.findIndex((u) => u.file === item.file && u.ceremonyId === item.ceremonyId);
 
       setUploads((prev) => {
         const next = [...prev];
-        next[idx] = { ...next[idx], status: "uploading" };
+        next[idx] = { ...next[idx], status: "uploading", progress: 0 };
         return next;
       });
 
@@ -120,13 +171,18 @@ export default function AlbumPage() {
         if (!metaRes.ok) throw new Error("Failed to get upload URL");
         const { uploadUrl } = await metaRes.json();
 
-        // Step 2: PUT directly to R2 (bypasses server bandwidth)
-        const uploadRes = await fetch(uploadUrl, {
-          method: "PUT",
-          body: item.file,
-          headers: { "Content-Type": item.file.type },
-        });
-        if (!uploadRes.ok) throw new Error("Upload to storage failed");
+        // Step 2: Upload via XHR with real progress + retry
+        await xhrUploadWithProgress(
+          uploadUrl,
+          item.file,
+          (pct) => {
+            setUploads((prev) => {
+              const next = [...prev];
+              next[idx] = { ...next[idx], progress: pct };
+              return next;
+            });
+          }
+        );
 
         setUploads((prev) => {
           const next = [...prev];
@@ -416,7 +472,7 @@ export default function AlbumPage() {
                   {isDragActive ? "Drop photos here" : "Drag & drop photos"}
                 </p>
                 <p style={{ fontSize: 13, color: "var(--brown)" }}>
-                  or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 50MB
+                  or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 25MB
                 </p>
               </div>
 
@@ -442,18 +498,30 @@ export default function AlbumPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {uploads.map((u, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "var(--warm-white)", borderRadius: 8 }}>
-                        <StatusIcon status={u.status} />
-                        <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {u.file.name}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--taupe)" }}>
-                          {(u.file.size / 1024 / 1024).toFixed(1)} MB
-                        </span>
-                        {u.status !== "uploading" && (
-                          <button onClick={() => clearUpload(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}>
-                            <X size={12} />
-                          </button>
+                      <div key={i} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px" }}>
+                          <StatusIcon status={u.status} />
+                          <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.file.name}
+                          </span>
+                          {u.status === "uploading" && (
+                            <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>
+                              {u.progress}%
+                            </span>
+                          )}
+                          <span style={{ fontSize: 11, color: "var(--taupe)" }}>
+                            {(u.file.size / 1024 / 1024).toFixed(1)} MB
+                          </span>
+                          {u.status !== "uploading" && (
+                            <button onClick={() => clearUpload(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}>
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                        {u.status === "uploading" && (
+                          <div style={{ height: 3, background: "var(--sand)", borderRadius: "0 0 8px 8px" }}>
+                            <div style={{ height: "100%", width: `${u.progress}%`, background: "var(--gold)", borderRadius: "0 0 8px 8px", transition: "width 0.3s ease" }} />
+                          </div>
                         )}
                       </div>
                     ))}

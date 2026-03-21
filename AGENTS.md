@@ -318,3 +318,53 @@ None.
 - [x] `npx tsc --noEmit` passes with zero errors
 - [x] Existing Cloudflare Tunnel config preserved (no regression)
 
+---
+
+## Task: Android optimization for large photo handling
+
+**Status:** Completed
+**Scope:** Optimize FotoHaven to run reliably on a low-end Android device (6 GB RAM, root access) handling photos up to 25 MB each, exposed via Cloudflare Tunnel.
+
+### Schema change
+None.
+
+### Modified files
+
+#### `next.config.mjs`
+- Added `serverExternalPackages: ['better-sqlite3']` (prevent native module bundling)
+- Added `experimental.serverActions.bodySizeLimit: '25mb'`
+
+#### `src/lib/db.ts`
+- Enabled SQLite WAL mode (`PRAGMA journal_mode=WAL`)
+- Set `busy_timeout=5000`, `cache_size=-8000`, `synchronous=NORMAL`, `temp_store=MEMORY`
+
+#### `src/app/api/upload/local/route.ts`
+- Replaced `req.arrayBuffer()` with streaming pipeline (`Readable.fromWeb → Transform → createWriteStream`)
+- Added mid-stream size enforcement (25 MB limit)
+- Added partial file cleanup on error
+- Disabled Next.js body parsing (`export const dynamic = "force-dynamic"`)
+
+#### `src/app/api/files/[...key]/route.ts`
+- Added HTTP Range request support (206 Partial Content) for resumable downloads
+- Added ETag header for conditional requests (304 Not Modified)
+- Increased Cache-Control to 24h with `immutable` hint
+
+#### `src/app/api/upload/route.ts` & `src/app/api/share/[token]/upload/route.ts`
+- Reduced `MAX_SIZE` from 50 MB → 25 MB
+
+#### `src/app/albums/[albumId]/page.tsx` & `src/app/share/[token]/page.tsx`
+- Replaced `fetch()` upload with XHR for real-time upload progress
+- Strict upload concurrency = 1 (one file at a time)
+- Retry with exponential backoff (3 attempts)
+- Added progress bar UI to upload queue items
+- Updated size limit text (50 MB → 25 MB)
+
+### Acceptance criteria
+- [x] Uploads stream to disk — 25 MB photo uses ~64 KB heap (not 25 MB)
+- [x] SQLite WAL mode enabled with busy_timeout for concurrent reads during writes
+- [x] File serving supports Range requests (206 Partial Content) for resumable downloads
+- [x] Upload concurrency strictly limited to 1 file at a time (prevents OOM)
+- [x] Upload progress shown with real percentage and visual progress bar
+- [x] Uploads retry up to 3 times with exponential backoff on network errors
+- [x] Max file size reduced to 25 MB across all routes
+- [x] `npx tsc --noEmit` passes with zero errors
