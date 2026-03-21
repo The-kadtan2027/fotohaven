@@ -23,6 +23,7 @@ module.exports = {
       autorestart: true,
       watch: false,           // don't watch files in production
       max_memory_restart: "1024M",  // restart if it exceeds 300MB (safe for most phones)
+      node_args: '--max-old-space-size=768 --expose-gc --optimize-for-size',  // Set heap to 768MB (was default ~512MB)
       restart_delay: 5000,         // wait 5s before restarting on crash
 
       // Environment

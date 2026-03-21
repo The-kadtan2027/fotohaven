@@ -9,6 +9,57 @@ import { db } from "@/lib/db";
 import { photos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
+// --- Background Thumbnail Queue for Android ---
+// Sharp WASM can take 15+ seconds per image on a low-end phone. 
+// If we block the PUT response, the HTTP tunnel connection times out.
+// We use a global queue to run ONE sharp process at a time in the background.
+
+type ThumbTask = {
+  resolvedPath: string;
+  decodedKey: string;
+};
+
+const thumbQueue: ThumbTask[] = [];
+let isProcessingThumbs = false;
+
+async function processThumbnails() {
+  if (isProcessingThumbs) return;
+  isProcessingThumbs = true;
+
+  while (thumbQueue.length > 0) {
+    const task = thumbQueue.shift();
+    if (!task) continue;
+
+    try {
+      // Small buffer delay to ensure frontend has finished POSTing the database record creation
+      await new Promise(r => setTimeout(r, 2000));
+
+      const parsedPath = path.parse(task.resolvedPath);
+      const thumbFilename = `thumb_${parsedPath.name}.jpg`;
+      const thumbResolved = path.join(parsedPath.dir, thumbFilename);
+      const thumbKey = task.decodedKey.replace(parsedPath.base, thumbFilename);
+
+      await sharp(task.resolvedPath)
+        .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 70 })
+        .toFile(thumbResolved);
+
+      // Update DB to link thumbnail
+      await db
+        .update(photos)
+        .set({ thumbnailKey: thumbKey })
+        .where(eq(photos.storageKey, task.decodedKey));
+
+      console.log(`[Queue] Successfully generated thumbnail for ${task.decodedKey}`);
+    } catch (err) {
+      console.error("[Queue] Failed to process thumbnail:", err);
+    }
+  }
+
+  isProcessingThumbs = false;
+}
+// ----------------------------------------------
+
 // POST /api/upload/local?key=<encoded-storage-key>
 // In local storage mode, the browser can't PUT directly to a filesystem path.
 // Instead, getPresignedUploadUrl() returns this route as the "upload URL".
@@ -73,27 +124,10 @@ async function handleUpload(req: NextRequest) {
 
     await pipeline(nodeReadable, sizeGuard, writeStream);
 
-    // ── Generate Thumbnail ──
-    try {
-      const parsedPath = path.parse(resolved);
-      const thumbFilename = `thumb_${parsedPath.name}.jpg`;
-      const thumbResolved = path.join(parsedPath.dir, thumbFilename);
-      // Create thumbnail key matching the storageKey format (always forward slashes)
-      const thumbKey = decodedKey.replace(parsedPath.base, thumbFilename);
-
-      await sharp(resolved)
-        .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toFile(thumbResolved);
-
-      // Update DB
-      await db
-        .update(photos)
-        .set({ thumbnailKey: thumbKey })
-        .where(eq(photos.storageKey, decodedKey));
-    } catch (thumbErr) {
-      console.error("[PUT /api/upload/local] Thumbnail generation failed:", thumbErr);
-    }
+    // ── Generate Thumbnail (Background Queue) ──
+    // Push the file paths to the module-level queue and kick off processing without awaiting.
+    thumbQueue.push({ resolvedPath: resolved, decodedKey });
+    processThumbnails().catch((err) => console.error("[ThumbWorker] Fatal Error:", err));
 
     return new NextResponse(null, { status: 200 });
   } catch (err: any) {
