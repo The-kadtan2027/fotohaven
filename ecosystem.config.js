@@ -7,7 +7,7 @@ module.exports = {
     {
       name: 'cloudflared',
       script: process.env.PREFIX + '/bin/cloudflared',
-      args: 'tunnel --url http://localhost:3000',
+      args: 'tunnel --protocol http2 --url http://localhost:3000',
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
