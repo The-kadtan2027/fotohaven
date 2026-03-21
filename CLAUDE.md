@@ -13,8 +13,8 @@ The primary use case is Indian weddings: a client selects photos from a multi-ce
 event (Mehndi, Sangeet, Wedding, Reception) and hands them off to a photographer
 via a secure share link — no WhatsApp, no Google Drive.
 
-The app runs on a **Next.js 14 App Router** server. The primary deployment target
-is an **old Android phone running Termux + PM2 + Cloudflare Tunnel** — not Vercel.
+The app runs on a **Next.js 15 App Router** server. The primary deployment target
+is an **old Android phone running Termux + PM2 + Cloudflare Tunnel (or Tailscale Funnel)**.
 Always keep ARM compatibility and low memory footprint in mind.
 
 ## Tech stack — exact versions
@@ -83,6 +83,7 @@ fotohaven/
 - `id`: UUID string
 - `originalName`: User's filename
 - `storageKey`: Path in R2/Local storage
+- `thumbnailKey`: Path to 800px downscaled JPEG (optional)
 - `ceremonyId`: Foreign key to Ceremony (Cascade)
 - `comments`: Relation to Comment table
 
@@ -129,11 +130,11 @@ pm2 start ecosystem.config.js
 ---
 
 ## Android hosting context
-- **Environment**: Termux + Alpine (musl).
-- **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries).
-- **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting.
-- **Next.js**: Uses `transpilePackages: ['lucide-react']` in `next.config.mjs` for build compatibility.
- no LD_PRELOAD injection
+- **Environment**: Termux + Alpine (musl). Tailscale Funnel or Cloudflare Tunnel for exposure.
+- **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries). `db.ts` uses WAL mode and custom timeouts for concurrency.
+- **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
+- **Uploads**: Hard limit of **30MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
+- **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
 
 ---
 

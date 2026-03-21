@@ -411,3 +411,37 @@ None.
 - [x] Gallery grids load the thumbnail version (faster sizes) and Zip downloads/Lightbox use the original high quality version.
 - [x] Deleting a photo also deletes the thumbnail from the filesystem.
 - [x] TypeScript compiles without failing.
+
+---
+
+## Task: System Logging and Documentation Updates
+
+**Status:** Completed
+**Scope:** Implement API and Database logging to help with debugging across the full stack. Update project documentation (`CLAUDE.md`) to reflect the drastic recent architectural changes ensuring any AI agent has the latest, most accurate context.
+
+### Schema change
+None.
+
+### New files
+- `src/middleware.ts` — Next.js Edge middleware to intercept incoming requests and log `[API] {METHOD} {PATH}` to the console. Restricted to `/api/*` routes.
+
+### Modified files
+
+#### `src/lib/db.ts`
+- Use Drizzle's `DefaultLogger` to capture and log every exact SQL query executed against the SQLite database, prefixed with `[DB]`.
+
+#### `CLAUDE.md`
+- Needs a full pass over the "Tech stack", "Data models", and "Android hosting context" sections:
+  - Add documentation about WebAssembly `sharp` requirement for ARM64/Android.
+  - Document the 30MB limit across server actions and uploads.
+  - Mention Next.js streaming pipeline and file chunking rules.
+  - Document new models (if any) and fields like `thumbnailKey`.
+
+#### `README.md`
+- Quick review to ensure deployment and feature list accurately mirrors reality (e.g. batch deletions, thumbnail generation).
+
+### Acceptance criteria
+- [x] Database queries are logged to stdout with a `[DB]` prefix.
+- [x] All hit API endpoints correctly log out `[API] {METHOD} {PATH}`.
+- [x] `CLAUDE.md` reflects modern features: Tailscale, thumbnail generation with `sharp`, 30MB stream uploads.
+- [x] `npx tsc --noEmit` passes with zero errors.

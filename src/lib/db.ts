@@ -19,5 +19,16 @@ sqlite.pragma("synchronous = NORMAL");
 // Store temp tables in memory
 sqlite.pragma("temp_store = MEMORY");
 
-export const db = drizzle(sqlite, { schema });
+import { DefaultLogger } from "drizzle-orm/logger";
+
+export const db = drizzle(sqlite, { 
+  schema,
+  logger: new DefaultLogger({
+    writer: {
+      write: (message: string) => {
+        console.log(`[DB] ${message}`);
+      }
+    }
+  })
+});
 

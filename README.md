@@ -40,7 +40,8 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Shareable links** — token-based URLs with optional expiry date
 - **Password-protected links** — bcrypt-hashed album passwords with a client-side challenge screen
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
-- **Bulk ZIP download** — per-ceremony, selected photos, or everything, generated in the browser
+- **Batch photo management** — select multiple photos to download as a ZIP or permanently delete
+- **Fast thumbnail generation** — uploads are automatically downscaled for quick gallery viewing; original high-res photos are kept for ZIP downloads
 - **Per-photo comments** — photographer and client can annotate individual photos with notes
 - **Email notifications** — photographer receives an email on first gallery view (via Resend)
 - **Upload-back flow** — photographer can upload edited finals back into the album via share link; client downloads them in a separate "Delivered Finals" tab
@@ -596,6 +597,13 @@ npm install --ignore-scripts
 pkg install python make clang
 ```
 
+**Next.js build fails on 'sharp' module load**
+Android/Termux uses `android-arm64` which native `sharp` doesn't support. Install the WebAssembly fallback:
+```bash
+npm install --cpu=wasm32 sharp
+npm install @img/sharp-wasm32
+```
+
 **Port 3000 already in use**
 ```bash
 lsof -i :3000
@@ -715,7 +723,7 @@ Creates a photo record with `isReturn: true`. Returns same presigned URL flow as
 - [ ] Health dashboard — phone stats (CPU, RAM, disk, tunnel status) at `/admin/health`
 - [ ] WhatsApp notifications via Twilio/WATI
 - [ ] AI duplicate detection before upload
-- [ ] Watermarked previews — low-res gallery, full-res on download
+- [x] Thumbnail previews — low-res gallery, full-res on download
 - [ ] Print ordering — Canvera / Zoomin for Indian photo labs
 - [ ] Two-phone redundancy — run on backup phone for uptime
 
