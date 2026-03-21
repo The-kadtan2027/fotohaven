@@ -57,6 +57,7 @@ export default function SharePage() {
   const [galleryTab, setGalleryTab] = useState<"originals" | "finals">("originals");
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -134,11 +135,16 @@ export default function SharePage() {
       const zip = new JSZip();
       const folder = zip.folder(ceremony.name)!;
 
+      let completed = 0;
+      setDownloadProgress({ current: 0, total: ceremony.photos.length });
+
       await Promise.all(
         ceremony.photos.map(async (photo) => {
           const res = await fetch(photo.originalUrl || photo.url);
           const blob = await res.blob();
           folder.file(photo.originalName, blob);
+          completed++;
+          setDownloadProgress({ current: completed, total: ceremony.photos.length });
         })
       );
 
@@ -153,6 +159,7 @@ export default function SharePage() {
       alert("Download failed. Please try again.");
     } finally {
       setDownloading(null);
+      setDownloadProgress(null);
     }
   };
 
@@ -163,6 +170,10 @@ export default function SharePage() {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
 
+      const totalPhotos = album.ceremonies.reduce((acc, c) => acc + c.photos.filter((p) => selectedPhotos.has(p.id)).length, 0);
+      let completed = 0;
+      setDownloadProgress({ current: 0, total: totalPhotos });
+
       for (const ceremony of album.ceremonies) {
         const photosToDownload = ceremony.photos.filter((p) => selectedPhotos.has(p.id));
         if (!photosToDownload.length) continue;
@@ -172,6 +183,8 @@ export default function SharePage() {
             const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
+            completed++;
+            setDownloadProgress({ current: completed, total: totalPhotos });
           })
         );
       }
@@ -187,6 +200,7 @@ export default function SharePage() {
       alert("Download failed. Please try again.");
     } finally {
       setDownloading(null);
+      setDownloadProgress(null);
     }
   };
 
@@ -197,6 +211,10 @@ export default function SharePage() {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
 
+      const totalPhotos = album.ceremonies.reduce((acc, c) => acc + c.photos.length, 0);
+      let completed = 0;
+      setDownloadProgress({ current: 0, total: totalPhotos });
+
       for (const ceremony of album.ceremonies) {
         const folder = zip.folder(ceremony.name)!;
         await Promise.all(
@@ -204,6 +222,8 @@ export default function SharePage() {
             const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
+            completed++;
+            setDownloadProgress({ current: completed, total: totalPhotos });
           })
         );
       }
@@ -219,6 +239,7 @@ export default function SharePage() {
       alert("Download failed. Please try again.");
     } finally {
       setDownloading(null);
+      setDownloadProgress(null);
     }
   };
 
@@ -361,6 +382,10 @@ export default function SharePage() {
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
+      const totalFinals = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => p.isReturn).length, 0);
+      let completed = 0;
+      setDownloadProgress({ current: 0, total: totalFinals });
+
       for (const ceremony of album.ceremonies) {
         const finals = ceremony.photos.filter((p) => p.isReturn);
         if (!finals.length) continue;
@@ -370,6 +395,8 @@ export default function SharePage() {
             const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
+            completed++;
+            setDownloadProgress({ current: completed, total: totalFinals });
           })
         );
       }
@@ -384,6 +411,7 @@ export default function SharePage() {
       alert("Download failed. Please try again.");
     } finally {
       setDownloading(null);
+      setDownloadProgress(null);
     }
   };
 
@@ -538,7 +566,7 @@ export default function SharePage() {
                 style={{ fontSize: 13 }}
               >
                 {downloading === "selected"
-                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
+                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
                   : <><Download size={14} /> Download Selected ({selectedPhotos.size})</>}
               </button>
             ) : null}
@@ -552,11 +580,11 @@ export default function SharePage() {
                 borderRadius: 8, fontSize: 13, cursor: "pointer", transition: "all 0.2s",
                 fontFamily: "var(--font-body)",
               }}
-            >
-              {downloading === "all"
-                ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Zipping all…</>
-                : <><Download size={14} /> Download All Photos</>}
-            </button>
+              >
+                {downloading === "all"
+                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping all…"}</>
+                  : <><Download size={14} /> Download All Photos</>}
+              </button>
             {totalFinals > 0 && (
               <button
                 onClick={downloadFinals}
@@ -570,7 +598,7 @@ export default function SharePage() {
                 }}
               >
                 {downloading === "finals"
-                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
+                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
                   : <><PackageCheck size={14} /> Download Finals ({totalFinals})</>}
               </button>
             )}

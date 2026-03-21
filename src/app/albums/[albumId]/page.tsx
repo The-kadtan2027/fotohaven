@@ -55,6 +55,7 @@ export default function AlbumPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [downloadingFinals, setDownloadingFinals] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
 
@@ -236,11 +237,17 @@ export default function AlbumPage() {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
       const folder = zip.folder(`${ceremony.name} — Finals`)!;
+
+      let completed = 0;
+      setDownloadProgress({ current: 0, total: finals.length });
+
       await Promise.all(
         finals.map(async (photo) => {
           const res = await fetch(photo.originalUrl || photo.url);
           const blob = await res.blob();
           folder.file(photo.originalName, blob);
+          completed++;
+          setDownloadProgress({ current: completed, total: finals.length });
         })
       );
       const content = await zip.generateAsync({ type: "blob" });
@@ -254,6 +261,7 @@ export default function AlbumPage() {
       alert("Download failed.");
     } finally {
       setDownloadingFinals(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -445,7 +453,7 @@ export default function AlbumPage() {
                     style={{ fontSize: 12 }}
                   >
                     {downloadingFinals
-                      ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
+                      ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
                       : <><PackageCheck size={12} /> Download Finals</>}
                   </button>
                 )}
