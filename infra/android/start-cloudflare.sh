@@ -1,49 +1,87 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
 # start-cloudflare.sh
-# Intercepts the native Cloudflare Tunnel output, parses the random trycloudflare.com URL,
-# updates the environment variables, and dynamically reloads the server to stay in sync.
+# Intercepts Cloudflare Tunnel output, extracts URL, updates .env.local, restarts app
 
-ENV_FILE=".env.local"
+set -e  # Exit on error
+
+# Configuration
+ENV_FILE="$HOME/fotohaven/.env.local"
 CLOUDFLARED_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/cloudflared"
+CLOUDFLARED_ARGS="tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s"
 
+# Verify cloudflared exists
 if [ ! -x "$CLOUDFLARED_BIN" ]; then
-  CLOUDFLARED_BIN="cloudflared"
+  if command -v cloudflared &>/dev/null; then
+    CLOUDFLARED_BIN="cloudflared"
+  else
+    echo "[FotoHaven-Sys] ERROR: cloudflared not found"
+    exit 1
+  fi
 fi
 
-# Run Cloudflared and intercept output line-by-line
-"$CLOUDFLARED_BIN" tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s 2>&1 | while read -r line; do
-  
-  # Print the normal output to PM2 logs
-  echo "$line"
+# Verify .env.local exists
+if [ ! -f "$ENV_FILE" ]; then
+  echo "[FotoHaven-Sys] WARNING: $ENV_FILE not found. Creating it..."
+  touch "$ENV_FILE"
+fi
 
-  # Search for the newly provisioned tunnel URL
-  URL=$(echo "$line" | grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' | head -n 1)
+# Track if URL has been updated
+URL_UPDATED=0
+
+echo "[FotoHaven-Sys] Starting Cloudflare Tunnel..."
+
+# Run cloudflared and intercept output
+"$CLOUDFLARED_BIN" $CLOUDFLARED_ARGS 2>&1 | while IFS= read -r line; do
+  
+  # Forward all output to PM2 logs
+  echo "$line"
+  
+  # Skip URL extraction if already updated
+  if [ $URL_UPDATED -eq 1 ]; then
+    continue
+  fi
+
+  # Extract tunnel URL (case-insensitive for robustness)
+  URL=$(echo "$line" | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | head -n 1)
 
   if [ -n "$URL" ]; then
-    echo "[FotoHaven-Sys] Intercepted new Tunnel URL: $URL"
+    echo "[FotoHaven-Sys] Detected Tunnel URL: $URL"
 
-    # Compare against current URL to avoid boot-looping the PM2 restart
-    if [ -f "$ENV_FILE" ]; then
-      CURRENT_URL=$(grep "NEXT_PUBLIC_APP_URL=" "$ENV_FILE" | cut -d'"' -f2)
-      if [ "$CURRENT_URL" == "$URL" ]; then
-        echo "[FotoHaven-Sys] URL matches existing (.env.local). Skipping restart."
-        continue
-      fi
+    # Read current URL from .env.local
+    CURRENT_URL=""
+    if grep -q "NEXT_PUBLIC_APP_URL=" "$ENV_FILE" 2>/dev/null; then
+      CURRENT_URL=$(grep "^NEXT_PUBLIC_APP_URL=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
     fi
 
-    # Overwrite NEXT_PUBLIC_APP_URL in .env.local safely
-    if grep -q "NEXT_PUBLIC_APP_URL=" "$ENV_FILE" 2>/dev/null; then
-      sed -i "s|NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=\"$URL\"|" "$ENV_FILE"
-      echo "[FotoHaven-Sys] Updated .env.local payload"
+    # Check if URL actually changed
+    if [ "$CURRENT_URL" = "$URL" ]; then
+      echo "[FotoHaven-Sys] URL unchanged ($URL). Skipping restart."
+      URL_UPDATED=1
+      continue
+    fi
+
+    # Update .env.local
+    if grep -q "^NEXT_PUBLIC_APP_URL=" "$ENV_FILE"; then
+      # Replace existing line
+      sed -i "s|^NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=\"$URL\"|" "$ENV_FILE"
+      echo "[FotoHaven-Sys] Updated NEXT_PUBLIC_APP_URL in $ENV_FILE"
     else
+      # Append new line
       echo "" >> "$ENV_FILE"
       echo "NEXT_PUBLIC_APP_URL=\"$URL\"" >> "$ENV_FILE"
-      echo "[FotoHaven-Sys] Appended .env.local payload"
+      echo "[FotoHaven-Sys] Added NEXT_PUBLIC_APP_URL to $ENV_FILE"
     fi
 
-    # Restart the web application gracefully
-    echo "[FotoHaven-Sys] Reloading web server to sync URL..."
-    pm2 reload fotohaven || pm2 restart fotohaven
+    # Restart FotoHaven to pick up new URL
+    echo "[FotoHaven-Sys] Restarting FotoHaven..."
+    if pm2 restart fotohaven --update-env; then
+      echo "[FotoHaven-Sys] ✓ FotoHaven restarted successfully"
+    else
+      echo "[FotoHaven-Sys] ✗ Failed to restart FotoHaven"
+    fi
+
+    # Mark as updated to prevent duplicate restarts
+    URL_UPDATED=1
   fi
 done
