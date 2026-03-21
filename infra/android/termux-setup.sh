@@ -49,18 +49,10 @@ step "Installing PM2 process manager"
 npm install -g pm2
 ok "PM2 $(pm2 --version) installed"
 
-# ── Step 5: Download cloudflared (ARM64 binary) ───────────────────────────────
+# ── Step 5: Install cloudflared (Termux native) ───────────────────────────────
 step "Installing cloudflared (Cloudflare Tunnel)"
-CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
-CLOUDFLARED_BIN="$PREFIX/bin/cloudflared"
-
-if [ -f "$CLOUDFLARED_BIN" ]; then
-  ok "cloudflared already installed: $(cloudflared --version)"
-else
-  wget -q --show-progress -O "$CLOUDFLARED_BIN" "$CLOUDFLARED_URL"
-  chmod +x "$CLOUDFLARED_BIN"
-  ok "cloudflared installed: $(cloudflared --version)"
-fi
+pkg install -y cloudflared
+ok "cloudflared installed: $(cloudflared --version)"
 
 # ── Step 6: Clone FotoHaven ────────────────────────────────────────────────────
 step "Cloning FotoHaven"
