@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import { createWriteStream } from "fs";
 import path from "path";
-import { Readable } from "stream";
+import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 
 // POST /api/upload/local?key=<encoded-storage-key>
@@ -56,7 +56,7 @@ async function handleUpload(req: NextRequest) {
     let bytesWritten = 0;
 
     // Track bytes and enforce size limit mid-stream
-    const sizeGuard = new (await import("stream")).Transform({
+    const sizeGuard = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         bytesWritten += chunk.length;
         if (bytesWritten > MAX_UPLOAD_BYTES) {

@@ -5,6 +5,14 @@
 module.exports = {
   apps: [
     {
+      name: 'cloudflared',
+      script: process.env.PREFIX + '/bin/cloudflared',
+      args: 'tunnel --url http://localhost:3000',
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+    },
+    {
       name: "fotohaven",
       script: "node_modules/.bin/next",
       args: "start",
@@ -13,7 +21,7 @@ module.exports = {
       // Restart policy
       autorestart: true,
       watch: false,           // don't watch files in production
-      max_memory_restart: "300M",  // restart if it exceeds 300MB (safe for most phones)
+      max_memory_restart: "1024M",  // restart if it exceeds 300MB (safe for most phones)
       restart_delay: 5000,         // wait 5s before restarting on crash
 
       // Environment
