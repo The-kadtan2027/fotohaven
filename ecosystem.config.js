@@ -6,8 +6,7 @@ module.exports = {
   apps: [
     {
       name: 'cloudflared',
-      script: process.env.PREFIX + '/bin/cloudflared',
-      args: 'tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s',
+      script: 'bash ./infra/android/start-cloudflare.sh',
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',

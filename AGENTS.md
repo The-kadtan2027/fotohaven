@@ -481,3 +481,24 @@ None.
 - [ ] Share page `Download All` and `Download Selected` triggers native browser download
 - [ ] Album manager `Download Finals` triggers native browser download
 - [ ] Zip generation uses `{ zlib: { level: 0 } }` to prevent CPU stalling on large JPEGs
+
+---
+
+## Task: Automate Cloudflare Tunnel URL
+
+**Status:** Not started  
+**Scope:** Automatically capture the randomized Quick Tunnel URL on startup, save it to `.env.local`, and restart the web server to reflect the newly assigned public URL.
+
+### Schema change
+None.
+
+### New files
+- `infra/android/start-cloudflare.sh` — Wraps `cloudflared`, intercepts the URL from `stderr`, injects into `.env.local`, and triggers a PM2 restart of `fotohaven`.
+
+### Modified files
+- `ecosystem.config.js` — Change the `cloudflared` script block to execute the new shell wrapper instead of the binary directly.
+
+### Acceptance criteria
+- [x] `.env.local` is automatically updated with the correct `NEXT_PUBLIC_APP_URL` every time `cloudflared` restarts.
+- [x] PM2 automatically restarts the `fotohaven` process only when a *new* URL is generated.
+- [x] PM2 effectively manages the script without crashing.
