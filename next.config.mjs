@@ -13,7 +13,7 @@ const nextConfig = {
   experimental: {
     // Allow server action payloads up to 25 MB (large photo metadata)
     serverActions: {
-      bodySizeLimit: '30mb',
+      bodySizeLimit: '35mb',
     },
   },
 };

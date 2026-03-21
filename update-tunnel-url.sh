@@ -13,10 +13,10 @@ RETRY_DELAY=1   # Check every 1 second
 echo "Waiting for Cloudflare Tunnel URL..."
 
 for i in $(seq 1 $MAX_RETRIES); do
-    # Extract URL from PM2 logs
-    TUNNEL_URL=$(pm2 logs cloudflared --nostream --lines 100 2>/dev/null | \
+    # Extract the MOST RECENT URL from PM2 logs
+    TUNNEL_URL=$(pm2 logs cloudflared --nostream --lines 50 2>/dev/null | \
                  grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | \
-                 head -n 1)
+                 tail -n 1)
     
     if [ -n "$TUNNEL_URL" ]; then
         echo "Found Cloudflare URL: $TUNNEL_URL"
