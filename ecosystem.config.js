@@ -7,7 +7,7 @@ module.exports = {
     {
       name: 'cloudflared',
       script: process.env.PREFIX + '/bin/cloudflared',
-      args: 'tunnel --protocol http2 --url http://localhost:3000',
+      args: 'tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s',
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
@@ -16,6 +16,7 @@ module.exports = {
       name: "fotohaven",
       script: "node_modules/.bin/next",
       args: "start",
+      nice: -10,  // Higher priority (range: -20 to 19)
       cwd: process.env.APP_DIR || "/data/data/com.termux/files/home/fotohaven",
 
       // Restart policy

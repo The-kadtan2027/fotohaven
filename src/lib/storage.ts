@@ -19,6 +19,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { createReadStream } from "fs";
+import { Readable } from "stream";
 
 // Termux shared storage path — accessible from Android Files app
 // Alternatively use: /data/data/com.termux/files/home/fotohaven-uploads
@@ -142,4 +143,13 @@ export async function getStorageStats(): Promise<{
 
   await walk(UPLOAD_BASE);
   return { totalFiles, totalSizeBytes };
+}
+
+/**
+ * Get a readable stream for a file directly from local storage.
+ * Bypasses memory buffering, great for piping into Server-Side ZIP generation.
+ */
+export async function getFileStream(key: string): Promise<Readable> {
+  const filePath = path.join(UPLOAD_BASE, key);
+  return createReadStream(filePath);
 }

@@ -445,3 +445,39 @@ None.
 - [x] All hit API endpoints correctly log out `[API] {METHOD} {PATH}`.
 - [x] `CLAUDE.md` reflects modern features: Tailscale, thumbnail generation with `sharp`, 30MB stream uploads.
 - [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Server-Side ZIP Streaming
+
+**Status:** Not started
+**Scope:** Replace client-side `JSZip` generation with server-side on-the-fly streaming using `archiver`. This prevents mobile browser crashes when downloading large albums.
+
+### Schema change
+None.
+
+### New dependencies
+`npm install archiver @types/archiver`
+
+### New API routes
+- `POST /api/share/[token]/download` — `src/app/api/share/[token]/download/route.ts`
+  - Body (FormData): `photoIds` (JSON array of strings) and `bundleName` (string).
+  - Queries database for `Photo.storageKey` matching the IDs.
+  - Opens `archiver('zip', { zlib: { level: 0 } })`.
+  - Streams local files into the archiver.
+  - Returns `new Response(stream)` with `Content-Type: application/zip` and `Content-Disposition: attachment`.
+- `POST /api/albums/[albumId]/download` — `src/app/api/albums/[albumId]/download/route.ts`
+  - Same logic, used by photographer dashboard for downloading returned finals.
+
+### UI changes
+- `src/app/share/[token]/page.tsx` & `src/app/albums/[albumId]/page.tsx`
+  - Remove all `JSZip` imports and client-side chunking logic.
+  - Replace `downloadAll`, `downloadSelected`, `downloadCeremony`, and `downloadFinals` click handlers to programmatically submit a hidden `<form method="POST">` containing the required `photoIds` directly to the new `download` API routes.
+  - This allows the browser to natively handle the download stream and show its own progress bar, completely wiping out browser memory usage.
+
+### Acceptance criteria
+- [ ] `JSZip` dependency removed or no longer loaded in browser
+- [ ] Zips are generated strictly on the server and streamed using `archiver`
+- [ ] Share page `Download All` and `Download Selected` triggers native browser download
+- [ ] Album manager `Download Finals` triggers native browser download
+- [ ] Zip generation uses `{ zlib: { level: 0 } }` to prevent CPU stalling on large JPEGs

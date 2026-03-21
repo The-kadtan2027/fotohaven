@@ -56,8 +56,6 @@ export default function SharePage() {
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
   const [galleryTab, setGalleryTab] = useState<"originals" | "finals">("originals");
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null);
-  const [downloading, setDownloading] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
@@ -125,122 +123,44 @@ export default function SharePage() {
     });
   };
 
-  // Download photos as individual files (fallback: open each in new tab)
-  // In production: generate a signed ZIP via an API route
-  const downloadCeremony = async (ceremony: Ceremony) => {
-    setDownloading(ceremony.id);
-    try {
-      // Dynamic import JSZip only when needed
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      const folder = zip.folder(ceremony.name)!;
+  // Trigger download via native browser form submission (streaming)
+  const requestDownload = (photoIds: string[], bundleName: string) => {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `/api/share/${token}/download`;
+    
+    const inputIds = document.createElement("input");
+    inputIds.type = "hidden";
+    inputIds.name = "photoIds";
+    inputIds.value = JSON.stringify(photoIds);
+    form.appendChild(inputIds);
 
-      let completed = 0;
-      setDownloadProgress({ current: 0, total: ceremony.photos.length });
+    const inputName = document.createElement("input");
+    inputName.type = "hidden";
+    inputName.name = "bundleName";
+    inputName.value = bundleName;
+    form.appendChild(inputName);
 
-      await Promise.all(
-        ceremony.photos.map(async (photo) => {
-          const res = await fetch(photo.originalUrl || photo.url);
-          const blob = await res.blob();
-          folder.file(photo.originalName, blob);
-          completed++;
-          setDownloadProgress({ current: completed, total: ceremony.photos.length });
-        })
-      );
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${ceremony.name}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Download failed. Please try again.");
-    } finally {
-      setDownloading(null);
-      setDownloadProgress(null);
-    }
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
   };
 
-  const downloadSelected = async () => {
+  const downloadCeremony = (ceremony: Ceremony) => {
+    const photoIds = ceremony.photos.map(p => p.id);
+    requestDownload(photoIds, ceremony.name);
+  };
+
+  const downloadSelected = () => {
     if (!album || selectedPhotos.size === 0) return;
-    setDownloading("selected");
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-
-      const totalPhotos = album.ceremonies.reduce((acc, c) => acc + c.photos.filter((p) => selectedPhotos.has(p.id)).length, 0);
-      let completed = 0;
-      setDownloadProgress({ current: 0, total: totalPhotos });
-
-      for (const ceremony of album.ceremonies) {
-        const photosToDownload = ceremony.photos.filter((p) => selectedPhotos.has(p.id));
-        if (!photosToDownload.length) continue;
-        const folder = zip.folder(ceremony.name)!;
-        await Promise.all(
-          photosToDownload.map(async (photo) => {
-            const res = await fetch(photo.originalUrl || photo.url);
-            const blob = await res.blob();
-            folder.file(photo.originalName, blob);
-            completed++;
-            setDownloadProgress({ current: completed, total: totalPhotos });
-          })
-        );
-      }
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${album.title} — Selected Photos.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Download failed. Please try again.");
-    } finally {
-      setDownloading(null);
-      setDownloadProgress(null);
-    }
+    const photoIds = Array.from(selectedPhotos);
+    requestDownload(photoIds, `${album.title} — Selected Photos`);
   };
 
-  const downloadAll = async () => {
+  const downloadAll = () => {
     if (!album) return;
-    setDownloading("all");
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-
-      const totalPhotos = album.ceremonies.reduce((acc, c) => acc + c.photos.length, 0);
-      let completed = 0;
-      setDownloadProgress({ current: 0, total: totalPhotos });
-
-      for (const ceremony of album.ceremonies) {
-        const folder = zip.folder(ceremony.name)!;
-        await Promise.all(
-          ceremony.photos.map(async (photo) => {
-            const res = await fetch(photo.originalUrl || photo.url);
-            const blob = await res.blob();
-            folder.file(photo.originalName, blob);
-            completed++;
-            setDownloadProgress({ current: completed, total: totalPhotos });
-          })
-        );
-      }
-
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${album.title} — All Photos.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Download failed. Please try again.");
-    } finally {
-      setDownloading(null);
-      setDownloadProgress(null);
-    }
+    const photoIds = album.ceremonies.flatMap(c => c.photos.map(p => p.id));
+    requestDownload(photoIds, `${album.title} — All Photos`);
   };
 
   // --- Upload Returns ---
@@ -376,43 +296,11 @@ export default function SharePage() {
     setTimeout(() => setReturnUploads((prev) => prev.filter((u) => u.status !== "done")), 2000);
   };
 
-  const downloadFinals = async () => {
+  const downloadFinals = () => {
     if (!album) return;
-    setDownloading("finals");
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      const totalFinals = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => p.isReturn).length, 0);
-      let completed = 0;
-      setDownloadProgress({ current: 0, total: totalFinals });
-
-      for (const ceremony of album.ceremonies) {
-        const finals = ceremony.photos.filter((p) => p.isReturn);
-        if (!finals.length) continue;
-        const folder = zip.folder(`${ceremony.name} — Finals`)!;
-        await Promise.all(
-          finals.map(async (photo) => {
-            const res = await fetch(photo.originalUrl || photo.url);
-            const blob = await res.blob();
-            folder.file(photo.originalName, blob);
-            completed++;
-            setDownloadProgress({ current: completed, total: totalFinals });
-          })
-        );
-      }
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${album.title} — Delivered Finals.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Download failed. Please try again.");
-    } finally {
-      setDownloading(null);
-      setDownloadProgress(null);
-    }
+    const photoIds = album.ceremonies.flatMap(c => c.photos.filter(p => p.isReturn).map(p => p.id));
+    if (photoIds.length === 0) return;
+    requestDownload(photoIds, `${album.title} — Delivered Finals`);
   };
 
   // Lightbox keyboard navigation
@@ -562,17 +450,13 @@ export default function SharePage() {
               <button
                 className="btn-gold"
                 onClick={downloadSelected}
-                disabled={downloading === "selected"}
                 style={{ fontSize: 13 }}
               >
-                {downloading === "selected"
-                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
-                  : <><Download size={14} /> Download Selected ({selectedPhotos.size})</>}
+                <><Download size={14} /> Download Selected ({selectedPhotos.size})</>
               </button>
             ) : null}
             <button
               onClick={downloadAll}
-              disabled={!!downloading}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 padding: "10px 20px", background: "rgba(250,247,242,0.12)",
@@ -581,14 +465,11 @@ export default function SharePage() {
                 fontFamily: "var(--font-body)",
               }}
               >
-                {downloading === "all"
-                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping all…"}</>
-                  : <><Download size={14} /> Download All Photos</>}
+                <><Download size={14} /> Download All Photos</>
               </button>
             {totalFinals > 0 && (
               <button
                 onClick={downloadFinals}
-                disabled={!!downloading}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 8,
                   padding: "10px 20px", background: "rgba(201,150,58,0.25)",
@@ -597,9 +478,7 @@ export default function SharePage() {
                   fontFamily: "var(--font-body)",
                 }}
               >
-                {downloading === "finals"
-                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
-                  : <><PackageCheck size={14} /> Download Finals ({totalFinals})</>}
+                <><PackageCheck size={14} /> Download Finals ({totalFinals})</>
               </button>
             )}
             {selectedPhotos.size > 0 && (
@@ -681,12 +560,9 @@ export default function SharePage() {
                   <button
                     className="btn-ghost"
                     onClick={() => downloadCeremony(activeCeremonyData)}
-                    disabled={downloading === activeCeremonyData.id}
                     style={{ fontSize: 12 }}
                   >
-                    {downloading === activeCeremonyData.id
-                      ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Zipping…</>
-                      : <><Download size={12} /> Download Ceremony</>}
+                    <><Download size={12} /> Download Ceremony</>
                   </button>
                 </div>
               </div>

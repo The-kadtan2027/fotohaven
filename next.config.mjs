@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  swcMinify: true, // Faster builds on ARM
   transpilePackages: ['lucide-react'],
   // Native module — must not be bundled by webpack
   serverExternalPackages: ['better-sqlite3', 'sharp'],

@@ -54,8 +54,6 @@ export default function AlbumPage() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [downloadingFinals, setDownloadingFinals] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
 
@@ -229,40 +227,31 @@ export default function AlbumPage() {
     setTimeout(() => setLinkCopied(false), 2500);
   };
 
-  const downloadFinals = async (ceremony: Ceremony) => {
+  const downloadFinals = (ceremony: Ceremony) => {
+    if (!album) return;
     const finals = ceremony.photos.filter((p) => p.isReturn);
     if (!finals.length) return;
-    setDownloadingFinals(true);
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      const folder = zip.folder(`${ceremony.name} — Finals`)!;
+    
+    // Trigger download via native browser form submission (streaming)
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `/api/albums/${album.id}/download`;
+    
+    const inputIds = document.createElement("input");
+    inputIds.type = "hidden";
+    inputIds.name = "photoIds";
+    inputIds.value = JSON.stringify(finals.map(p => p.id));
+    form.appendChild(inputIds);
 
-      let completed = 0;
-      setDownloadProgress({ current: 0, total: finals.length });
+    const inputName = document.createElement("input");
+    inputName.type = "hidden";
+    inputName.name = "bundleName";
+    inputName.value = `${ceremony.name} — Finals`;
+    form.appendChild(inputName);
 
-      await Promise.all(
-        finals.map(async (photo) => {
-          const res = await fetch(photo.originalUrl || photo.url);
-          const blob = await res.blob();
-          folder.file(photo.originalName, blob);
-          completed++;
-          setDownloadProgress({ current: completed, total: finals.length });
-        })
-      );
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${ceremony.name} — Finals.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Download failed.");
-    } finally {
-      setDownloadingFinals(false);
-      setDownloadProgress(null);
-    }
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
   };
 
   const deleteAlbum = async () => {
@@ -449,12 +438,9 @@ export default function AlbumPage() {
                   <button
                     className="btn-gold"
                     onClick={() => downloadFinals(activeCeremonyData)}
-                    disabled={downloadingFinals}
                     style={{ fontSize: 12 }}
                   >
-                    {downloadingFinals
-                      ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> {downloadProgress ? `Zipping ${downloadProgress.current}/${downloadProgress.total}…` : "Zipping…"}</>
-                      : <><PackageCheck size={12} /> Download Finals</>}
+                    <><PackageCheck size={12} /> Download Finals</>
                   </button>
                 )}
               </div>
