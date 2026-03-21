@@ -266,6 +266,34 @@ export default function AlbumPage() {
     }
   };
 
+  const addCeremony = async () => {
+    const name = window.prompt("New Ceremony Name:");
+    if (!name || !name.trim()) return;
+    try {
+      const res = await fetch("/api/ceremonies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), albumId }),
+      });
+      if (!res.ok) throw new Error();
+      await fetchAlbum();
+    } catch {
+      alert("Failed to add ceremony.");
+    }
+  };
+
+  const deleteCeremony = async (ceremonyId: string) => {
+    if (!confirm("Are you sure you want to delete this ceremony and ALL its photos permanently?")) return;
+    try {
+      const res = await fetch(`/api/ceremonies/${ceremonyId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      if (activeCeremony === ceremonyId) setActiveCeremony(null);
+      await fetchAlbum();
+    } catch {
+      alert("Failed to delete ceremony.");
+    }
+  };
+
   const deletePhoto = async (photoId: string) => {
     if (!confirm("Are you sure you want to delete this photo forever?")) return;
     try {
@@ -412,6 +440,13 @@ export default function AlbumPage() {
               </button>
             );
           })}
+            <button
+              onClick={addCeremony}
+              className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full"
+              style={{ fontSize: 13, fontWeight: 500 }}
+            >
+              <span style={{ fontSize: 18 }}>+</span> Add Ceremony
+            </button>
           </div>
         </aside>
 
@@ -422,9 +457,20 @@ export default function AlbumPage() {
               {/* Ceremony header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
                 <div>
-                  <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
-                    {activeCeremonyData.name}
-                  </h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
+                      {activeCeremonyData.name}
+                    </h2>
+                    <button
+                      onClick={() => deleteCeremony(activeCeremonyData.id)}
+                      title="Delete Ceremony"
+                      style={{ color: "var(--blush)", opacity: 0.6, cursor: "pointer", background: "none", border: "none", padding: 0 }}
+                      onMouseOver={(e) => (e.currentTarget.style.opacity = "1")}
+                      onMouseOut={(e) => (e.currentTarget.style.opacity = "0.6")}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                   <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2 }}>
                     {activeCeremonyData.photos.filter((p) => !p.isReturn).length} photos uploaded
                     {activeCeremonyData.photos.filter((p) => p.isReturn).length > 0 && (

@@ -502,3 +502,27 @@ None.
 - [x] `.env.local` is automatically updated with the correct `NEXT_PUBLIC_APP_URL` every time `cloudflared` restarts.
 - [x] PM2 automatically restarts the `fotohaven` process only when a *new* URL is generated.
 - [x] PM2 effectively manages the script without crashing.
+
+---
+
+## Task: Add/Delete Ceremonies & 100MB Uploads
+
+**Status:** Not started
+**Scope:** Increase maximum photo sizes to 100MB. Add controls to the album manager allowing photographers to dynamically add new ceremony folders or delete entire ceremony folders (wiping photos safely from disk).
+
+### Schema change
+None. Database cascade is correctly configured.
+
+### New API routes
+- `POST /api/ceremonies` — accepts `{ albumId, name }` to create a new ceremony.
+- `DELETE /api/ceremonies/[ceremonyId]` — fetches all nested photos, deletes the objects from `storageKey` and `thumbnailKey` respectfully, then cascades deletion.
+
+### Modified files
+- `next.config.mjs` — Increase `bodySizeLimit` to `100mb`.
+- `src/app/api/upload/route.ts` & analogues — Increment internal `MAX_SIZE` traps to `100 * 1024 * 1024`.
+- `src/app/albums/[albumId]/page.tsx` — Introduce intuitive UI controls attached to the ceremony Tab switcher for "Add" and "Delete".
+
+### Acceptance criteria
+- [x] Maximum photo upload size succeeds at safely capturing 100MB files sequentially.
+- [x] "Add Ceremony" drops a new functional folder into the album view.
+- [x] "Delete Ceremony" deletes all interior folder data off the disk, deletes the DB row, and reverts the UI safely.

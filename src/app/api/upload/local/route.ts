@@ -76,7 +76,7 @@ const UPLOAD_BASE =
 export const dynamic = "force-dynamic";
 
 // Max file size accepted by this route (matches the metadata route limit)
-const MAX_UPLOAD_BYTES = 35 * 1024 * 1024; // 35 MB
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 async function handleUpload(req: NextRequest) {
   try {
