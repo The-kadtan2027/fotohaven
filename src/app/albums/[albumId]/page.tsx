@@ -14,6 +14,7 @@ interface Photo {
   originalName: string;
   size: number;
   url: string;
+  originalUrl?: string;
   storageKey: string;
   comments?: any[];
   isReturn?: boolean;
@@ -237,7 +238,7 @@ export default function AlbumPage() {
       const folder = zip.folder(`${ceremony.name} — Finals`)!;
       await Promise.all(
         finals.map(async (photo) => {
-          const res = await fetch(photo.url);
+          const res = await fetch(photo.originalUrl || photo.url);
           const blob = await res.blob();
           folder.file(photo.originalName, blob);
         })

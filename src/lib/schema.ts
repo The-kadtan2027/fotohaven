@@ -34,6 +34,7 @@ export const photos = sqliteTable('Photo', {
   ceremonyId:   text('ceremonyId').notNull().references(() => ceremonies.id, { onDelete: 'cascade' }),
   isReturn:     integer('isReturn', { mode: 'boolean' }).notNull().default(false),
   returnOf:     text('returnOf'),
+  thumbnailKey: text('thumbnailKey'),
   createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
 

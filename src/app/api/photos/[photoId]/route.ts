@@ -22,6 +22,9 @@ export async function DELETE(
 
     // Call deleteFile(photo.storageKey)
     await deleteFile(photo.storageKey);
+    if (photo.thumbnailKey) {
+      await deleteFile(photo.thumbnailKey);
+    }
 
     // Delete the photo from the database
     await db.delete(photos).where(eq(photos.id, photoId)).run();

@@ -4,6 +4,10 @@ import { createWriteStream } from "fs";
 import path from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
+import sharp from "sharp";
+import { db } from "@/lib/db";
+import { photos } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 // POST /api/upload/local?key=<encoded-storage-key>
 // In local storage mode, the browser can't PUT directly to a filesystem path.
@@ -21,7 +25,7 @@ const UPLOAD_BASE =
 export const dynamic = "force-dynamic";
 
 // Max file size accepted by this route (matches the metadata route limit)
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB
 
 async function handleUpload(req: NextRequest) {
   try {
@@ -68,6 +72,28 @@ async function handleUpload(req: NextRequest) {
     });
 
     await pipeline(nodeReadable, sizeGuard, writeStream);
+
+    // ── Generate Thumbnail ──
+    try {
+      const parsedPath = path.parse(resolved);
+      const thumbFilename = `thumb_${parsedPath.name}.jpg`;
+      const thumbResolved = path.join(parsedPath.dir, thumbFilename);
+      // Create thumbnail key matching the storageKey format (always forward slashes)
+      const thumbKey = decodedKey.replace(parsedPath.base, thumbFilename);
+
+      await sharp(resolved)
+        .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 70 })
+        .toFile(thumbResolved);
+
+      // Update DB
+      await db
+        .update(photos)
+        .set({ thumbnailKey: thumbKey })
+        .where(eq(photos.storageKey, decodedKey));
+    } catch (thumbErr) {
+      console.error("[PUT /api/upload/local] Thumbnail generation failed:", thumbErr);
+    }
 
     return new NextResponse(null, { status: 200 });
   } catch (err: any) {

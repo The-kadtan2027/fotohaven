@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
     // Delete files from storage
     for (const photo of photoRecords) {
       await deleteFile(photo.storageKey);
+      if (photo.thumbnailKey) {
+        await deleteFile(photo.thumbnailKey);
+      }
     }
 
     // Delete photos from DB in one query

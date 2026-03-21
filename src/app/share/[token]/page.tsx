@@ -15,6 +15,7 @@ interface Photo {
   originalName: string;
   size: number;
   url: string;
+  originalUrl?: string;
   storageKey: string;
   mimeType: string;
   comments?: any[];
@@ -135,7 +136,7 @@ export default function SharePage() {
 
       await Promise.all(
         ceremony.photos.map(async (photo) => {
-          const res = await fetch(photo.url);
+          const res = await fetch(photo.originalUrl || photo.url);
           const blob = await res.blob();
           folder.file(photo.originalName, blob);
         })
@@ -168,7 +169,7 @@ export default function SharePage() {
         const folder = zip.folder(ceremony.name)!;
         await Promise.all(
           photosToDownload.map(async (photo) => {
-            const res = await fetch(photo.url);
+            const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
           })
@@ -200,7 +201,7 @@ export default function SharePage() {
         const folder = zip.folder(ceremony.name)!;
         await Promise.all(
           ceremony.photos.map(async (photo) => {
-            const res = await fetch(photo.url);
+            const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
           })
@@ -366,7 +367,7 @@ export default function SharePage() {
         const folder = zip.folder(`${ceremony.name} — Finals`)!;
         await Promise.all(
           finals.map(async (photo) => {
-            const res = await fetch(photo.url);
+            const res = await fetch(photo.originalUrl || photo.url);
             const blob = await res.blob();
             folder.file(photo.originalName, blob);
           })
@@ -828,7 +829,7 @@ export default function SharePage() {
 
             <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
               <img
-                src={lightbox.photos[lightbox.index].url}
+                src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
                 alt={lightbox.photos[lightbox.index].originalName}
                 onClick={(e) => e.stopPropagation()}
                 style={{ 

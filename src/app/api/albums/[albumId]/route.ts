@@ -41,7 +41,8 @@ export async function GET(
           photos: await Promise.all(
             ceremony.photos.map(async (photo: any) => ({
               ...photo,
-              url: await getPresignedUrl(photo.storageKey),
+              url: await getPresignedUrl(photo.thumbnailKey || photo.storageKey),
+              originalUrl: await getPresignedUrl(photo.storageKey),
             }))
           ),
         }))
@@ -83,6 +84,9 @@ export async function DELETE(
     for (const ceremony of album.ceremonies) {
       for (const photo of ceremony.photos) {
         await deleteFile(photo.storageKey);
+        if (photo.thumbnailKey) {
+          await deleteFile(photo.thumbnailKey);
+        }
       }
     }
 

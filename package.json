@@ -25,6 +25,7 @@
     "react-dom": "^19",
     "react-dropzone": "14.2",
     "resend": "^6.9.3",
+    "sharp": "^0.34.5",
     "uuid": "9.0"
   },
   "devDependencies": {

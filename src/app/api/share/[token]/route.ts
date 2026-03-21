@@ -86,7 +86,8 @@ export async function GET(
           photos: await Promise.all(
             ceremony.photos.map(async (photo: any) => ({
               ...photo,
-              url: await getPresignedUrl(photo.storageKey, 7200),
+              url: await getPresignedUrl(photo.thumbnailKey || photo.storageKey, 7200),
+              originalUrl: await getPresignedUrl(photo.storageKey, 7200),
             }))
           ),
         }))

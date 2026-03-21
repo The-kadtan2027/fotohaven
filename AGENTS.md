@@ -368,3 +368,46 @@ None.
 - [x] Uploads retry up to 3 times with exponential backoff on network errors
 - [x] Max file size reduced to 25 MB across all routes
 - [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Thumbnail Previews for Fast Gallery Loading
+
+**Status:** Completed
+**Scope:** Generate smaller (800px) JPEG thumbnails of uploaded photos to serve in gallery grids, while retaining original high-resolution files for downloads and lightbox viewing.
+
+### Schema change
+- Added `thumbnailKey` (nullable `String`) to the `Photo` model.
+
+### Modified files
+
+#### `next.config.mjs`
+- Increased `experimental.serverActions.bodySizeLimit` to `30mb`.
+
+#### `src/app/api/upload/route.ts` & `src/app/api/share/[token]/upload/route.ts`
+- Increased `MAX_SIZE` from 25 MB → 30 MB.
+
+#### `src/app/api/upload/local/route.ts`
+- Increased `MAX_UPLOAD_BYTES` to 30 MB.
+- Added `sharp` to process a downscaled `thumb_` prefixed copy right after stream ingestion.
+- Updated database to write the `thumbnailKey` after `sharp` processing completes.
+
+#### `src/app/api/share/[token]/route.ts` & `src/app/api/albums/[albumId]/route.ts`
+- Updated `photos` JSON mapping to return `url` pointing to the presigned `thumbnailKey` (or falling back to `storageKey`) and `originalUrl` pointing to the full-resolution `storageKey`.
+- Updated album deletion routes to also `deleteFile(photo.thumbnailKey)`.
+
+#### `src/app/api/photos/[photoId]/route.ts` & `src/app/api/photos/delete-batch/route.ts`
+- Updated to delete `photo.thumbnailKey` from storage alongside `photo.storageKey`.
+
+#### UI View Pages
+- Modified `Photo` interface to include `originalUrl?`.
+- `share/[token]/page.tsx` & `albums/[albumId]/page.tsx` now use `originalUrl` for downloading zip archives.
+- Lightbox view uses `originalUrl` when available to render high resolution in full screen.
+
+### Acceptance criteria
+- [x] Max upload size successfully bumped to 30MB across the board.
+- [x] Local storage creates a `thumb_` prefixed file next to the original file.
+- [x] Database is successfully updated with `thumbnailKey`.
+- [x] Gallery grids load the thumbnail version (faster sizes) and Zip downloads/Lightbox use the original high quality version.
+- [x] Deleting a photo also deletes the thumbnail from the filesystem.
+- [x] TypeScript compiles without failing.
