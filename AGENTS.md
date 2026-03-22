@@ -526,3 +526,115 @@ None. Database cascade is correctly configured.
 - [x] Maximum photo upload size succeeds at safely capturing 100MB files sequentially.
 - [x] "Add Ceremony" drops a new functional folder into the album view.
 - [x] "Delete Ceremony" deletes all interior folder data off the disk, deletes the DB row, and reverts the UI safely.
+
+---
+
+## Task: Photographer login / logout
+
+**Status:** Completed  
+**Scope:** Add real authentication so only a registered photographer can access the admin dashboard (`/`, `/albums/*`). Public share links remain unauthenticated.
+
+### New dependency
+`jose` — Edge-compatible JWT library (works in Next.js middleware which runs on the Edge runtime).
+
+### New env vars (add to `.env.local`)
+```env
+JWT_SECRET=            # 32+ char random string (openssl rand -hex 32)
+ADMIN_USERNAME=        # e.g. "admin"
+ADMIN_PASSWORD=        # plain-text, only used by seed script to hash + insert
+```
+
+### Schema change (`src/lib/schema.ts`)
+New table — append after existing tables:
+```typescript
+export const photographers = sqliteTable('Photographer', {
+  id:           text('id').primaryKey(),
+  username:     text('username').notNull().unique(),
+  passwordHash: text('passwordHash').notNull(),
+  createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+After schema edit run: `npm run db:generate && npm run db:push`
+
+### New API routes
+
+#### `POST /api/auth/login` — `src/app/api/auth/login/route.ts`
+- Body: `{ username, password }`
+- Looks up `photographers` table by `username` (via Drizzle + `db.ts`)
+- Verifies password with `bcryptjs.compare()`
+- On success: creates a JWT (signed with `JWT_SECRET`, 7-day expiry, payload: `{ sub: photographer.id, username }`) using `jose`, sets it as an `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` cookie named `session`
+- Returns `200 { ok: true }`
+- On failure: returns `401 { error: "Invalid credentials" }`
+
+#### `POST /api/auth/logout` — `src/app/api/auth/logout/route.ts`
+- Clears the `session` cookie (set `maxAge=0`)
+- Returns `200 { ok: true }`
+
+#### `GET /api/auth/me` — `src/app/api/auth/me/route.ts`
+- Reads `session` cookie, verifies JWT with `jose`
+- Returns `200 { id, username }` if valid
+- Returns `401 { error: "Not authenticated" }` if missing/invalid
+
+### Middleware changes (`src/middleware.ts`)
+Extend the existing Edge middleware to:
+- Keep the existing `[API]` logging for `/api/*` routes
+- Guard browser routes: `/`, `/albums`, `/albums/*` — if no valid `session` cookie, redirect to `/login`
+- Guard API routes: `/api/albums`, `/api/albums/*`, `/api/upload`, `/api/upload/*`, `/api/photos`, `/api/photos/*`, `/api/ceremonies`, `/api/ceremonies/*` — if no valid `session` cookie, return `401 { error: "Unauthorized" }`
+- **Do NOT guard**: `/api/auth/*`, `/api/share/*`, `/api/comments/*`, `/api/files/*`, `/login`, `/share/*`
+- JWT verification uses `jose` (Edge-compatible) — **no** `better-sqlite3` or Node-only imports
+- Update `config.matcher` to cover both `/api/:path*` and the admin pages
+
+### New page: `src/app/login/page.tsx`
+- Simple username + password form styled in the existing FotoHaven aesthetic (Cormorant Garamond heading, DM Sans body, dark palette)
+- On submit: `POST /api/auth/login` with JSON body
+- On success (200): `router.push('/')`
+- On failure (401): show inline error message, allow retry
+- Show a subtle "FotoHaven" branding / logo
+
+### Seed script: `scripts/seed.ts`
+- Reads `ADMIN_USERNAME` and `ADMIN_PASSWORD` from `process.env` (loaded from `.env.local`)
+- Hashes the password with `bcryptjs`
+- Upserts one `Photographer` record into the database (insert if not exists, update hash if exists)
+- Wire up in `package.json` as: `"seed": "npx tsx scripts/seed.ts"`
+
+### Modified files summary
+| File | Change |
+|------|--------|
+| `src/lib/schema.ts` | Add `photographers` table |
+| `src/middleware.ts` | Add JWT verification + route guarding |
+| `package.json` | Add `jose` dep, add `"seed"` script |
+| `.env.example` (if it exists) | Add `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` |
+
+### New files summary
+| File | Purpose |
+|------|---------|
+| `src/app/api/auth/login/route.ts` | Login endpoint |
+| `src/app/api/auth/logout/route.ts` | Logout endpoint |
+| `src/app/api/auth/me/route.ts` | Session check endpoint |
+| `src/app/login/page.tsx` | Login UI page |
+| `scripts/seed.ts` | One-shot admin user seeder |
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes needed (already exports the Drizzle client)
+- `src/app/share/*` — share links remain public
+- `src/app/api/share/*` — share API remains public
+- `src/app/api/comments/*` — comments remain public (honour-system author field)
+
+### Acceptance criteria
+- [x] `jose` package is installed and used for JWT in middleware (Edge-compatible)
+- [x] `photographers` table exists in schema with `id`, `username`, `passwordHash`, `createdAt`
+- [x] `POST /api/auth/login` returns 200 + sets HttpOnly `session` cookie on valid credentials
+- [x] `POST /api/auth/login` returns 401 on invalid credentials
+- [x] `POST /api/auth/logout` clears the session cookie
+- [x] `GET /api/auth/me` returns photographer info when authenticated
+- [x] Unauthenticated browser request to `/` redirects to `/login`
+- [x] Unauthenticated browser request to `/albums/*` redirects to `/login`
+- [x] Unauthenticated API request to `/api/albums` returns 401
+- [x] Share links (`/share/*`, `/api/share/*`) work without any login
+- [x] Login page has proper FotoHaven styling (not a plain HTML form)
+- [x] `scripts/seed.ts` creates a photographer from `ADMIN_USERNAME` + `ADMIN_PASSWORD` env vars
+- [x] `npm run seed` is wired up in `package.json`
+- [x] `npx tsc --noEmit` passes with zero errors
+

@@ -46,6 +46,13 @@ export const comments = sqliteTable('Comment', {
   createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const photographers = sqliteTable('Photographer', {
+  id:           text('id').primaryKey(),
+  username:     text('username').notNull().unique(),
+  passwordHash: text('passwordHash').notNull(),
+  createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+
 export const albumsRelations = relations(albums, ({ many }) => ({
   ceremonies: many(ceremonies),
 }));
