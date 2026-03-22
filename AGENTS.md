@@ -729,3 +729,61 @@ isSelected?: boolean;
 - [x] Album manager `PhotoCard` shows a gold star overlay on client-selected photos
 - [x] Download-selected on the share page correctly uses the persisted selection as its default
 - [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Admin dashboard
+
+**Status:** Completed  
+**Scope:** A UI-only upgrade to the existing album list (`src/app/page.tsx`). No new API routes. Incorporates auth state and client selection summaries.
+
+### Architectural approach (`src/app/page.tsx`)
+- Since the spec mandates "All DB access indirectly via existing API routes, not direct DB calls from page components", and fetching intra-app API routes from Server Components requires passing session cookies and resolving absolute URLs (which is brittle), `page.tsx` will remain a `"use client"` component.
+- This allows natural interaction with the `GET /api/albums` and `GET /api/auth/me` protected routes, and instant UI updates after deletions.
+
+### Dependencies
+- **Auth (Feature 1)**: The page will fetch `GET /api/auth/me` on mount. If it returns 401, redirect to `/login`.
+- **Selections (Feature 4)**: The page will calculate total selections by summing `isSelected === true` across all photos in all ceremonies in the `GET /api/albums` response.
+
+### UI changes (`src/app/page.tsx`)
+
+#### Header
+- Show photographer's username retrieved from `/api/auth/me`.
+- Add a **Logout** button that calls `POST /api/auth/logout` and redirects to `/login`.
+- Maintain existing "FotoHaven" branding and "New Album" CTA.
+
+#### Stats Row (New)
+- Top-level summary cards below the hero text:
+  - **Total Albums**: `albums.length`
+  - **Total Photos**: Sum of all photo counts
+  - **Client Selections**: Sum of all `isSelected` photos across all albums.
+
+#### Album Cards Update
+Enhance the existing card map (`albums.map`) to include:
+- **Title and Client Name** (existing)
+- **Ceremony Count and Photo Count** (existing)
+- **First Viewed Status**:
+  - If `firstViewedAt` exists, show "Viewed on [date]"
+  - Else show "Not yet viewed".
+- **Expiry Badge**:
+  - Green if >7 days remaining until `expiresAt`.
+  - Amber if ≤7 days remaining.
+  - Red if expired (or expiring today).
+- **Selection Summary**: "Client selected N of M photos" (derive N from `isSelected` photos, M from non-`isReturn` photos).
+- **Action Buttons**:
+  - **Copy Link**: Existing clipboard functionality.
+  - **Manage**: Links to `/albums/[albumId]`.
+  - **Delete**: Existing prompt and DELETE call.
+
+#### Empty State
+- Show a friendly "No albums yet" prompt (keep existing `EmptyState` component or polish it).
+
+### Acceptance criteria
+- [x] Dashboard is restricted to authenticated photographers (redirects to `/login` if `/api/auth/me` fails).
+- [x] Header shows the photographer's username and a working Logout button.
+- [x] Stats row correctly aggregates total albums, total photos, and total `isSelected` client selections.
+- [x] Album cards display `firstViewedAt` status cleanly.
+- [x] Album cards display color-coded expiry badges based on days remaining.
+- [x] Album cards show "Client selected N of M photos" accurately deriving from the API payload.
+- [x] `npx tsc --noEmit` passes with zero errors.
+
