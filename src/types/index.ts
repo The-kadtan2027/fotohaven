@@ -17,6 +17,7 @@ export interface Photo {
   ceremonyId: string;
   isReturn?: boolean;
   returnOf?: string | null;
+  isSelected?: boolean;
 }
 
 export interface ReturnUploadPayload {

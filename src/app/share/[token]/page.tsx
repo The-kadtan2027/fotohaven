@@ -21,6 +21,7 @@ interface Photo {
   comments?: any[];
   isReturn?: boolean;
   returnOf?: string | null;
+  isSelected?: boolean;
 }
 
 type ReturnUploadStatus = "pending" | "uploading" | "done" | "error";
@@ -91,6 +92,14 @@ export default function SharePage() {
       setAlbum(data);
       setActiveCeremony(data.ceremonies[0]?.id ?? null);
       setPasswordRequired(false);
+      // Pre-populate from persisted DB selections
+      const preSelected = new Set<string>();
+      for (const ceremony of data.ceremonies ?? []) {
+        for (const photo of ceremony.photos ?? []) {
+          if (photo.isSelected) preSelected.add(photo.id);
+        }
+      }
+      setSelectedPhotos(preSelected);
     } catch (err: any) {
       setError(err.message || "This link is invalid or has expired.");
       if (providedPassword) setAuthError("Incorrect password. Please try again.");
@@ -106,8 +115,15 @@ export default function SharePage() {
   const toggleSelect = (photoId: string) => {
     setSelectedPhotos((prev) => {
       const next = new Set(prev);
-      if (next.has(photoId)) next.delete(photoId);
-      else next.add(photoId);
+      const nowSelected = !next.has(photoId);
+      if (nowSelected) next.add(photoId);
+      else next.delete(photoId);
+      // Persist to DB (fire-and-forget, optimistic)
+      fetch(`/api/photos/${photoId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isSelected: nowSelected }),
+      }).catch((err) => console.error('[toggleSelect] PATCH failed:', err));
       return next;
     });
   };
@@ -442,6 +458,11 @@ export default function SharePage() {
           </h1>
           <p style={{ color: "rgba(250,247,242,0.65)", fontSize: 15, marginBottom: 32 }}>
             Shared by {album.clientName} · {totalPhotos} photos · {totalFinals > 0 ? `${totalFinals} finals · ` : ""}{album.ceremonies.length} ceremonies
+            {selectedPhotos.size > 0 && (
+              <span style={{ color: 'var(--gold)', marginLeft: 8 }}>
+                · ★ Selected: {selectedPhotos.size}
+              </span>
+            )}
           </p>
 
           {/* Download actions */}

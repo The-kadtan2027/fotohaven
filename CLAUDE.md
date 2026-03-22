@@ -28,6 +28,7 @@ Always keep ARM compatibility and low memory footprint in mind.
 | resend | ^6.9.3 | Email notifications |
 | bcryptjs | ^3.0.3 | Password hashing |
 | archiver | ^7.0.1 | Server-side ZIP Streaming |
+| jose | ^6.x | JWT (Edge-compatible, used in middleware) |
 | @aws-sdk/client-s3 | 3.540.x | Cloudflare R2 / Local Storage |
 | lucide-react | 0.468.x | Icons |
 | uuid | 9.0.x | ID generation |
@@ -46,10 +47,14 @@ fotohaven/
 │   │   └── email.ts           ← Email utility (Resend)
 │   ├── app/                   ← Next.js App Router
 │   │   ├── api/
-│   │   │   ├── albums/        ← CRUD for albums
-│   │   │   ├── share/         ← Public gallery data (password guarded)
+│   │   │   ├── albums/        ← CRUD for albums + download
+│   │   │   ├── share/         ← Public gallery data (password guarded, upload-returns, download)
 │   │   │   ├── upload/        ← S3/Local upload handler
-│   │   │   └── comments/      ← Per-photo comments (POST/GET)
+│   │   │   ├── photos/        ← Photo DELETE (auth), PATCH isSelected (public), batch-delete
+│   │   │   ├── ceremonies/    ← Add/Delete ceremony folders
+│   │   │   ├── auth/          ← login, logout, me (JWT cookie)
+│   │   │   ├── comments/      ← Per-photo comments (POST/GET)
+│   │   │   └── files/         ← Local file serving (Range request support)
 │   │   ├── share/[token]/     ← Public gallery UI (challenge screen)
 │   │   └── albums/[id]/       ← Admin manage view
 │   └── types/                 ← Shared TS interfaces
@@ -86,6 +91,9 @@ fotohaven/
 - `storageKey`: Path in R2/Local storage
 - `thumbnailKey`: Path to 800px downscaled JPEG (optional)
 - `ceremonyId`: Foreign key to Ceremony (Cascade)
+- `isReturn`: Boolean — true = edited final delivered by photographer
+- `returnOf`: Optional photoId linking to original (nullable)
+- `isSelected`: Boolean (default false) — client-marked selection, persistent across sessions
 - `comments`: Relation to Comment table
 
 ### Comment
@@ -94,6 +102,13 @@ fotohaven/
 - `author`: "photographer" | "client"
 - `photoId`: Foreign key to Photo (Cascade)
 
+### Photographer
+- `id`: UUID string
+- `username`: Unique username (for admin login)
+- `passwordHash`: bcrypt hash
+- `createdAt`: Timestamp
+- Seed with `npm run seed` using `ADMIN_USERNAME` + `ADMIN_PASSWORD` env vars
+
 ---
 
 ## API Contracts
@@ -101,7 +116,27 @@ fotohaven/
 ### GET /api/share/:token
 - **Guard**: Returns `401 { passwordRequired: true }` if album has password and `Authorization: Bearer <pass>` header is missing.
 - **Trigger**: Sets `firstViewedAt` and sends Resend notification on first successful load.
-- **Response**: Full gallery data including comments.
+- **Response**: Full gallery data including comments and `isSelected` per photo.
+
+### PATCH /api/photos/:photoId
+- **Auth**: **Not required** — called from the unauthenticated share page.
+- **Body**: `{ isSelected: boolean }`
+- **Response**: `{ ok: true }` or `404`.
+- **Purpose**: Persists client photo selection to the database.
+
+### DELETE /api/photos/:photoId
+- **Auth**: Required (session cookie, guarded by middleware).
+- **Effect**: Deletes file from storage + DB row.
+
+### POST /api/auth/login
+- **Body**: `{ username, password }`
+- **Response**: Sets `session` HttpOnly JWT cookie (7-day expiry).
+
+### POST /api/auth/logout
+- **Effect**: Clears `session` cookie.
+
+### GET /api/auth/me
+- **Response**: `{ id, username }` if JWT valid, else `401`.
 
 ### POST /api/comments
 - **Body**: `{ photoId, body, author }`
@@ -109,6 +144,12 @@ fotohaven/
 
 ### GET /api/comments?photoId=uuid
 - **Response**: List of comments for the photo.
+
+### Middleware guards (src/middleware.ts)
+- **Redirects** unauthenticated browser requests to `/` and `/albums/*` → `/login`.
+- **Returns 401** for unauthenticated API calls to `/api/albums`, `/api/upload`, `/api/ceremonies`.
+- **`/api/photos` PATCH + GET are public** (client selection from share page). DELETE is guarded.
+- **Public**: `/api/auth/*`, `/api/share/*`, `/api/comments/*`, `/api/files/*`, `/login`, `/share/*`.
 
 ---
 

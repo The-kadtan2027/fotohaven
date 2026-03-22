@@ -39,7 +39,9 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Drag-and-drop upload** — browser uploads directly to storage (R2 or local phone disk)
 - **Shareable links** — token-based URLs with optional expiry date
 - **Password-protected links** — bcrypt-hashed album passwords with a client-side challenge screen
+- **Photographer login** — JWT-based session (HttpOnly cookie) protecting the admin dashboard
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
+- **Client photo selection** — clients star/select photos on the share page; selections persist across sessions and are visible to the photographer in the album manager
 - **Batch photo management** — select multiple photos to delete or download as a ZIP
 - **Server-side ZIP streaming** — large albums download efficiently without crashing mobile browsers
 - **Fast thumbnail generation** — uploads are automatically downscaled for quick gallery viewing; original high-res photos are kept for ZIP downloads

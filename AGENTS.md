@@ -638,3 +638,94 @@ Extend the existing Edge middleware to:
 - [x] `npm run seed` is wired up in `package.json`
 - [x] `npx tsc --noEmit` passes with zero errors
 
+---
+
+## Task: Photo selection by client
+
+**Status:** Completed  
+**Scope:** Client can star/select individual photos on the share page. Selections persist in the database so the photographer can see "Client has selected N of M photos" in the album manager.
+
+### Schema change (`src/lib/schema.ts`)
+Add `isSelected` to the `photos` table:
+```typescript
+isSelected: integer('isSelected', { mode: 'boolean' }).notNull().default(false),
+```
+
+After schema edit run: `npm run db:generate && npm run db:push`
+
+### New API route
+
+#### `PATCH /api/photos/[photoId]` — `src/app/api/photos/[photoId]/route.ts`
+Add a `PATCH` handler to the existing file (which already has `DELETE`):
+- Body: `{ isSelected: boolean }`
+- Look up the photo by `photoId`. If not found, return `404`.
+- Update `photos.isSelected` for that record.
+- Return `200 { ok: true }`.
+- **No auth required** — called from the unauthenticated share page.
+
+### API changes (data mapping)
+
+#### `GET /api/albums/[albumId]/route.ts`
+- In the photo spread inside `albumWithUrls`, pass through `isSelected` from the DB row (it's already included via the Drizzle query spread — no extra query needed, just confirm it's not stripped).
+
+#### `GET /api/share/[token]/route.ts`
+- Same as above — `isSelected` is included in the Drizzle result and will be spread into the photo object automatically; no code change needed unless the field is explicitly omitted.
+
+### Types (`src/types/index.ts`)
+Add `isSelected` to the `Photo` interface:
+```typescript
+isSelected?: boolean;
+```
+
+### Share page UI (`src/app/share/[token]/page.tsx`)
+
+**Current state:** The page already has a `selectedPhotos: Set<string>` state and `toggleSelect()` function wired to the `GalleryPhoto` checkbox — but this is ephemeral (lost on refresh) and used only for download selection.
+
+**Changes needed:**
+1. Add `isSelected` to the local `Photo` interface (line ~14).
+2. On album load, initialise `selectedPhotos` from `photo.isSelected === true` across all ceremonies — so the set is pre-populated from the DB on mount.
+3. Extend `toggleSelect(photoId)` to also call `PATCH /api/photos/:id` with `{ isSelected: !prev.has(photoId) }` — fire-and-forget (optimistic update, log error if it fails).
+4. Add a live counter in the hero header — e.g. alongside the existing `"{totalPhotos} photos"` line, show `· Client selected: N` when `selectedPhotos.size > 0`. Alternatively, add a subtle sticky badge. Keep it unobtrusive.
+5. No changes to download logic — `downloadSelected()` already uses `selectedPhotos` which will now reflect persisted selections.
+
+### Album manager UI (`src/app/albums/[albumId]/page.tsx`)
+
+**Current state:** The album page shows originals count and Finals badge on ceremony tabs. The PhotoCard shows checkboxes for bulk-delete selection only.
+
+**Changes needed:**
+1. Add `isSelected` to the local `Photo` interface (line ~12).
+2. Add a "Client selected" summary line in the ceremony header area — e.g.: `"Client has selected {N} of {M} original photos."` — derived from `activeCeremonyData.photos.filter(p => !p.isReturn && p.isSelected).length`. Show only when N > 0.
+3. Add a small gold star `★` overlay (bottom-right corner of each photo card) when `photo.isSelected === true` in `PhotoCard`. This is read-only on the admin side — no click handler needed. Position it opposite the existing comment dot indicator (top-right) to avoid overlap.
+4. In the ceremony sidebar tab, optionally add a "S:N" micro-badge (like the FINALS badge) when any photo in that ceremony is selected.
+
+### Download route — no changes needed
+`POST /api/share/[token]/download` already accepts any `photoIds` array from the client. The client's persistent selection is just a pre-populated starting point for the existing download-selected flow. ✅ Confirmed: no change to the download route.
+
+### Modified files summary
+| File | Change |
+|------|--------|
+| `src/lib/schema.ts` | Add `isSelected` boolean field to `photos` table |
+| `src/app/api/photos/[photoId]/route.ts` | Add `PATCH` handler |
+| `src/app/api/albums/[albumId]/route.ts` | Confirm `isSelected` passes through (no-op if spread includes it) |
+| `src/app/api/share/[token]/route.ts` | Same confirmation |
+| `src/types/index.ts` | Add `isSelected?: boolean` to `Photo` |
+| `src/app/share/[token]/page.tsx` | Pre-populate selection from DB, call PATCH on toggle, show counter |
+| `src/app/albums/[albumId]/page.tsx` | "Client selected N of M" summary + star overlay on PhotoCard |
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/app/api/share/[token]/download/route.ts` — no changes
+- `src/app/api/photos/delete-batch/route.ts` — no changes
+
+### Acceptance criteria
+- [x] `isSelected` column exists in the `Photo` DB table (boolean, default false)
+- [x] `PATCH /api/photos/[photoId]` with `{ isSelected: true/false }` persists the value
+- [x] `PATCH /api/photos/[photoId]` returns 404 if the photo does not exist
+- [x] Share page checkboxes pre-populate from `photo.isSelected` on load (survives refresh)
+- [x] Clicking a checkbox on the share page calls PATCH optimistically (no spinner, instant UI update)
+- [x] Share page shows a live "Selected: N" counter when any photos are selected
+- [x] Album manager shows "Client has selected N of M original photos" when N > 0
+- [x] Album manager `PhotoCard` shows a gold star overlay on client-selected photos
+- [x] Download-selected on the share page correctly uses the persisted selection as its default
+- [x] `npx tsc --noEmit` passes with zero errors

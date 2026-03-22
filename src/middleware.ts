@@ -34,6 +34,9 @@ async function verifySession(request: NextRequest): Promise<boolean> {
   }
 }
 
+// Methods on /api/photos/* that don't require auth (called from share page)
+const PUBLIC_PHOTO_METHODS = new Set(['PATCH', 'GET']);
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -52,6 +55,10 @@ export async function middleware(request: NextRequest) {
   // Guard API routes — return 401 JSON for unauthenticated requests
   for (const prefix of GUARDED_API_PREFIXES) {
     if (pathname.startsWith(prefix)) {
+      // /api/photos PATCH and GET are public (client selection from share page)
+      if (prefix === '/api/photos' && PUBLIC_PHOTO_METHODS.has(request.method)) {
+        return NextResponse.next();
+      }
       const isValid = await verifySession(request);
       if (!isValid) {
         return NextResponse.json(
