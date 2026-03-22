@@ -27,6 +27,7 @@ Always keep ARM compatibility and low memory footprint in mind.
 | better-sqlite3 | ^12.8.0 | SQLite Driver (Native Termux compatibility) |
 | resend | ^6.9.3 | Email notifications |
 | bcryptjs | ^3.0.3 | Password hashing |
+| archiver | ^7.0.1 | Server-side ZIP Streaming |
 | @aws-sdk/client-s3 | 3.540.x | Cloudflare R2 / Local Storage |
 | lucide-react | 0.468.x | Icons |
 | uuid | 9.0.x | ID generation |
@@ -130,10 +131,10 @@ pm2 start ecosystem.config.js
 ---
 
 ## Android hosting context
-- **Environment**: Termux + Alpine (musl). Tailscale Funnel or Cloudflare Tunnel for exposure.
+- **Environment**: Ubuntu 24.04 LTS (Chroot on rooted or PRoot via `ubuntu-proot-setup.sh`) OR Termux + Alpine (musl). Tailscale Funnel or Cloudflare Tunnel for exposure.
 - **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries). `db.ts` uses WAL mode and custom timeouts for concurrency.
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
-- **Uploads**: Hard limit of **30MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
+- **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
 
 ---

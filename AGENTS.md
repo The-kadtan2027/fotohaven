@@ -450,7 +450,7 @@ None.
 
 ## Task: Server-Side ZIP Streaming
 
-**Status:** Not started
+**Status:** Completed
 **Scope:** Replace client-side `JSZip` generation with server-side on-the-fly streaming using `archiver`. This prevents mobile browser crashes when downloading large albums.
 
 ### Schema change
@@ -476,17 +476,17 @@ None.
   - This allows the browser to natively handle the download stream and show its own progress bar, completely wiping out browser memory usage.
 
 ### Acceptance criteria
-- [ ] `JSZip` dependency removed or no longer loaded in browser
-- [ ] Zips are generated strictly on the server and streamed using `archiver`
-- [ ] Share page `Download All` and `Download Selected` triggers native browser download
-- [ ] Album manager `Download Finals` triggers native browser download
-- [ ] Zip generation uses `{ zlib: { level: 0 } }` to prevent CPU stalling on large JPEGs
+- [x] `JSZip` dependency removed or no longer loaded in browser
+- [x] Zips are generated strictly on the server and streamed using `archiver`
+- [x] Share page `Download All` and `Download Selected` triggers native browser download
+- [x] Album manager `Download Finals` triggers native browser download
+- [x] Zip generation uses `{ zlib: { level: 0 } }` to prevent CPU stalling on large JPEGs
 
 ---
 
 ## Task: Automate Cloudflare Tunnel URL
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** Automatically capture the randomized Quick Tunnel URL on startup, save it to `.env.local`, and restart the web server to reflect the newly assigned public URL.
 
 ### Schema change
@@ -507,7 +507,7 @@ None.
 
 ## Task: Add/Delete Ceremonies & 100MB Uploads
 
-**Status:** Not started
+**Status:** Completed
 **Scope:** Increase maximum photo sizes to 100MB. Add controls to the album manager allowing photographers to dynamically add new ceremony folders or delete entire ceremony folders (wiping photos safely from disk).
 
 ### Schema change

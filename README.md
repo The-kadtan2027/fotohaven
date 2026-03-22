@@ -40,7 +40,8 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Shareable links** — token-based URLs with optional expiry date
 - **Password-protected links** — bcrypt-hashed album passwords with a client-side challenge screen
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
-- **Batch photo management** — select multiple photos to download as a ZIP or permanently delete
+- **Batch photo management** — select multiple photos to delete or download as a ZIP
+- **Server-side ZIP streaming** — large albums download efficiently without crashing mobile browsers
 - **Fast thumbnail generation** — uploads are automatically downscaled for quick gallery viewing; original high-res photos are kept for ZIP downloads
 - **Per-photo comments** — photographer and client can annotate individual photos with notes
 - **Email notifications** — photographer receives an email on first gallery view (via Resend)
@@ -127,7 +128,7 @@ fotohaven/
 
 ## Android Phone Hosting Guide
 
-Your old Android phone is a capable ARM Linux machine:
+Your old Android phone is a capable ARM Linux machine (runs natively in Termux, or inside an Ubuntu PRoot/Chroot environment for better compatibility via `infra/android/ubuntu-proot-setup.sh`):
 - Multi-core CPU — runs Node.js comfortably
 - 2–4 GB RAM — Next.js uses ~150–250 MB
 - Built-in battery = free UPS (stays up during power cuts)
@@ -401,8 +402,8 @@ cloudflared tunnel --config ~/fotohaven/infra/android/cloudflared-config.yml run
 
 Your app is now live at `https://fotohaven.yourdomain.com` 🎉
 
-> **Quick test with no domain:** `cloudflared tunnel --url http://localhost:3000`
-> Instantly prints a `*.trycloudflare.com` URL — share it and it works immediately.
+> **Quick test with no domain (Automated):**
+> Run `bash ~/fotohaven/infra/android/start-cloudflare.sh` to automatically start a Quick Tunnel, grab the new `*.trycloudflare.com` URL, inject it into `.env.local`, and restart Next.js to apply the correct base URL.
 
 #### Option B — Tailscale Funnel (recommended for experiments)
 
