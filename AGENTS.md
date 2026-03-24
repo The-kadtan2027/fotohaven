@@ -927,7 +927,7 @@ inference ever runs on the Android device.
 ### Modified files
 - `src/app/albums/[albumId]/page.tsx`
   - Import and render <FaceProcessor> passing photos with faceProcessed=false
-  - Pass album's LOCAL storage paths so FaceProcessor can fetch image URLs
+  - Pass API-resolved photo URLs so FaceProcessor can fetch browser-accessible image data
 
 ### Existing files — DO NOT touch yet (cleanup phase comes after validation)
 - `scripts/process-faces.ts` — keep, disable via PM2 only
@@ -942,6 +942,15 @@ inference ever runs on the Android device.
 - [x] Guest match route returns correct photos using browser-generated descriptors
 - [x] Processing does not block album page UI (runs in background)
 - [x] Progress indicator shows and is dismissible
+
+### Critical implementation note (do not regress)
+- Browser `face-api.js` does **not** accept `ImageBitmap` directly as net input.
+- Required flow in `FaceProcessor`:
+  - fetch photo URL -> blob -> `createImageBitmap(blob)`
+  - draw bitmap onto `HTMLCanvasElement`
+  - call `detectAllFaces(canvas, ...)`
+- If this is violated, runtime error appears:
+  - `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`
 
 ### Cleanup phase (do NOT start until all validation criteria are checked off)
 - Remove scripts/process-faces.ts

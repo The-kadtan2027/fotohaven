@@ -726,6 +726,40 @@ Example:
 PROCESS_FACES_SOURCE=thumbnail PROCESS_FACES_LIMIT=40 npm run faces:process
 ```
 
+**Browser-side face descriptor extraction (new default path)**
+
+Use this validation flow after pull/redeploy to verify end-to-end browser processing:
+
+1. Start app and open any album manager page (`/albums/[albumId]`) on laptop/desktop browser.
+2. Open browser DevTools Console and confirm:
+   - `[FaceProcessor] Loading models from /models...`
+   - `[FaceProcessor] Models loaded.`
+3. Confirm floating indicator appears at bottom-right:
+   - `Processing faces (N/Total)`
+4. Keep tab open until at least 10 photos are processed. You should see per-photo logs:
+   - `[FaceProcessor] Processed <photoId>: <count> face(s)`
+5. Verify DB counters on server:
+```bash
+node - <<'JS'
+const Database=require('better-sqlite3');
+const db=new Database('local.db');
+const total=db.prepare("select count(*) as c from Photo where isReturn=0").get().c;
+const pending=db.prepare("select count(*) as c from Photo where isReturn=0 and faceProcessed=0").get().c;
+const faces=db.prepare("select count(*) as c from PhotoFace").get().c;
+console.log({ total, pending, faces });
+JS
+```
+6. Verify guest matching still works (`/share/[token]/guest`) with processed photos.
+
+Important implementation detail: face-api.js browser detection must receive `HTMLImageElement`/`HTMLCanvasElement`.
+`ImageBitmap` is not a valid net input. In `FaceProcessor`, always draw bitmap to a canvas and run detection on that canvas.
+
+If you see this error in console:
+- `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`
+
+Then hard refresh first. If it persists, confirm `src/app/albums/[albumId]/FaceProcessor.tsx` still does:
+- `createImageBitmap(blob)` -> draw to `document.createElement('canvas')` -> `detectAllFaces(canvas, ...)`
+
 ---
 
 ## Standard Setup (PC / VPS)

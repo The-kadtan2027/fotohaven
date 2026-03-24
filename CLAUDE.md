@@ -124,6 +124,15 @@ fotohaven/
 - **Response**: `{ ok: true }` or `404`.
 - **Purpose**: Persists client photo selection to the database.
 
+### POST /api/photos/:photoId/faces
+- **Auth**: Required (photographer session cookie / JWT).
+- **Body**: `{ faces: Array<{ descriptor: number[], boundingBox: { x, y, width, height } }> }`
+- **Effect**:
+  - Replaces existing `PhotoFace` rows for the photo (idempotent overwrite).
+  - Inserts new descriptors and bounding boxes.
+  - Sets `Photo.faceProcessed = true`.
+- **Purpose**: Stores browser-extracted descriptors; no server-side neural inference.
+
 ### DELETE /api/photos/:photoId
 - **Auth**: Required (session cookie, guarded by middleware).
 - **Effect**: Deletes file from storage + DB row.
@@ -177,7 +186,11 @@ pm2 start ecosystem.config.js
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
+- **Face processing architecture**:
+  - Primary path is browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
+  - Browser loads models from `/public/models` with `loadFromUri('/models')`.
+  - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
+  - Server only stores descriptors and runs cosine distance matching; heavy inference is offloaded from Android phone CPU.
 
 ---
-
 

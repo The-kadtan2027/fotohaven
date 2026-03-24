@@ -28,6 +28,19 @@ async function ensureModelsLoaded() {
   await modelLoadPromise;
 }
 
+async function blobToImageElement(blob: Blob): Promise<HTMLImageElement> {
+  const objectUrl = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = objectUrl;
+
+  try {
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export default function FaceProcessor({ photos }: FaceProcessorProps) {
   const queue = useMemo(
     () => photos.filter((photo) => !photo.faceProcessed),
@@ -69,57 +82,61 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
           }
 
           const blob = await response.blob();
-          const bitmap = await createImageBitmap(blob);
+          const img = await blobToImageElement(blob);
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
 
-          try {
-            const canvas = document.createElement("canvas");
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-              throw new Error(`Failed to get canvas context for ${photo.id}`);
-            }
-            ctx.drawImage(bitmap, 0, 0);
-
-            const detections = await faceapi
-              .detectAllFaces(
-                canvas as any,
-                new faceapi.SsdMobilenetv1Options({
-                  minConfidence: 0.3,
-                  inputSize: 416,
-                } as any)
-              )
-              .withFaceLandmarks(true)
-              .withFaceDescriptors();
-
-            const faces = detections.map((det) => ({
-              descriptor: Array.from(det.descriptor),
-              boundingBox: {
-                x: det.detection.box.x,
-                y: det.detection.box.y,
-                width: det.detection.box.width,
-                height: det.detection.box.height,
-              },
-            }));
-
-            const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ faces }),
-            });
-
-            if (!saveResponse.ok) {
-              throw new Error(`Failed to save faces for ${photo.id}`);
-            }
-
-            successCount += 1;
-            setProcessed((prev) => prev + 1);
-            console.log(
-              `[FaceProcessor] Processed ${photo.id}: ${faces.length} face(s)`
+          if (!width || !height) {
+            throw new Error(
+              `Decoded image has zero dimensions for ${photo.id} (${photo.url})`
             );
-          } finally {
-            bitmap.close();
           }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            throw new Error(`Failed to get canvas context for ${photo.id}`);
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const detections = await faceapi
+            .detectAllFaces(
+              canvas as any,
+              new faceapi.SsdMobilenetv1Options({
+                minConfidence: 0.3,
+                inputSize: 416,
+              } as any)
+            )
+            .withFaceLandmarks(true)
+            .withFaceDescriptors();
+
+          const faces = detections.map((det) => ({
+            descriptor: Array.from(det.descriptor),
+            boundingBox: {
+              x: det.detection.box.x,
+              y: det.detection.box.y,
+              width: det.detection.box.width,
+              height: det.detection.box.height,
+            },
+          }));
+
+          const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ faces }),
+          });
+
+          if (!saveResponse.ok) {
+            throw new Error(`Failed to save faces for ${photo.id}`);
+          }
+
+          successCount += 1;
+          setProcessed((prev) => prev + 1);
+          console.log(
+            `[FaceProcessor] Processed ${photo.id}: ${faces.length} face(s)`
+          );
         } catch (error) {
           console.error(`[FaceProcessor] Failed photo ${photo.id}`, error);
         }
