@@ -2,7 +2,7 @@ import path from "path";
 import { Readable } from "stream";
 import { and, eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { Canvas, Image, ImageData, loadImage } from "canvas";
+import { Canvas, Image, ImageData, loadImage } from "@napi-rs/canvas";
 import { db } from "../src/lib/db";
 import { photoFaces, photos } from "../src/lib/schema";
 import { getFileStream } from "../src/lib/storage";
@@ -91,7 +91,7 @@ async function main() {
   const modelRoot = path.join(process.cwd(), "public", "models");
 
   await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelRoot);
-  await faceapi.nets.faceLandmark68Net.loadFromDisk(modelRoot);
+  await faceapi.nets.faceLandmark68TinyNet.loadFromDisk(modelRoot);
   await faceapi.nets.faceRecognitionNet.loadFromDisk(modelRoot);
 
   const unprocessed = db
@@ -124,8 +124,11 @@ async function main() {
       const img = await loadImage(buffer);
 
       const detections = (await faceapi
-        .detectAllFaces(img as any)
-        .withFaceLandmarks()
+        .detectAllFaces(
+          img as any,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, inputSize: 160 } as any)
+        )
+        .withFaceLandmarks(true)
         .withFaceDescriptors()) as FaceMatchResult[];
 
       db.delete(photoFaces).where(eq(photoFaces.photoId, photo.id)).run();
