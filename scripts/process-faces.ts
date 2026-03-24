@@ -99,7 +99,7 @@ async function main() {
   const faceapi = await loadFaceApi();
   const modelRoot = path.join(process.cwd(), "public", "models");
 
-  await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelRoot);
+  await faceapi.nets.tinyFaceDetector.loadFromDisk(modelRoot);
   await faceapi.nets.faceLandmark68TinyNet.loadFromDisk(modelRoot);
   await faceapi.nets.faceRecognitionNet.loadFromDisk(modelRoot);
 
@@ -140,7 +140,7 @@ async function main() {
       const detections = (await faceapi
         .detectAllFaces(
           canvas as any,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, inputSize: 160 } as any)
+          new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5, inputSize: 128 } as any)
         )
         .withFaceLandmarks(true)
         .withFaceDescriptors()) as FaceMatchResult[];
