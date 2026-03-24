@@ -615,6 +615,21 @@ The project now suppresses it via webpack alias/fallback in `next.config.mjs` (`
 This is a known Next.js static-analysis warning path with `jose` webapi modules.
 Current auth flow remains functional; treat as warning unless runtime auth endpoints fail.
 
+**Guest OTP not arriving during testing**
+If your Resend domain is not verified yet, enable temporary bypass in `.env.local`:
+```env
+GUEST_OTP_BYPASS="true"
+```
+Then restart:
+```bash
+pm2 restart fotohaven --update-env
+```
+In bypass mode:
+- OTP email sending is skipped
+- OTP validation is skipped in verify route
+- A guest session cookie is still created normally
+- Disable this (`false`) before production use
+
 **Port 3000 already in use**
 ```bash
 lsof -i :3000

@@ -1,6 +1,11 @@
 import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const defaultFrom = "FotoHaven <notifications@fotohaven.live>";
+
+function resolveFromAddress() {
+  return process.env.GUEST_OTP_FROM_EMAIL || defaultFrom;
+}
 
 export async function sendViewNotification(
   albumTitle: string,
@@ -12,9 +17,11 @@ export async function sendViewNotification(
     return;
   }
 
+  const from = resolveFromAddress();
+
   try {
     await resend.emails.send({
-      from: "FotoHaven <notifications@fotohaven.app>", // Ensure this domain is verified in Resend
+      from,
       to: recipientEmail,
       subject: `Gallery Viewed: ${albumTitle}`,
       html: `
@@ -30,6 +37,7 @@ export async function sendViewNotification(
         </div>
       `,
     });
+    console.log(`[EMAIL] From address used: ${from}`);
     console.log(`[EMAIL] Notification sent to ${recipientEmail} for album "${albumTitle}"`);
   } catch (error) {
     console.error("[EMAIL] Failed to send notification:", error);
@@ -46,7 +54,7 @@ export async function sendGuestOtpEmail(
     return;
   }
 
-  const from = process.env.GUEST_OTP_FROM_EMAIL || "FotoHaven <notifications@fotohaven.app>";
+  const from = resolveFromAddress();
 
   try {
     await resend.emails.send({
@@ -62,6 +70,7 @@ export async function sendGuestOtpEmail(
         </div>
       `,
     });
+    console.log(`[EMAIL] From address used: ${from}`);
   } catch (error) {
     console.error("[EMAIL] Failed to send guest OTP:", error);
     throw error;

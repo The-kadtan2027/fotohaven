@@ -18,6 +18,10 @@ type VerifyOtpBody = {
   otp?: string;
 };
 
+function isOtpBypassEnabled() {
+  return process.env.GUEST_OTP_BYPASS === "true";
+}
+
 function buildOtpHash(code: string, albumId: string, email: string) {
   const secret = process.env.APP_SECRET || process.env.JWT_SECRET || "fotohaven-guest-otp";
   return createHash("sha256")
@@ -33,8 +37,9 @@ export async function POST(request: Request) {
     const otp = body.otp?.trim();
     const name = body.name?.trim();
     const phone = body.phone?.trim() || null;
+    const bypass = isOtpBypassEnabled();
 
-    if (!token || !email || !otp || !name) {
+    if (!token || !email || !name || (!bypass && !otp)) {
       return NextResponse.json(
         { error: "token, email, otp, and name are required" },
         { status: 400 }
@@ -55,34 +60,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "This link has expired" }, { status: 410 });
     }
 
-    const otpRow = db
-      .select()
-      .from(guestOtps)
-      .where(
-        and(
-          eq(guestOtps.albumId, album.id),
-          eq(guestOtps.email, email),
-          isNull(guestOtps.consumedAt)
+    if (!bypass) {
+      const otpRow = db
+        .select()
+        .from(guestOtps)
+        .where(
+          and(
+            eq(guestOtps.albumId, album.id),
+            eq(guestOtps.email, email),
+            isNull(guestOtps.consumedAt)
+          )
         )
-      )
-      .orderBy(desc(guestOtps.createdAt))
-      .get();
+        .orderBy(desc(guestOtps.createdAt))
+        .get();
 
-    if (!otpRow) {
-      return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
+      if (!otpRow) {
+        return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
+      }
+
+      const now = new Date();
+      if (new Date(otpRow.expiresAt) < now) {
+        return NextResponse.json({ error: "OTP expired" }, { status: 401 });
+      }
+
+      const expected = buildOtpHash(otp!, album.id, email);
+      if (expected !== otpRow.codeHash) {
+        return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
+      }
+
+      db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
+    } else {
+      console.warn(
+        `[GUEST OTP] Bypass enabled. OTP validation skipped for ${email} (album=${album.id}).`
+      );
     }
-
-    const now = new Date();
-    if (new Date(otpRow.expiresAt) < now) {
-      return NextResponse.json({ error: "OTP expired" }, { status: 401 });
-    }
-
-    const expected = buildOtpHash(otp, album.id, email);
-    if (expected !== otpRow.codeHash) {
-      return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
-    }
-
-    db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
 
     const existingGuest = db
       .select()
@@ -103,7 +114,7 @@ export async function POST(request: Request) {
           email,
           phone,
           sessionToken,
-          createdAt: now,
+          createdAt: new Date(),
         })
         .run();
     } else {
@@ -124,7 +135,7 @@ export async function POST(request: Request) {
       st: sessionToken,
     });
 
-    const response = NextResponse.json({ ok: true });
+    const response = NextResponse.json({ ok: true, bypass });
     response.cookies.set(getGuestCookieName(), guestJwt, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

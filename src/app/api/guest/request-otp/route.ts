@@ -12,6 +12,10 @@ type RequestOtpBody = {
   email?: string;
 };
 
+function isOtpBypassEnabled() {
+  return process.env.GUEST_OTP_BYPASS === "true";
+}
+
 function buildOtpHash(code: string, albumId: string, email: string) {
   const secret = process.env.APP_SECRET || process.env.JWT_SECRET || "fotohaven-guest-otp";
   return createHash("sha256")
@@ -72,7 +76,8 @@ export async function POST(request: Request) {
         .run();
     }
 
-    const otpCode = createOtpCode();
+    const bypass = isOtpBypassEnabled();
+    const otpCode = bypass ? "000000" : createOtpCode();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
 
@@ -87,9 +92,19 @@ export async function POST(request: Request) {
       })
       .run();
 
-    await sendGuestOtpEmail(email, otpCode, album.title);
+    if (!bypass) {
+      await sendGuestOtpEmail(email, otpCode, album.title);
+    } else {
+      console.warn(
+        `[GUEST OTP] Bypass enabled. OTP email skipped for ${email} (album=${album.id}).`
+      );
+    }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      bypass,
+      ...(bypass ? { testOtp: otpCode } : {}),
+    });
   } catch (error) {
     console.error("[POST /api/guest/request-otp]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
