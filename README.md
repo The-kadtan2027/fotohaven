@@ -624,6 +624,96 @@ pm2 start ecosystem.config.js
 npm run db:push   # applies any new columns / tables to local.db
 ```
 
+**Guest face discovery on Termux (sharp / models / processor)**
+
+Use this when setting up or after `git pull` on Android/Termux.
+
+```bash
+cd ~/fotohaven
+cp local.db "local.db.bak.$(date +%Y%m%d-%H%M%S)"
+
+pkg install -y x11-repo
+pkg install -y \
+  nodejs-lts python make clang pkg-config ndk-sysroot \
+  libc++ glib vips \
+  libcairo pango libpixman libjpeg-turbo libpng giflib librsvg freetype fontconfig \
+  libx11 libxrender xorgproto
+
+export android_ndk_path="$PREFIX"
+export GYP_DEFINES="android_ndk_path=$PREFIX"
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig"
+export CFLAGS="-I$PREFIX/include"
+export CXXFLAGS="-I$PREFIX/include"
+export LDFLAGS="-L$PREFIX/lib"
+
+npm install
+
+# On Termux, build sharp against global libvips.
+unset SHARP_IGNORE_GLOBAL_LIBVIPS
+unset npm_config_build_from_source
+npm config delete build-from-source 2>/dev/null || true
+rm -rf node_modules/sharp
+SHARP_FORCE_GLOBAL_LIBVIPS=1 npm install sharp --build-from-source
+
+node -e "const sharp=require('sharp'); console.log('sharp ok', sharp.versions)"
+npm run db:push
+npx tsc --noEmit
+pm2 restart fotohaven --update-env
+```
+
+Download all required face-api model files:
+
+```bash
+cd ~/fotohaven
+mkdir -p public/models
+
+curl -L -o public/models/ssd_mobilenetv1_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-weights_manifest.json
+curl -L -o public/models/ssd_mobilenetv1_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard1
+curl -L -o public/models/ssd_mobilenetv1_model-shard2 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard2
+
+curl -L -o public/models/face_landmark_68_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-weights_manifest.json
+curl -L -o public/models/face_landmark_68_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-shard1
+
+curl -L -o public/models/face_recognition_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-weights_manifest.json
+curl -L -o public/models/face_recognition_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard1
+curl -L -o public/models/face_recognition_model-shard2 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard2
+
+ls -lh public/models
+```
+
+If `npm run faces:process` logs `ENOENT` for old photos, those files are missing on disk. Reset processing only for files that exist and skip missing files:
+
+```bash
+cd ~/fotohaven
+node - <<'JS'
+const fs=require('fs');
+const path=require('path');
+const Database=require('better-sqlite3');
+const db=new Database('local.db');
+const base=process.env.LOCAL_UPLOAD_PATH || '/data/data/com.termux/files/home/storage/shared/fotohaven';
+const rows=db.prepare("SELECT id, storageKey FROM Photo WHERE isReturn=0").all();
+const set0=db.prepare("UPDATE Photo SET faceProcessed=0 WHERE id=?");
+const set1=db.prepare("UPDATE Photo SET faceProcessed=1 WHERE id=?");
+let existing=0, missing=0;
+for (const r of rows) {
+  const ok = fs.existsSync(path.join(base, r.storageKey));
+  (ok ? set0 : set1).run(r.id);
+  ok ? existing++ : missing++;
+}
+console.log({ existing, missing, base });
+JS
+
+npm run faces:process
+```
+
+To run background processing on a schedule without overlap, use `scripts/process-faces-safe.sh` with PM2 cron:
+
+```bash
+chmod +x ~/fotohaven/scripts/process-faces-safe.sh
+pm2 start ~/fotohaven/scripts/process-faces-safe.sh --name fotohaven-faces --cron "*/30 * * * *" --no-autorestart
+pm2 save
+```
+
 ---
 
 ## Standard Setup (PC / VPS)
