@@ -607,6 +607,14 @@ npm install --cpu=wasm32 sharp
 npm install @img/sharp-wasm32
 ```
 
+**Build warning: `face-api.js ... Can't resolve 'encoding'`**
+This comes from an optional `node-fetch` path inside `face-api.js` and is not needed for browser inference.
+The project now suppresses it via webpack alias/fallback in `next.config.mjs` (`encoding: false`, `fs: false` on client).
+
+**Build warning: `jose ... CompressionStream/DecompressionStream not supported in Edge Runtime`**
+This is a known Next.js static-analysis warning path with `jose` webapi modules.
+Current auth flow remains functional; treat as warning unless runtime auth endpoints fail.
+
 **Port 3000 already in use**
 ```bash
 lsof -i :3000

@@ -105,32 +105,66 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
               );
             }
 
-            const ctx = canvas.getContext("2d");
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
             if (!ctx) {
               throw new Error(`Failed to get canvas context for ${photo.id}`);
             }
             ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-            const detections = await faceapi
-              .detectAllFaces(
-                canvas as any,
-                new faceapi.SsdMobilenetv1Options({
-                  minConfidence: 0.3,
-                  inputSize: 416,
-                } as any)
-              )
-              .withFaceLandmarks(true)
-              .withFaceDescriptors();
+            const detections = await faceapi.detectAllFaces(
+              canvas as any,
+              new faceapi.SsdMobilenetv1Options({
+                minConfidence: 0.3,
+                inputSize: 416,
+              } as any)
+            );
 
-            const faces = detections.map((det) => ({
-              descriptor: Array.from(det.descriptor),
-              boundingBox: {
-                x: det.detection.box.x,
-                y: det.detection.box.y,
-                width: det.detection.box.width,
-                height: det.detection.box.height,
-              },
-            }));
+            const validDetections = detections.filter((det) => {
+              const box = det.box;
+              return (
+                Number.isFinite(box.x) &&
+                Number.isFinite(box.y) &&
+                Number.isFinite(box.width) &&
+                Number.isFinite(box.height) &&
+                box.width >= 2 &&
+                box.height >= 2
+              );
+            });
+
+            const faces: Array<{
+              descriptor: number[];
+              boundingBox: { x: number; y: number; width: number; height: number };
+            }> = [];
+
+            for (const det of validDetections) {
+              try {
+                const crops = await faceapi.extractFaces(canvas as any, [det]);
+                const crop = crops[0];
+                if (!crop || crop.width < 2 || crop.height < 2) continue;
+
+                const landmarks = await faceapi.detectFaceLandmarksTiny(crop as any);
+                if (!landmarks) continue;
+                if (Array.isArray(landmarks)) continue;
+
+                const aligned = landmarks.align();
+                const descriptor = await faceapi.computeFaceDescriptor(aligned as any);
+
+                faces.push({
+                  descriptor: Array.from(descriptor as Float32Array),
+                  boundingBox: {
+                    x: det.box.x,
+                    y: det.box.y,
+                    width: det.box.width,
+                    height: det.box.height,
+                  },
+                });
+              } catch (singleFaceError) {
+                console.warn(
+                  `[FaceProcessor] Skipped invalid face crop in ${photo.id}`,
+                  singleFaceError
+                );
+              }
+            }
 
             const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
               method: "POST",
