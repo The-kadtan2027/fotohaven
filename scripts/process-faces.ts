@@ -1,3 +1,4 @@
+process.env.TF_CPP_MIN_LOG_LEVEL = '3';
 import path from "path";
 import { Readable } from "stream";
 import { and, eq } from "drizzle-orm";
@@ -122,10 +123,12 @@ async function main() {
     try {
       const { buffer, sourceKey } = await readPhotoBufferWithFallback(photo);
       const img = await loadImage(buffer);
-
+      const canvas = new Canvas(img.width, img.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img as any, 0, 0);
       const detections = (await faceapi
         .detectAllFaces(
-          img as any,
+          canvas as any,
           new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, inputSize: 160 } as any)
         )
         .withFaceLandmarks(true)
