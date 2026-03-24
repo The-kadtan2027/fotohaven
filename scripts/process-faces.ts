@@ -82,7 +82,15 @@ async function readPhotoBufferWithFallback(photo: {
 
 async function loadFaceApi() {
   const faceapi = await import("face-api.js");
-  faceapi.env.monkeyPatch({ Canvas, Image, ImageData } as any);
+  class CanvasCompat extends (Canvas as any) {
+    constructor(width?: number, height?: number) {
+      super(
+        Number.isFinite(width as number) ? (width as number) : 1,
+        Number.isFinite(height as number) ? (height as number) : 1
+      );
+    }
+  }
+  faceapi.env.monkeyPatch({ Canvas: CanvasCompat, Image, ImageData } as any);
   return faceapi;
 }
 
@@ -123,7 +131,10 @@ async function main() {
     try {
       const { buffer, sourceKey } = await readPhotoBufferWithFallback(photo);
       const img = await loadImage(buffer);
-      const canvas = new Canvas(img.width, img.height);
+      const canvas = new Canvas(
+        Number((img as any).width) || Number((img as any).naturalWidth) || 1,
+        Number((img as any).height) || Number((img as any).naturalHeight) || 1
+      );
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img as any, 0, 0);
       const detections = (await faceapi
