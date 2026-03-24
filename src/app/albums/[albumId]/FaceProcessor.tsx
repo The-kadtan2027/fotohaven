@@ -72,9 +72,18 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
           const bitmap = await createImageBitmap(blob);
 
           try {
+            const canvas = document.createElement("canvas");
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              throw new Error(`Failed to get canvas context for ${photo.id}`);
+            }
+            ctx.drawImage(bitmap, 0, 0);
+
             const detections = await faceapi
               .detectAllFaces(
-                bitmap as any,
+                canvas as any,
                 new faceapi.SsdMobilenetv1Options({
                   minConfidence: 0.3,
                   inputSize: 416,
