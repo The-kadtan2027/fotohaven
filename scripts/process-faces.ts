@@ -21,10 +21,17 @@ type FaceMatchResult = {
 };
 
 type SourceMode = "auto" | "original" | "thumbnail";
+type DetectorMode = "tiny" | "ssd" | "hybrid";
 
 const VALID_SOURCES: SourceMode[] = ["auto", "original", "thumbnail"];
+const VALID_DETECTORS: DetectorMode[] = ["tiny", "ssd", "hybrid"];
 const SOURCE_MODE = parseSourceMode(process.env.PROCESS_FACES_SOURCE);
 const PROCESS_LIMIT = parsePositiveInt(process.env.PROCESS_FACES_LIMIT, 25);
+const DETECTOR_MODE = parseDetectorMode(process.env.PROCESS_FACES_DETECTOR);
+const TINY_INPUT = parsePositiveInt(process.env.PROCESS_FACES_TINY_INPUT, 128);
+const TINY_SCORE = parseProbability(process.env.PROCESS_FACES_TINY_SCORE, 0.5);
+const SSD_INPUT = parsePositiveInt(process.env.PROCESS_FACES_SSD_INPUT, 224);
+const SSD_CONFIDENCE = parseProbability(process.env.PROCESS_FACES_SSD_CONFIDENCE, 0.5);
 
 function streamToBuffer(stream: Readable): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -46,6 +53,19 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.floor(n);
+}
+
+function parseProbability(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return fallback;
+  return n;
+}
+
+function parseDetectorMode(value: string | undefined): DetectorMode {
+  const normalized = (value || "hybrid").toLowerCase();
+  return (VALID_DETECTORS as string[]).includes(normalized)
+    ? (normalized as DetectorMode)
+    : "hybrid";
 }
 
 function getCandidateKeys(photo: { storageKey: string; thumbnailKey: string | null }): string[] {
@@ -99,7 +119,12 @@ async function main() {
   const faceapi = await loadFaceApi();
   const modelRoot = path.join(process.cwd(), "public", "models");
 
-  await faceapi.nets.tinyFaceDetector.loadFromDisk(modelRoot);
+  if (DETECTOR_MODE === "tiny" || DETECTOR_MODE === "hybrid") {
+    await faceapi.nets.tinyFaceDetector.loadFromDisk(modelRoot);
+  }
+  if (DETECTOR_MODE === "ssd" || DETECTOR_MODE === "hybrid") {
+    await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelRoot);
+  }
   await faceapi.nets.faceLandmark68TinyNet.loadFromDisk(modelRoot);
   await faceapi.nets.faceRecognitionNet.loadFromDisk(modelRoot);
 
@@ -121,7 +146,7 @@ async function main() {
 
   const pending = unprocessed.slice(0, PROCESS_LIMIT);
   console.log(
-    `[process-faces] Found ${unprocessed.length} unprocessed photos. Processing ${pending.length} (source=${SOURCE_MODE}).`
+    `[process-faces] Found ${unprocessed.length} unprocessed photos. Processing ${pending.length} (source=${SOURCE_MODE}, detector=${DETECTOR_MODE}).`
   );
 
   let processedCount = 0;
@@ -131,19 +156,53 @@ async function main() {
     try {
       const { buffer, sourceKey } = await readPhotoBufferWithFallback(photo);
       const img = await loadImage(buffer);
-      const canvas = new Canvas(
-        Number((img as any).width) || Number((img as any).naturalWidth) || 1,
-        Number((img as any).height) || Number((img as any).naturalHeight) || 1
-      );
+      const canvas = new Canvas(img.width, img.height);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img as any, 0, 0);
-      const detections = (await faceapi
-        .detectAllFaces(
-          canvas as any,
-          new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5, inputSize: 128 } as any)
-        )
-        .withFaceLandmarks(true)
-        .withFaceDescriptors()) as FaceMatchResult[];
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        const stretched = Math.min(255, Math.max(0, (avg - 40) * 1.4));
+        data[i] = data[i + 1] = data[i + 2] = stretched;
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      const detectWithTiny = async () =>
+        (await faceapi
+          .detectAllFaces(
+            canvas as any,
+            new faceapi.TinyFaceDetectorOptions({
+              scoreThreshold: TINY_SCORE,
+              inputSize: TINY_INPUT,
+            } as any)
+          )
+          .withFaceLandmarks(true)
+          .withFaceDescriptors()) as FaceMatchResult[];
+
+      const detectWithSsd = async () =>
+        (await faceapi
+          .detectAllFaces(
+            canvas as any,
+            new faceapi.SsdMobilenetv1Options({
+              minConfidence: 0.3,
+              inputSize: 416,
+            } as any)
+          )
+          .withFaceLandmarks(true)
+          .withFaceDescriptors()) as FaceMatchResult[];
+
+      let detections: FaceMatchResult[] = [];
+      if (DETECTOR_MODE === "tiny") {
+        detections = await detectWithTiny();
+      } else if (DETECTOR_MODE === "ssd") {
+        detections = await detectWithSsd();
+      } else {
+        detections = await detectWithTiny();
+        if (detections.length === 0) {
+          detections = await detectWithSsd();
+        }
+      }
 
       db.delete(photoFaces).where(eq(photoFaces.photoId, photo.id)).run();
 
@@ -167,7 +226,7 @@ async function main() {
       processedCount += 1;
       faceCount += detections.length;
       console.log(
-        `[process-faces] Processed ${photo.id} (${detections.length} faces, source=${sourceKey}, ${Date.now() - photoStartedAt}ms).`
+        `[process-faces] Processed ${photo.id} (${detections.length} faces, scores=${detections.map(d => (d.detection as any).score?.toFixed(2) ?? '?').join(',')}, source=${sourceKey}, ${Date.now() - photoStartedAt}ms).`
       );
     } catch (error) {
       console.error(`[process-faces] Failed for ${photo.id}:`, error);
