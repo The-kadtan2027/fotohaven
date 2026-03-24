@@ -14,6 +14,7 @@ type FaceProcessorProps = {
 };
 
 let modelLoadPromise: Promise<void> | null = null;
+const MAX_DETECTION_SIDE = 2048;
 
 async function ensureModelsLoaded() {
   if (!modelLoadPromise) {
@@ -92,13 +93,23 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             }
 
             const canvas = document.createElement("canvas");
-            canvas.width = width;
-            canvas.height = height;
+            const scale = Math.min(1, MAX_DETECTION_SIDE / Math.max(width, height));
+            const targetWidth = Math.max(1, Math.floor(width * scale));
+            const targetHeight = Math.max(1, Math.floor(height * scale));
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            if (!canvas.width || !canvas.height) {
+              throw new Error(
+                `Canvas collapsed to zero for ${photo.id} (${width}x${height} -> ${targetWidth}x${targetHeight})`
+              );
+            }
+
             const ctx = canvas.getContext("2d");
             if (!ctx) {
               throw new Error(`Failed to get canvas context for ${photo.id}`);
             }
-            ctx.drawImage(img, 0, 0, width, height);
+            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
             const detections = await faceapi
               .detectAllFaces(
