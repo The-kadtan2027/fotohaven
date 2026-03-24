@@ -18,6 +18,7 @@ export interface Photo {
   isReturn?: boolean;
   returnOf?: string | null;
   isSelected?: boolean;
+  faceProcessed?: boolean;
 }
 
 export interface ReturnUploadPayload {
@@ -69,3 +70,20 @@ export interface Comment {
   createdAt: string;
 }
 
+export interface Guest {
+  id: string;
+  albumId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  faceDescriptor?: string | null;
+  sessionToken?: string | null;
+  createdAt: string;
+}
+
+export interface PhotoFace {
+  id: string;
+  photoId: string;
+  descriptor: string;
+  boundingBox: string;
+}

@@ -8,6 +8,7 @@ const PUBLIC_API_PREFIXES = [
   '/api/share/',
   '/api/comments/',
   '/api/files/',
+  '/api/guest/',
 ];
 
 // API routes that require authentication
@@ -92,4 +93,3 @@ export const config = {
     '/albums/:path*',
   ],
 };
-

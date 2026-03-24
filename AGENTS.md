@@ -787,3 +787,107 @@ Enhance the existing card map (`albums.map`) to include:
 - [x] Album cards show "Client selected N of M photos" accurately deriving from the API payload.
 - [x] `npx tsc --noEmit` passes with zero errors.
 
+---
+
+## Task: Guest face-based photo discovery
+
+**Status:** Completed  
+**Scope:** Guest verifies via OTP, consents to face scan, and discovers matched photos from a share album.
+
+### Schema changes (`src/lib/schema.ts`)
+Add to `Photo`:
+```typescript
+faceProcessed: integer('faceProcessed', { mode: 'boolean' }).notNull().default(false),
+```
+
+New table:
+```typescript
+export const guests = sqliteTable('Guest', {
+  id: text('id').primaryKey(),
+  albumId: text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  faceDescriptor: text('faceDescriptor'),
+  sessionToken: text('sessionToken'),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+New table:
+```typescript
+export const photoFaces = sqliteTable('PhotoFace', {
+  id: text('id').primaryKey(),
+  photoId: text('photoId').notNull().references(() => photos.id, { onDelete: 'cascade' }),
+  descriptor: text('descriptor').notNull(),
+  boundingBox: text('boundingBox').notNull(),
+});
+```
+
+OTP storage table:
+```typescript
+export const guestOtps = sqliteTable('GuestOtp', {
+  id: text('id').primaryKey(),
+  albumId: text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  codeHash: text('codeHash').notNull(),
+  expiresAt: integer('expiresAt', { mode: 'timestamp_ms' }).notNull(),
+  consumedAt: integer('consumedAt', { mode: 'timestamp_ms' }),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+After schema edits run:
+`npm run db:generate && npm run db:push`
+
+### API routes
+- `POST /api/guest/request-otp` — send 6-digit OTP via Resend and persist hashed OTP.
+- `POST /api/guest/verify-otp` — validate OTP, create guest session, set signed guest cookie for 24h.
+- `POST /api/guest/enroll-face` — accept 128-float descriptor from browser and store on guest.
+- `GET /api/guest/my-photos` — cosine-distance match against `photoFaces` in same album, threshold `< 0.5`.
+
+### Background extraction
+New script: `scripts/process-faces.ts`
+- Reads `Photo.faceProcessed = false`.
+- Uses `face-api.js + canvas` in Node.
+- Writes `PhotoFace` rows and sets `faceProcessed = true`.
+- Runs manually (`npm run faces:process`) or via PM2 cron.
+- Never runs in upload request lifecycle.
+
+### Guest page
+New page: `src/app/share/[token]/guest/page.tsx`
+- OTP request/verify UI.
+- Consent screen before camera scan.
+- Skippable fallback: "Browse all photos instead".
+- Browser face scan via `face-api.js`.
+- Display matched photos grid.
+- ZIP download via existing `/api/share/[token]/download` route.
+
+### Model files
+- Keep models in `public/models/`:
+  - `ssd_mobilenetv1`
+  - `face_landmark_68`
+  - `face_recognition`
+- Do not bundle model files via webpack.
+
+### Data handling
+- Store descriptor as:
+  `JSON.stringify(Array.from(descriptor))`
+- Read descriptor as:
+  `Float32Array.from(JSON.parse(descriptorJson))`
+- All DB access through `src/lib/db.ts`.
+
+### Acceptance criteria
+- [x] `guests`, `photoFaces`, and `guestOtps` tables exist; `photos.faceProcessed` exists with default `false`
+- [x] `POST /api/guest/request-otp` sends OTP and stores only hashed OTP
+- [x] `POST /api/guest/verify-otp` validates OTP and sets signed `guest_session` cookie (24h TTL)
+- [x] `POST /api/guest/enroll-face` stores 128-float descriptor JSON on guest record
+- [x] `scripts/process-faces.ts` extracts faces and writes descriptors + bounding boxes
+- [x] Background face extraction is non-blocking and not part of upload requests
+- [x] `GET /api/guest/my-photos` returns photo IDs by cosine distance threshold `0.5`
+- [x] Guest page supports OTP → consent → scan → matched grid flow
+- [x] Consent screen explicitly allows skip with "Browse all photos instead"
+- [x] Guest can download matched photos as ZIP through existing download route
+- [x] Models are loaded from `public/models/` and not bundled
+- [x] `npm run db:generate && npm run db:push` succeeds
+- [x] `npx tsc --noEmit` passes with zero errors

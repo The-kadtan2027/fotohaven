@@ -35,6 +35,7 @@ export const photos = sqliteTable('Photo', {
   isReturn:     integer('isReturn', { mode: 'boolean' }).notNull().default(false),
   returnOf:     text('returnOf'),
   isSelected:   integer('isSelected', { mode: 'boolean' }).notNull().default(false),
+  faceProcessed: integer('faceProcessed', { mode: 'boolean' }).notNull().default(false),
   thumbnailKey: text('thumbnailKey'),
   createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -54,8 +55,38 @@ export const photographers = sqliteTable('Photographer', {
   createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const guests = sqliteTable('Guest', {
+  id:             text('id').primaryKey(),
+  albumId:        text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  name:           text('name').notNull(),
+  email:          text('email'),
+  phone:          text('phone'),
+  faceDescriptor: text('faceDescriptor'),
+  sessionToken:   text('sessionToken'),
+  createdAt:      integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const photoFaces = sqliteTable('PhotoFace', {
+  id:          text('id').primaryKey(),
+  photoId:     text('photoId').notNull().references(() => photos.id, { onDelete: 'cascade' }),
+  descriptor:  text('descriptor').notNull(),
+  boundingBox: text('boundingBox').notNull(),
+});
+
+export const guestOtps = sqliteTable('GuestOtp', {
+  id:         text('id').primaryKey(),
+  albumId:    text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  email:      text('email').notNull(),
+  codeHash:   text('codeHash').notNull(),
+  expiresAt:  integer('expiresAt', { mode: 'timestamp_ms' }).notNull(),
+  consumedAt: integer('consumedAt', { mode: 'timestamp_ms' }),
+  createdAt:  integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+
 export const albumsRelations = relations(albums, ({ many }) => ({
   ceremonies: many(ceremonies),
+  guests: many(guests),
+  guestOtps: many(guestOtps),
 }));
 
 export const ceremoniesRelations = relations(ceremonies, ({ one, many }) => ({
@@ -72,11 +103,33 @@ export const photosRelations = relations(photos, ({ one, many }) => ({
     references: [ceremonies.id],
   }),
   comments: many(comments),
+  photoFaces: many(photoFaces),
 }));
 
 export const commentsRelations = relations(comments, ({ one }) => ({
   photo: one(photos, {
     fields: [comments.photoId],
     references: [photos.id],
+  }),
+}));
+
+export const guestsRelations = relations(guests, ({ one }) => ({
+  album: one(albums, {
+    fields: [guests.albumId],
+    references: [albums.id],
+  }),
+}));
+
+export const photoFacesRelations = relations(photoFaces, ({ one }) => ({
+  photo: one(photos, {
+    fields: [photoFaces.photoId],
+    references: [photos.id],
+  }),
+}));
+
+export const guestOtpsRelations = relations(guestOtps, ({ one }) => ({
+  album: one(albums, {
+    fields: [guestOtps.albumId],
+    references: [albums.id],
   }),
 }));
