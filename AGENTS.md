@@ -891,3 +891,68 @@ New page: `src/app/share/[token]/guest/page.tsx`
 - [x] Models are loaded from `public/models/` and not bundled
 - [x] `npm run db:generate && npm run db:push` succeeds
 - [x] `npx tsc --noEmit` passes with zero errors
+
+
+## Task: Browser-side face descriptor extraction (Phase 1 of face architecture refactor)
+
+**Status:** In Progress
+**Scope:** Move face detection inference from the phone server to the photographer's
+laptop browser. The phone stores and matches descriptors only — no neural network
+inference ever runs on the Android device.
+
+### Architecture
+- face-api.js runs in the album manager browser page (photographer's laptop)
+- A background React worker processes unprocessed photos silently after page load
+- Descriptors (128 floats per face) are POSTed to a new API endpoint on the phone
+- The phone stores them in the existing PhotoFace table and marks faceProcessed=true
+- Guest matching (cosine distance) remains server-side — pure arithmetic, no TF
+
+### New files
+- `src/app/albums/[albumId]/FaceProcessor.tsx` — Client Component, background worker
+  - Loads face-api.js models from /public/models/ once
+  - Processes unprocessed photos one at a time using fetch + canvas in browser
+  - Shows dismissible progress indicator: "Processing faces (47/200)"
+  - POSTs descriptors to /api/photos/[photoId]/faces on completion of each photo
+  - Skips photos that already have faceProcessed=true
+
+### New API route
+- `POST /api/photos/[photoId]/faces`
+  - Auth: requires valid photographer session (JWT cookie)
+  - Body: `{ faces: Array<{ descriptor: number[], boundingBox: { x, y, width, height } }> }`
+  - Deletes existing PhotoFace rows for this photoId (idempotent)
+  - Inserts new PhotoFace rows
+  - Sets photo.faceProcessed = true
+  - Returns: `{ saved: number }`
+
+### Modified files
+- `src/app/albums/[albumId]/page.tsx`
+  - Import and render <FaceProcessor> passing photos with faceProcessed=false
+  - Pass album's LOCAL storage paths so FaceProcessor can fetch image URLs
+
+### Existing files — DO NOT touch yet (cleanup phase comes after validation)
+- `scripts/process-faces.ts` — keep, disable via PM2 only
+- `scripts/process-faces-safe.sh` — keep
+- `@napi-rs/canvas` — keep in package.json for now
+
+### Validation criteria before cleanup
+- [x] FaceProcessor loads models successfully in browser (check console, no 404s)
+- [x] At least 10 photos process successfully end-to-end in browser
+- [x] PhotoFace rows appear in DB after browser processing
+- [x] faceProcessed = true set correctly on processed photos
+- [x] Guest match route returns correct photos using browser-generated descriptors
+- [x] Processing does not block album page UI (runs in background)
+- [x] Progress indicator shows and is dismissible
+
+### Cleanup phase (do NOT start until all validation criteria are checked off)
+- Remove scripts/process-faces.ts
+- Remove scripts/process-faces-safe.sh
+- Remove PM2 cron job fotohaven-faces
+- Uninstall @napi-rs/canvas, face-api.js server deps
+- Update CLAUDE.md and README.md
+
+### Acceptance criteria
+- [ ] Photographer opens album page on any laptop/desktop browser
+- [ ] All unprocessed photos get descriptors extracted automatically in background
+- [ ] Phone CPU never runs neural network inference
+- [ ] Guest face matching works correctly using browser-generated descriptors
+- [ ] npx tsc --noEmit passes with zero errors

@@ -8,6 +8,7 @@ import {
   ArrowLeft, Share2, Upload, Check, X, Image as ImageIcon,
   FolderOpen, Loader2, Copy, ExternalLink, Trash2, PackageCheck,
 } from "lucide-react";
+import FaceProcessor from "./FaceProcessor";
 
 interface Photo {
   id: string;
@@ -19,6 +20,7 @@ interface Photo {
   comments?: any[];
   isReturn?: boolean;
   isSelected?: boolean;
+  faceProcessed?: boolean;
 }
 
 interface Ceremony {
@@ -630,6 +632,16 @@ export default function AlbumPage() {
           </button>
         </div>
       )}
+
+      <FaceProcessor
+        photos={album.ceremonies.flatMap((ceremony) =>
+          ceremony.photos.map((photo) => ({
+            id: photo.id,
+            url: photo.url,
+            faceProcessed: Boolean(photo.faceProcessed),
+          }))
+        )}
+      />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

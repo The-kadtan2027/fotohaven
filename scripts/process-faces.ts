@@ -1,12 +1,4 @@
 process.env.TF_CPP_MIN_LOG_LEVEL = '3';
-import('@tensorflow/tfjs-backend-wasm').then(({ setWasmPaths }) => {
-  setWasmPaths(
-    require('path').join(
-      require.resolve('@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm.wasm'),
-      '..'
-    ) + '/'
-  );
-});
 import path from "path";
 import { Readable } from "stream";
 import { and, eq } from "drizzle-orm";
@@ -131,11 +123,6 @@ async function main() {
     await faceapi.nets.tinyFaceDetector.loadFromDisk(modelRoot);
   }
   if (DETECTOR_MODE === "ssd" || DETECTOR_MODE === "hybrid") {
-    const tf = await import('@tensorflow/tfjs');
-    await import('@tensorflow/tfjs-backend-wasm');
-    await tf.setBackend('wasm');
-    await tf.ready();
-    console.log('[process-faces] TF backend:', tf.getBackend());
     await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelRoot);
   }
   await faceapi.nets.faceLandmark68TinyNet.loadFromDisk(modelRoot);
