@@ -145,9 +145,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
                 const landmarks = await faceapi.detectFaceLandmarksTiny(crop as any);
                 if (!landmarks) continue;
                 if (Array.isArray(landmarks)) continue;
-
-                const aligned = landmarks.align();
-                const descriptor = await faceapi.computeFaceDescriptor(aligned as any);
+                const descriptor = await faceapi.computeFaceDescriptor(crop as any);
 
                 faces.push({
                   descriptor: Array.from(descriptor as Float32Array),
@@ -159,9 +157,12 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
                   },
                 });
               } catch (singleFaceError) {
+                const message =
+                  singleFaceError instanceof Error
+                    ? singleFaceError.message
+                    : String(singleFaceError);
                 console.warn(
-                  `[FaceProcessor] Skipped invalid face crop in ${photo.id}`,
-                  singleFaceError
+                  `[FaceProcessor] Skipped invalid face crop in ${photo.id}: ${message}`
                 );
               }
             }

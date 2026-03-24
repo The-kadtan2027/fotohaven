@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
+import { jwtVerify } from "jose/jwt/verify";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "@/lib/db";

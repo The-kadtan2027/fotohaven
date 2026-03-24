@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
-import { SignJWT } from 'jose';
+import { SignJWT } from 'jose/jwt/sign';
 import { db } from '@/lib/db';
 import { photographers } from '@/lib/schema';
 

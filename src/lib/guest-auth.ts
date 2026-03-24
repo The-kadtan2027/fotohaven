@@ -1,4 +1,5 @@
-import { jwtVerify, SignJWT } from "jose";
+import { SignJWT } from "jose/jwt/sign";
+import { jwtVerify } from "jose/jwt/verify";
 
 const GUEST_COOKIE = "guest_session";
 const GUEST_TTL_SECONDS = 60 * 60 * 24;
