@@ -21,6 +21,8 @@ if mkdir "$LOCKDIR" 2>/dev/null; then
   # in PM2 env or uncomment and edit below.
   # export LOCAL_UPLOAD_PATH="/data/data/com.termux/files/home/storage/shared/fotohaven"
   export LOCAL_UPLOAD_PATH="/data/data/com.termux/files/home/storage/shared/fotohaven-uploads"
+  export PROCESS_FACES_SOURCE="${PROCESS_FACES_SOURCE:-auto}"
+  export PROCESS_FACES_LIMIT="${PROCESS_FACES_LIMIT:-25}"
 
 
   npm run faces:process

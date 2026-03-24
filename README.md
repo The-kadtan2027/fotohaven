@@ -714,6 +714,18 @@ pm2 start ~/fotohaven/scripts/process-faces-safe.sh --name fotohaven-faces --cro
 pm2 save
 ```
 
+Face processor tuning switches (env vars):
+- `PROCESS_FACES_SOURCE=auto|thumbnail|original`
+  - `auto` (default): thumbnail first, fallback to original
+  - `thumbnail`: only thumbnail key
+  - `original`: only original key
+- `PROCESS_FACES_LIMIT=25` (default) — max photos per run
+
+Example:
+```bash
+PROCESS_FACES_SOURCE=thumbnail PROCESS_FACES_LIMIT=40 npm run faces:process
+```
+
 ---
 
 ## Standard Setup (PC / VPS)
