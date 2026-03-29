@@ -187,10 +187,11 @@ pm2 start ecosystem.config.js
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
 - **Face processing architecture**:
-  - Primary path is browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
+  - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
   - Browser loads models from `/public/models` with `loadFromUri('/models')`.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs cosine distance matching; heavy inference is offloaded from Android phone CPU.
+  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
 

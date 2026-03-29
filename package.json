@@ -10,20 +10,15 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "seed": "npx tsx scripts/seed.ts",
-    "faces:process": "npx tsx scripts/process-faces.ts"
+    "seed": "npx tsx scripts/seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.540",
     "@aws-sdk/s3-request-presigner": "3.540",
-    "@napi-rs/canvas": "^0.1.97",
-    "@tensorflow/tfjs": "^4.22.0",
-    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@types/archiver": "^7.0.0",
     "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
-    "canvas": "^3.2.2",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.1",
     "face-api.js": "^0.22.2",

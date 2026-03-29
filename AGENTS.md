@@ -895,7 +895,7 @@ New page: `src/app/share/[token]/guest/page.tsx`
 
 ## Task: Browser-side face descriptor extraction (Phase 1 of face architecture refactor)
 
-**Status:** In Progress
+**Status:** Completed
 **Scope:** Move face detection inference from the phone server to the photographer's
 laptop browser. The phone stores and matches descriptors only — no neural network
 inference ever runs on the Android device.
@@ -952,16 +952,18 @@ inference ever runs on the Android device.
 - If this is violated, runtime error appears:
   - `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`
 
-### Cleanup phase (do NOT start until all validation criteria are checked off)
-- Remove scripts/process-faces.ts
-- Remove scripts/process-faces-safe.sh
-- Remove PM2 cron job fotohaven-faces
-- Uninstall @napi-rs/canvas, face-api.js server deps
-- Update CLAUDE.md and README.md
+### Cleanup phase (completed)
+- [x] Archived `scripts/process-faces.ts` → `scripts/archive/process-faces.ts`
+- [x] Archived `scripts/process-faces-safe.sh` → `scripts/archive/process-faces-safe.sh`
+- [x] Removed PM2 cron job `fotohaven-faces` (not present in final ecosystem.config.js)
+- [x] Uninstalled `@napi-rs/canvas`, `@tensorflow/tfjs`, `@tensorflow/tfjs-backend-wasm`, `canvas`
+- [x] `face-api.js` retained — still required for browser-side `FaceProcessor.tsx`
+- [x] Updated CLAUDE.md and README.md
+- [x] Archive README added at `scripts/archive/README.md`
 
 ### Acceptance criteria
-- [ ] Photographer opens album page on any laptop/desktop browser
-- [ ] All unprocessed photos get descriptors extracted automatically in background
-- [ ] Phone CPU never runs neural network inference
-- [ ] Guest face matching works correctly using browser-generated descriptors
-- [ ] npx tsc --noEmit passes with zero errors
+- [x] Photographer opens album page on any laptop/desktop browser
+- [x] All unprocessed photos get descriptors extracted automatically in background
+- [x] Phone CPU never runs neural network inference
+- [x] Guest face matching works correctly using browser-generated descriptors
+- [x] npx tsc --noEmit passes with zero errors
