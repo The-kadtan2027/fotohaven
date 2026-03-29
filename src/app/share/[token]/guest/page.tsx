@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { averageDescriptors } from "@/lib/face-math";
 
 type Photo = {
   id: string;
@@ -10,6 +11,9 @@ type Photo = {
   url: string;
   originalUrl?: string;
 };
+
+// Extends Photo with the cosine-distance score returned by /api/guest/my-photos
+type MatchedPhoto = Photo & { score: number };
 
 type Ceremony = {
   id: string;
@@ -36,7 +40,7 @@ export default function GuestFaceDiscoveryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
-  const [matchedPhotos, setMatchedPhotos] = useState<Photo[]>([]);
+  const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -130,17 +134,48 @@ export default function GuestFaceDiscoveryPage() {
       await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
       await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
 
-      setStatus("Scanning face...");
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+      // Multi-frame enrollment: capture 3 frames 500 ms apart and average the
+      // descriptors. A single selfie frame is sensitive to momentary expression,
+      // angle, and lighting; an average of 3 is far more stable.
+      const SAMPLES = 3;
+      const DELAY_MS = 500;
+      const collectedDescriptors: Float32Array[] = [];
 
-      if (!detection) {
-        throw new Error("No face detected. Try better lighting and face the camera.");
+      for (let i = 0; i < SAMPLES; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
+        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} — hold still...`);
+
+        const video = videoRef.current;
+        if (!video) break;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        ctx.drawImage(video, 0, 0);
+
+        const detection = await faceapi
+          .detectSingleFace(canvas)
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (detection) {
+          collectedDescriptors.push(Float32Array.from(detection.descriptor));
+        }
       }
 
-      const descriptor = Array.from(detection.descriptor);
+      if (collectedDescriptors.length < 2) {
+        throw new Error(
+          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. ` +
+          "Make sure your face is well-lit and centred in the frame."
+        );
+      }
+
+      setStatus("Computing face profile...");
+      const averaged = averageDescriptors(collectedDescriptors);
+      const descriptor = Array.from(averaged);
+
       const enrollResp = await fetch("/api/guest/enroll-face", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -158,8 +193,9 @@ export default function GuestFaceDiscoveryPage() {
         throw new Error(matchData.error || "Failed to find matches");
       }
 
-      const ids: string[] = matchData.photoIds || [];
-      if (!ids.length) {
+      // New response: { photos: [{ photoId, score }] } sorted best-first
+      const scored: { photoId: string; score: number }[] = matchData.photos || [];
+      if (!scored.length) {
         setMatchedPhotos([]);
         setStep("results");
         setStatus("");
@@ -172,7 +208,14 @@ export default function GuestFaceDiscoveryPage() {
       }
       const album = (await albumResp.json()) as Album;
       const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
-      const matched = all.filter((photo) => ids.includes(photo.id));
+      const photoMap = new Map(all.map((p) => [p.id, p]));
+
+      const matched: MatchedPhoto[] = scored
+        .map((m) => {
+          const photo = photoMap.get(m.photoId);
+          return photo ? { ...photo, score: m.score } : null;
+        })
+        .filter((p): p is MatchedPhoto => p !== null);
 
       setMatchedPhotos(matched);
       setStep("results");
@@ -340,12 +383,34 @@ export default function GuestFaceDiscoveryPage() {
             ) : (
               <div className="photo-grid" style={{ marginTop: 16 }}>
                 {matchedPhotos.map((photo) => (
-                  <div key={photo.id} style={{ borderRadius: 10, overflow: "hidden", background: "var(--sand)" }}>
+                  <div
+                    key={photo.id}
+                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)" }}
+                  >
                     <img
                       src={photo.url}
                       alt={photo.originalName}
                       style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1 / 1" }}
                     />
+                    <span
+                      style={{
+                        position: "absolute",
+                        bottom: 6,
+                        left: 6,
+                        background:
+                          photo.score < 0.3
+                            ? "rgba(34,197,94,0.88)"
+                            : "rgba(234,179,8,0.88)",
+                        color: "#fff",
+                        borderRadius: 4,
+                        padding: "2px 7px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.03em",
+                      }}
+                    >
+                      {photo.score < 0.3 ? "Strong match" : "Possible match"}
+                    </span>
                   </div>
                 ))}
               </div>

@@ -133,6 +133,13 @@ fotohaven/
   - Sets `Photo.faceProcessed = true`.
 - **Purpose**: Stores browser-extracted descriptors; no server-side neural inference.
 
+### GET /api/guest/my-photos
+- **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
+- **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending cosine distance (best matches first).
+- **Threshold**: `0.4` cosine distance (high-confidence match range for face-api.js embeddings).
+- **Score meaning**: `< 0.3` = strong match, `0.3–0.4` = possible match.
+- **Enrollment**: Guest page captures 3 selfie frames at 500ms intervals, averages descriptors via `averageDescriptors()` for robustness.
+
 ### DELETE /api/photos/:photoId
 - **Auth**: Required (session cookie, guarded by middleware).
 - **Effect**: Deletes file from storage + DB row.

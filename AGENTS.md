@@ -967,3 +967,61 @@ inference ever runs on the Android device.
 - [x] Phone CPU never runs neural network inference
 - [x] Guest face matching works correctly using browser-generated descriptors
 - [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Improve face matching accuracy & performance
+
+**Status:** Completed  
+**Scope:** Four targeted improvements to the guest face matching pipeline. No schema changes, no new packages.
+
+### Problem analysis
+- Guest enrollment captured a single selfie frame — fragile against angle/lighting variation
+- Match threshold `0.5` was too permissive for large crowds (Indian weddings)
+- API returned bare `photoIds` with no confidence indication
+- Match query used 3 sequential DB queries instead of a join
+
+### Changes
+
+#### Change 1 — Multi-sample guest enrollment
+- `src/app/share/[token]/guest/page.tsx` — `scanAndMatch()` now captures **3 frames** at 500ms intervals, extracts a descriptor from each, and averages them before enrolling
+- `src/lib/face-math.ts` — Added `averageDescriptors(Float32Array[])` helper
+- Requires at least 2 of 3 successful detections; shows per-sample status text
+- Status text shows "Capturing sample 1 of 3 — hold still..."
+
+#### Change 2 — Tighten match threshold (0.5 → 0.4)
+- `src/app/api/guest/my-photos/route.ts` — `DISTANCE_THRESHOLD` changed from `0.5` to `0.4`
+- face-api.js same-person range: ≤0.4 is high confidence, ≤0.6 is same person
+- The old threshold was in the "maybe same person" range; 0.4 is firmly "high confidence"
+
+#### Change 3 — Return scored results
+- `GET /api/guest/my-photos` now returns `{ photos: [{ photoId, score }] }` sorted best-first (lowest distance = strongest match)
+- Guest page shows confidence badges: green "Strong match" (score < 0.3) or amber "Possible match" (score 0.3–0.4)
+- Results are sorted best-first so most confident matches appear at top of grid
+
+#### Change 4 — Single-join DB query
+- Replaced 3 sequential queries (ceremonies → photos → photoFaces) with a single `innerJoin` query: `photoFaces → photos → ceremonies WHERE albumId = X AND isReturn = false`
+- Eliminates `inArray(ceremonyIds)` and `inArray(photoIds)` intermediate arrays
+
+### Modified files
+| File | Change |
+|------|--------|
+| `src/lib/face-math.ts` | Added `averageDescriptors()` helper |
+| `src/app/api/guest/my-photos/route.ts` | Threshold 0.5→0.4, single join query, scored response |
+| `src/app/share/[token]/guest/page.tsx` | Multi-frame capture, MatchedPhoto type, confidence badges |
+
+### Files NOT touched
+- `src/lib/schema.ts` — no schema changes
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/app/api/guest/enroll-face/route.ts` — receives same `number[]` descriptor format
+- `src/app/albums/[albumId]/FaceProcessor.tsx` — photo indexing unchanged
+
+### Acceptance criteria
+- [x] Guest enrollment captures 3 frames and averages descriptors (requires ≥2 successful detections)
+- [x] Match threshold tightened from 0.5 to 0.4 to reduce false positives
+- [x] `GET /api/guest/my-photos` returns `{ photos: [{ photoId, score }] }` sorted best-first
+- [x] Match results show green "Strong match" (< 0.3) or amber "Possible match" (0.3–0.4) badges
+- [x] DB query uses a single join instead of 3 sequential queries
+- [x] `averageDescriptors()` correctly averages N Float32Array descriptors
+- [x] `npx tsc --noEmit` passes with zero errors

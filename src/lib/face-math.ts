@@ -28,3 +28,28 @@ export function cosineDistance(a: Float32Array, b: Float32Array): number {
   const similarity = dot / (Math.sqrt(magA) * Math.sqrt(magB));
   return 1 - similarity;
 }
+
+/**
+ * Averages multiple 128-float face descriptors into a single representative descriptor.
+ * Used for multi-sample guest enrollment — averaging 3 frames across slightly different
+ * angles/lighting produces a centroid that is more robust than any single capture.
+ */
+export function averageDescriptors(descriptors: Float32Array[]): Float32Array {
+  if (!descriptors.length) {
+    throw new Error("averageDescriptors: no descriptors provided");
+  }
+  const len = descriptors[0].length;
+  const result = new Float32Array(len);
+  for (const d of descriptors) {
+    if (d.length !== len) {
+      throw new Error("averageDescriptors: descriptor length mismatch");
+    }
+    for (let i = 0; i < len; i++) {
+      result[i] += d[i];
+    }
+  }
+  for (let i = 0; i < len; i++) {
+    result[i] /= descriptors.length;
+  }
+  return result;
+}
