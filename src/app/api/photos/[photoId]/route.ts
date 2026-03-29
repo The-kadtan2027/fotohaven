@@ -38,3 +38,47 @@ export async function DELETE(
     );
   }
 }
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ photoId: string }> }
+) {
+  try {
+    const { photoId } = await params;
+
+    // Validate photo exists
+    const photo = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.id, photoId))
+      .get();
+
+    if (!photo) {
+      return NextResponse.json({ error: "Photo not found" }, { status: 404 });
+    }
+
+    const body = await req.json();
+    const { isSelected } = body;
+
+    if (typeof isSelected !== "boolean") {
+      return NextResponse.json(
+        { error: "isSelected must be a boolean" },
+        { status: 400 }
+      );
+    }
+
+    // Update isSelected
+    db.update(photos)
+      .set({ isSelected })
+      .where(eq(photos.id, photoId))
+      .run();
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[PATCH /api/photos]", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
+}

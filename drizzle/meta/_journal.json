@@ -15,6 +15,13 @@
       "when": 1773807465949,
       "tag": "0001_parched_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1774322822652,
+      "tag": "0002_salty_butterfly",
+      "breakpoints": true
     }
   ]
 }

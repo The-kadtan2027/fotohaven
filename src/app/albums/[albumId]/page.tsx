@@ -8,6 +8,7 @@ import {
   ArrowLeft, Share2, Upload, Check, X, Image as ImageIcon,
   FolderOpen, Loader2, Copy, ExternalLink, Trash2, PackageCheck,
 } from "lucide-react";
+import FaceProcessor from "./FaceProcessor";
 
 interface Photo {
   id: string;
@@ -18,6 +19,8 @@ interface Photo {
   storageKey: string;
   comments?: any[];
   isReturn?: boolean;
+  isSelected?: boolean;
+  faceProcessed?: boolean;
 }
 
 interface Ceremony {
@@ -414,6 +417,7 @@ export default function AlbumPage() {
           {album.ceremonies.map((c) => {
             const origCount = c.photos.filter((p) => !p.isReturn).length;
             const finCount = c.photos.filter((p) => p.isReturn).length;
+            const selCount = c.photos.filter((p) => !p.isReturn && p.isSelected).length;
             return (
               <button
                 key={c.id}
@@ -432,6 +436,9 @@ export default function AlbumPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   {finCount > 0 && (
                     <span title={`${finCount} finals`} style={{ fontSize: 9, background: "rgba(201,150,58,0.2)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>FINALS</span>
+                  )}
+                  {selCount > 0 && (
+                    <span title={`${selCount} client-selected`} style={{ fontSize: 9, background: "rgba(201,150,58,0.12)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>★{selCount}</span>
                   )}
                   <span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>
                     {origCount}
@@ -479,6 +486,15 @@ export default function AlbumPage() {
                       </span>
                     )}
                   </p>
+                  {(() => {
+                    const selN = activeCeremonyData.photos.filter((p) => !p.isReturn && p.isSelected).length;
+                    const totN = activeCeremonyData.photos.filter((p) => !p.isReturn).length;
+                    return selN > 0 ? (
+                      <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 4 }}>
+                        ★ Client has selected {selN} of {totN} original photo{totN !== 1 ? 's' : ''}
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
                 {activeCeremonyData.photos.some((p) => p.isReturn) && (
                   <button
@@ -617,6 +633,16 @@ export default function AlbumPage() {
         </div>
       )}
 
+      <FaceProcessor
+        photos={album.ceremonies.flatMap((ceremony) =>
+          ceremony.photos.map((photo) => ({
+            id: photo.id,
+            url: photo.url,
+            faceProcessed: Boolean(photo.faceProcessed),
+          }))
+        )}
+      />
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
@@ -693,6 +719,21 @@ function PhotoCard({ photo, onDelete, onSelect, isSelected, showCheckbox }: { ph
             zIndex: 5
           }} 
         />
+      )}
+      {photo.isSelected && (
+        <div
+          title="Client selected"
+          style={{
+            position: "absolute", bottom: 8, right: 8,
+            fontSize: 14, lineHeight: 1,
+            color: "var(--gold)",
+            textShadow: "0 1px 3px rgba(0,0,0,0.5)",
+            zIndex: 5,
+            pointerEvents: "none",
+          }}
+        >
+          ★
+        </div>
       )}
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "24px 8px 8px", background: "linear-gradient(transparent, rgba(26,18,8,0.5))", opacity: 0, transition: "opacity 0.2s" }}
         onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}

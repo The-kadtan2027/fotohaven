@@ -28,6 +28,7 @@ Always keep ARM compatibility and low memory footprint in mind.
 | resend | ^6.9.3 | Email notifications |
 | bcryptjs | ^3.0.3 | Password hashing |
 | archiver | ^7.0.1 | Server-side ZIP Streaming |
+| jose | ^6.x | JWT (Edge-compatible, used in middleware) |
 | @aws-sdk/client-s3 | 3.540.x | Cloudflare R2 / Local Storage |
 | lucide-react | 0.468.x | Icons |
 | uuid | 9.0.x | ID generation |
@@ -46,10 +47,14 @@ fotohaven/
 │   │   └── email.ts           ← Email utility (Resend)
 │   ├── app/                   ← Next.js App Router
 │   │   ├── api/
-│   │   │   ├── albums/        ← CRUD for albums
-│   │   │   ├── share/         ← Public gallery data (password guarded)
+│   │   │   ├── albums/        ← CRUD for albums + download
+│   │   │   ├── share/         ← Public gallery data (password guarded, upload-returns, download)
 │   │   │   ├── upload/        ← S3/Local upload handler
-│   │   │   └── comments/      ← Per-photo comments (POST/GET)
+│   │   │   ├── photos/        ← Photo DELETE (auth), PATCH isSelected (public), batch-delete
+│   │   │   ├── ceremonies/    ← Add/Delete ceremony folders
+│   │   │   ├── auth/          ← login, logout, me (JWT cookie)
+│   │   │   ├── comments/      ← Per-photo comments (POST/GET)
+│   │   │   └── files/         ← Local file serving (Range request support)
 │   │   ├── share/[token]/     ← Public gallery UI (challenge screen)
 │   │   └── albums/[id]/       ← Admin manage view
 │   └── types/                 ← Shared TS interfaces
@@ -86,6 +91,9 @@ fotohaven/
 - `storageKey`: Path in R2/Local storage
 - `thumbnailKey`: Path to 800px downscaled JPEG (optional)
 - `ceremonyId`: Foreign key to Ceremony (Cascade)
+- `isReturn`: Boolean — true = edited final delivered by photographer
+- `returnOf`: Optional photoId linking to original (nullable)
+- `isSelected`: Boolean (default false) — client-marked selection, persistent across sessions
 - `comments`: Relation to Comment table
 
 ### Comment
@@ -94,6 +102,13 @@ fotohaven/
 - `author`: "photographer" | "client"
 - `photoId`: Foreign key to Photo (Cascade)
 
+### Photographer
+- `id`: UUID string
+- `username`: Unique username (for admin login)
+- `passwordHash`: bcrypt hash
+- `createdAt`: Timestamp
+- Seed with `npm run seed` using `ADMIN_USERNAME` + `ADMIN_PASSWORD` env vars
+
 ---
 
 ## API Contracts
@@ -101,7 +116,43 @@ fotohaven/
 ### GET /api/share/:token
 - **Guard**: Returns `401 { passwordRequired: true }` if album has password and `Authorization: Bearer <pass>` header is missing.
 - **Trigger**: Sets `firstViewedAt` and sends Resend notification on first successful load.
-- **Response**: Full gallery data including comments.
+- **Response**: Full gallery data including comments and `isSelected` per photo.
+
+### PATCH /api/photos/:photoId
+- **Auth**: **Not required** — called from the unauthenticated share page.
+- **Body**: `{ isSelected: boolean }`
+- **Response**: `{ ok: true }` or `404`.
+- **Purpose**: Persists client photo selection to the database.
+
+### POST /api/photos/:photoId/faces
+- **Auth**: Required (photographer session cookie / JWT).
+- **Body**: `{ faces: Array<{ descriptor: number[], boundingBox: { x, y, width, height } }> }`
+- **Effect**:
+  - Replaces existing `PhotoFace` rows for the photo (idempotent overwrite).
+  - Inserts new descriptors and bounding boxes.
+  - Sets `Photo.faceProcessed = true`.
+- **Purpose**: Stores browser-extracted descriptors; no server-side neural inference.
+
+### GET /api/guest/my-photos
+- **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
+- **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending cosine distance (best matches first).
+- **Threshold**: `0.4` cosine distance (high-confidence match range for face-api.js embeddings).
+- **Score meaning**: `< 0.3` = strong match, `0.3–0.4` = possible match.
+- **Enrollment**: Guest page captures 3 selfie frames at 500ms intervals, averages descriptors via `averageDescriptors()` for robustness.
+
+### DELETE /api/photos/:photoId
+- **Auth**: Required (session cookie, guarded by middleware).
+- **Effect**: Deletes file from storage + DB row.
+
+### POST /api/auth/login
+- **Body**: `{ username, password }`
+- **Response**: Sets `session` HttpOnly JWT cookie (7-day expiry).
+
+### POST /api/auth/logout
+- **Effect**: Clears `session` cookie.
+
+### GET /api/auth/me
+- **Response**: `{ id, username }` if JWT valid, else `401`.
 
 ### POST /api/comments
 - **Body**: `{ photoId, body, author }`
@@ -109,6 +160,12 @@ fotohaven/
 
 ### GET /api/comments?photoId=uuid
 - **Response**: List of comments for the photo.
+
+### Middleware guards (src/middleware.ts)
+- **Redirects** unauthenticated browser requests to `/` and `/albums/*` → `/login`.
+- **Returns 401** for unauthenticated API calls to `/api/albums`, `/api/upload`, `/api/ceremonies`.
+- **`/api/photos` PATCH + GET are public** (client selection from share page). DELETE is guarded.
+- **Public**: `/api/auth/*`, `/api/share/*`, `/api/comments/*`, `/api/files/*`, `/login`, `/share/*`.
 
 ---
 
@@ -136,7 +193,12 @@ pm2 start ecosystem.config.js
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
+- **Face processing architecture**:
+  - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
+  - Browser loads models from `/public/models` with `loadFromUri('/models')`.
+  - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
+  - Server only stores descriptors and runs cosine distance matching; heavy inference is offloaded from Android phone CPU.
+  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
-
 
