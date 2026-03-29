@@ -126,20 +126,14 @@ export default function GuestFaceDiscoveryPage() {
     if (!videoRef.current) return;
     setBusy(true);
     setError("");
-    setStatus("Loading models...");
 
     try {
-      const faceapi = await import("face-api.js");
-      await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
-      await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
-
       // Multi-frame enrollment: capture 3 frames 500 ms apart and average the
       // descriptors. A single selfie frame is sensitive to momentary expression,
       // angle, and lighting; an average of 3 is far more stable.
       const SAMPLES = 3;
       const DELAY_MS = 500;
-      const collectedDescriptors: Float32Array[] = [];
+      const canvases: HTMLCanvasElement[] = [];
 
       for (let i = 0; i < SAMPLES; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
@@ -154,7 +148,18 @@ export default function GuestFaceDiscoveryPage() {
         const ctx = canvas.getContext("2d");
         if (!ctx) continue;
         ctx.drawImage(video, 0, 0);
+        canvases.push(canvas);
+      }
 
+      setStatus("Loading models...");
+      const faceapi = await import("face-api.js");
+      await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
+      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
+      await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
+
+      setStatus("Computing face profile...");
+      const collectedDescriptors: Float32Array[] = [];
+      for (const canvas of canvases) {
         const detection = await faceapi
           .detectSingleFace(canvas)
           .withFaceLandmarks()
@@ -172,7 +177,6 @@ export default function GuestFaceDiscoveryPage() {
         );
       }
 
-      setStatus("Computing face profile...");
       const averaged = averageDescriptors(collectedDescriptors);
       const descriptor = Array.from(averaged);
 
