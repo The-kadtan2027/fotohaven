@@ -1150,3 +1150,42 @@ imageHash:   text('imageHash'),   // 64-bit dHash as 16-char hex, computed clien
 - [ ] Album manager has a working lightbox with progressive thumbnail→full-res loading.
 - [ ] Share page lightbox uses progressive loading (thumbnail placeholder → full-res fade).
 - [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Parallel Browser Compression Controls
+
+**Status:** Completed
+**Scope:** Speed up upload preparation on the photographer's browser by allowing bounded parallel image compression, expose a configurable concurrency control in the album upload settings, and add console timing logs for each prepared file.
+
+### Schema change
+None.
+
+### Modified files
+
+#### `src/app/albums/[albumId]/page.tsx`
+- Add a local `compressionConcurrency` setting for browser-side preparation.
+- Update `onDrop` to prepare files with bounded parallelism while preserving queue order.
+- Add console logs for compression start/end, original size, output size, and elapsed milliseconds.
+- Add a small UI control in Upload Settings to choose concurrency (recommended default: `2`).
+- Make it explicit in the UI that concurrency is a browser-only setting and is not saved as an album default.
+
+#### `src/lib/image-utils.ts`
+- No algorithm rewrite required.
+- Continue using `compressImageFile()` as the single-file primitive while allowing the album page to orchestrate parallel execution.
+
+### Implementation plan
+1. Keep compression browser-side; do not move work onto the Android server.
+2. Introduce bounded parallel processing with a small configurable cap.
+3. Preserve upload queue ordering so prepared files still appear in the same order as selected files.
+4. Add concise console logs to help diagnose slow or failed preparation runs from the browser.
+5. Verify with `npx tsc --noEmit`.
+
+### Acceptance criteria
+- [x] Upload preparation can run with configurable parallel compression in the browser.
+- [x] Default concurrency is a safe low number (`2`).
+- [x] Prepared files preserve the same order as the selected input files.
+- [x] Browser console logs show per-file compression timing and size information.
+- [x] The setting works with `original`, `jpeg`, and `webp` modes.
+- [x] No schema changes are introduced.
+- [x] `npx tsc --noEmit` passes with zero errors.

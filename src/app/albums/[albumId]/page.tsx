@@ -79,6 +79,7 @@ export default function AlbumPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [compressionFormat, setCompressionFormat] = useState<CompressionFormat>("webp");
   const [compressionQuality, setCompressionQuality] = useState(80);
+  const [compressionConcurrency, setCompressionConcurrency] = useState(2);
   const [dedupThreshold, setDedupThreshold] = useState(10);
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
   const [isFindingDuplicates, setIsFindingDuplicates] = useState(false);
@@ -125,20 +126,29 @@ export default function AlbumPage() {
     if (!activeCeremony || acceptedFiles.length === 0) return;
     setIsPreparingUploads(true);
     try {
-      const prepared: UploadItem[] = [];
-      for (const file of acceptedFiles) {
-        prepared.push({
-          file: await compressImageFile(file, compressionFormat, compressionQuality),
-          ceremonyId: activeCeremony,
-          status: "pending",
-          progress: 0,
-        });
-      }
+      const preparedFiles = await mapWithConcurrency(
+        acceptedFiles,
+        compressionConcurrency,
+        async (file, index) => {
+          const startedAt = performance.now();
+          console.info(`[upload-prepare] start ${index + 1}/${acceptedFiles.length}: ${file.name} (${formatMb(file.size)} MB) using ${compressionFormat}`);
+          const preparedFile = await compressImageFile(file, compressionFormat, compressionQuality);
+          const elapsedMs = Math.round(performance.now() - startedAt);
+          console.info(`[upload-prepare] done ${index + 1}/${acceptedFiles.length}: ${file.name} -> ${preparedFile.name} (${formatMb(file.size)} MB -> ${formatMb(preparedFile.size)} MB) in ${elapsedMs}ms`);
+          return preparedFile;
+        }
+      );
+      const prepared: UploadItem[] = preparedFiles.map((file) => ({
+        file,
+        ceremonyId: activeCeremony,
+        status: "pending",
+        progress: 0,
+      }));
       setUploads((prev) => [...prev, ...prepared]);
     } finally {
       setIsPreparingUploads(false);
     }
-  }, [activeCeremony, compressionFormat, compressionQuality]);
+  }, [activeCeremony, compressionConcurrency, compressionFormat, compressionQuality]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -423,7 +433,7 @@ export default function AlbumPage() {
 
           <div className="card" style={{ padding: 18, marginBottom: 24 }}>
             <button onClick={() => setSettingsOpen((prev) => !prev)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", cursor: "pointer", color: "var(--espresso)" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600 }}><Settings2 size={16} color="var(--gold)" />Upload Settings</span>{settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-            {settingsOpen ? <div style={{ marginTop: 18, display: "grid", gap: 18 }}><div><p style={settingsLabel}>Compression Format</p><div style={{ display: "flex", gap: 8 }}>{(["webp", "jpeg", "original"] as CompressionFormat[]).map((format) => <button key={format} onClick={() => setCompressionFormat(format)} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${compressionFormat === format ? "var(--gold)" : "var(--sand)"}`, background: compressionFormat === format ? "rgba(201,150,58,0.08)" : "var(--warm-white)", color: compressionFormat === format ? "var(--espresso)" : "var(--brown)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>{format.toUpperCase()}</button>)}</div></div><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Quality: {compressionQuality}%</span><input type="range" min={10} max={100} value={compressionQuality} onChange={(event) => setCompressionQuality(Number(event.target.value))} /></label><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Duplicate Threshold: {dedupThreshold}</span><input type="range" min={1} max={20} value={dedupThreshold} onChange={(event) => setDedupThreshold(Number(event.target.value))} /><span style={{ fontSize: 12, color: "var(--brown)" }}>Lower values are stricter. Higher values group looser visual matches.</span></label><div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><p style={{ fontSize: 12, color: "var(--brown)" }}>{compressionFormat === "original" ? "New uploads keep their original file and quality." : "New uploads are compressed in the browser before they enter the queue."}</p><button className="btn-gold" onClick={saveAlbumDefaults} disabled={isSavingDefaults} style={{ fontSize: 12 }}>{isSavingDefaults ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={12} />}Save as album default</button></div></div> : null}
+            {settingsOpen ? <div style={{ marginTop: 18, display: "grid", gap: 18 }}><div><p style={settingsLabel}>Compression Format</p><div style={{ display: "flex", gap: 8 }}>{(["webp", "jpeg", "original"] as CompressionFormat[]).map((format) => <button key={format} onClick={() => setCompressionFormat(format)} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${compressionFormat === format ? "var(--gold)" : "var(--sand)"}`, background: compressionFormat === format ? "rgba(201,150,58,0.08)" : "var(--warm-white)", color: compressionFormat === format ? "var(--espresso)" : "var(--brown)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>{format.toUpperCase()}</button>)}</div></div><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Quality: {compressionQuality}%</span><input type="range" min={10} max={100} value={compressionQuality} onChange={(event) => setCompressionQuality(Number(event.target.value))} /></label><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Preparation Concurrency: {compressionConcurrency}</span><input type="range" min={1} max={4} value={compressionConcurrency} onChange={(event) => setCompressionConcurrency(Number(event.target.value))} /><span style={{ fontSize: 12, color: "var(--brown)" }}>Browser-only setting. Higher values may prepare faster on strong laptops but can make weaker machines stutter.</span></label><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Duplicate Threshold: {dedupThreshold}</span><input type="range" min={1} max={20} value={dedupThreshold} onChange={(event) => setDedupThreshold(Number(event.target.value))} /><span style={{ fontSize: 12, color: "var(--brown)" }}>Lower values are stricter. Higher values group looser visual matches.</span></label><div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><p style={{ fontSize: 12, color: "var(--brown)" }}>{compressionFormat === "original" ? "New uploads keep their original file and quality." : "New uploads are compressed in the browser before they enter the queue."}</p><button className="btn-gold" onClick={saveAlbumDefaults} disabled={isSavingDefaults} style={{ fontSize: 12 }}>{isSavingDefaults ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={12} />}Save as album default</button></div></div> : null}
           </div>
 
           {uploads.length > 0 ? <UploadQueue uploads={uploads} isUploading={isUploading} onUploadAll={uploadAll} onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))} /> : null}
@@ -482,6 +492,33 @@ function appendHidden(form: HTMLFormElement, name: string, value: string) {
   input.name = name;
   input.value = value;
   form.appendChild(input);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, () => worker())
+  );
+
+  return results;
+}
+
+function formatMb(size: number) {
+  return (size / 1024 / 1024).toFixed(1);
 }
 
 const settingsLabel = { fontSize: 12, color: "var(--taupe)", textTransform: "uppercase" as const, letterSpacing: "0.08em" };
