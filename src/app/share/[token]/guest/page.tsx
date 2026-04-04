@@ -46,11 +46,20 @@ export default function GuestFaceDiscoveryPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  }
+
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
+      stopCamera();
     };
   }, []);
 
@@ -150,6 +159,8 @@ export default function GuestFaceDiscoveryPage() {
         ctx.drawImage(video, 0, 0);
         canvases.push(canvas);
       }
+
+      stopCamera();
 
       setStatus("Loading models...");
       const faceapi = await import("face-api.js");
@@ -432,3 +443,4 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
