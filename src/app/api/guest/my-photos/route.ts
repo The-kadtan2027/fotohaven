@@ -6,6 +6,8 @@ import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 import { cosineDistance, parseDescriptor } from "@/lib/face-math";
 
+export const dynamic = "force-dynamic";
+
 // Tightened from 0.5 — reduces false positives in large crowds (e.g. Indian weddings).
 // face-api.js same-person threshold is typically = 0.6; = 0.35 is a stricter crowded-album cutoff.
 const DISTANCE_THRESHOLD = 0.35;
@@ -15,7 +17,7 @@ export async function GET() {
     const cookieStore = await cookies();
     const session = cookieStore.get(getGuestCookieName())?.value;
     if (!session) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
 
     const payload = await verifyGuestSession(session);
@@ -27,11 +29,11 @@ export async function GET() {
       .get();
 
     if (!guest || !guest.sessionToken || guest.sessionToken !== payload.st) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
 
     if (!guest.faceDescriptor) {
-      return NextResponse.json({ photos: [] });
+      return NextResponse.json({ photos: [] }, { headers: { "Cache-Control": "no-store" } });
     }
 
     const guestDescriptor = parseDescriptor(guest.faceDescriptor);
@@ -56,7 +58,7 @@ export async function GET() {
       .all();
 
     if (!faces.length) {
-      return NextResponse.json({ photos: [] });
+      return NextResponse.json({ photos: [] }, { headers: { "Cache-Control": "no-store" } });
     }
 
     // Track best (lowest) distance per photo — a photo with multiple faces
@@ -87,11 +89,12 @@ export async function GET() {
         score: Math.round(score * 1000) / 1000,
       }));
 
-    return NextResponse.json({ photos: matched });
+    return NextResponse.json({ photos: matched }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[GET /api/guest/my-photos]", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
+
 
 

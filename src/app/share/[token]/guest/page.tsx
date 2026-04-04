@@ -202,7 +202,7 @@ export default function GuestFaceDiscoveryPage() {
       }
 
       setStatus("Finding your photos...");
-      const matchResp = await fetch("/api/guest/my-photos");
+      const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
       const matchData = await matchResp.json();
       if (!matchResp.ok) {
         throw new Error(matchData.error || "Failed to find matches");
@@ -217,7 +217,7 @@ export default function GuestFaceDiscoveryPage() {
         return;
       }
 
-      const albumResp = await fetch(`/api/share/${token}`);
+      const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
       if (!albumResp.ok) {
         throw new Error("Face matched photos found, but gallery is unavailable right now.");
       }
@@ -443,4 +443,5 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
 
