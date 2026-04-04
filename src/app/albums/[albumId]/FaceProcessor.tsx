@@ -36,7 +36,16 @@ async function blobToImageElement(
   const img = new Image();
   img.src = objectUrl;
 
-  await img.decode();
+  await img
+    .decode()
+    .catch(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () =>
+            reject(new Error("The source image cannot be decoded."));
+        })
+    );
   return { img, objectUrl };
 }
 
