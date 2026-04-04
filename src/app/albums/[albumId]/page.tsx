@@ -320,7 +320,7 @@ export default function AlbumPage() {
     }
   };
 
-  const findDuplicates = async () => {
+  const scanDuplicates = async (forceRescan = false) => {
     const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
     if (!activeCeremonyData) return;
     setIsFindingDuplicates(true);
@@ -330,7 +330,7 @@ export default function AlbumPage() {
       const hashedPhotos: Photo[] = [];
       const newHashes: Array<{ photoId: string; imageHash: string }> = [];
       for (const photo of originals) {
-        if (photo.imageHash) {
+        if (!forceRescan && photo.imageHash) {
           hashedPhotos.push(photo);
           continue;
         }
@@ -362,6 +362,14 @@ export default function AlbumPage() {
     } finally {
       setIsFindingDuplicates(false);
     }
+  };
+
+  const findDuplicates = async () => {
+    await scanDuplicates(false);
+  };
+
+  const rescanDuplicates = async () => {
+    await scanDuplicates(true);
   };
 
   const reprocessFaces = async () => {
@@ -435,6 +443,7 @@ export default function AlbumPage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn-ghost" onClick={reprocessFaces} style={{ fontSize: 12 }} disabled={isReprocessingFaces}>{isReprocessingFaces ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : null}{isReprocessingFaces ? "Resetting..." : "Reprocess Faces"}</button>
               <button className="btn-ghost" onClick={findDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Find Duplicates"}</button>
+              <button className="btn-ghost" onClick={rescanDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Rescan Duplicates"}</button>
               {activeCeremonyData.photos.some((photo) => photo.isReturn) ? <button className="btn-gold" onClick={() => downloadFinals(album, activeCeremonyData)} style={{ fontSize: 12 }}><PackageCheck size={12} />Download Finals</button> : null}
             </div>
           </div>
