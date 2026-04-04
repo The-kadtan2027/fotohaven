@@ -68,8 +68,9 @@ export async function compressImageFile(
   }
 }
 
-export async function computeDHashFromUrl(url: string): Promise<string> {
-  const response = await fetch(url);
+export async function computeDHashFromUrl(url: string, options?: { cacheBust?: boolean }): Promise<string> {
+  const requestUrl = options?.cacheBust ? `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}` : url;
+  const response = await fetch(requestUrl, { cache: options?.cacheBust ? "no-store" : "default" });
   if (!response.ok) {
     throw new Error("Failed to fetch image for hashing");
   }

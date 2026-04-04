@@ -325,6 +325,10 @@ export default function AlbumPage() {
     if (!activeCeremonyData) return;
     setIsFindingDuplicates(true);
     setDuplicateScanError("");
+    if (forceRescan) {
+      setDuplicateSourcePhotos(null);
+      setShowDuplicateModal(false);
+    }
     try {
       const originals = activeCeremonyData.photos.filter((photo) => !photo.isReturn);
       const hashedPhotos: Photo[] = [];
@@ -334,7 +338,7 @@ export default function AlbumPage() {
           hashedPhotos.push(photo);
           continue;
         }
-        const imageHash = await computeDHashFromUrl(photo.url);
+        const imageHash = await computeDHashFromUrl(photo.url, { cacheBust: forceRescan });
         hashedPhotos.push({ ...photo, imageHash });
         newHashes.push({ photoId: photo.id, imageHash });
       }
