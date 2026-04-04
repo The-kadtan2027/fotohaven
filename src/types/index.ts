@@ -18,7 +18,11 @@ export interface Photo {
   isReturn?: boolean;
   returnOf?: string | null;
   isSelected?: boolean;
+  isBlurred?: boolean;
+  imageHash?: string | null;
   faceProcessed?: boolean;
+  originalUrl?: string;
+  createdAt?: string;
 }
 
 export interface ReturnUploadPayload {
@@ -35,6 +39,9 @@ export interface Album {
   clientName: string;
   shareToken: string;
   expiresAt: string | null;
+  compressionQuality?: number;
+  compressionFormat?: "jpeg" | "webp";
+  dedupThreshold?: number;
   ceremonies: Ceremony[];
 }
 

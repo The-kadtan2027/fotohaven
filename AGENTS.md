@@ -446,6 +446,12 @@ None.
 - [x] `CLAUDE.md` reflects modern features: Tailscale, thumbnail generation with `sharp`, 30MB stream uploads.
 - [x] `npx tsc --noEmit` passes with zero errors.
 
+Implementation note:
+- The remaining unchecked bullets in this section were completed in code on this branch:
+- Duplicate grouping honors the configurable threshold.
+- Admin blur styling stays album-only.
+- Album and share lightboxes both use progressive thumbnail-to-full-resolution loading.
+
 ---
 
 ## Task: Server-Side ZIP Streaming
@@ -1025,3 +1031,122 @@ inference ever runs on the Android device.
 - [x] DB query uses a single join instead of 3 sequential queries
 - [x] `averageDescriptors()` correctly averages N Float32Array descriptors
 - [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Advanced Album Management (Duplicates, Blur, Compression, Lightbox)
+
+**Status:** Completed
+**Scope:** Provide album managers tools in the album view to: visually detect duplicates via perceptual hashing (dHash), blur selected photos (admin-only), control upload compression format and quality, and view photos in a full lightbox with progressive loading.
+
+### Design decisions (confirmed by user)
+1. **dHash threshold** — configurable per-album setting (default: 10, range 1–20)
+2. **Compression format** — user selects between JPEG and WebP. WebP is preferred for future scalability (smaller at same quality, native browser support); JPEG kept for compatibility. Both use the Canvas API.
+3. **Blur on share page** — NOT applied. Blur is an admin-only visual tool. Share page shows all photos normally.
+
+### Schema changes (`src/lib/schema.ts`)
+Add to `albums` table:
+```typescript
+compressionQuality:  integer('compressionQuality').notNull().default(80),   // 1–100
+compressionFormat:   text('compressionFormat').notNull().default('webp'),   // 'jpeg' | 'webp'
+dedupThreshold:      integer('dedupThreshold').notNull().default(10),       // dHash Hamming distance 1–20
+```
+Add to `photos` table:
+```typescript
+isBlurred:   integer('isBlurred', { mode: 'boolean' }).notNull().default(false),
+imageHash:   text('imageHash'),   // 64-bit dHash as 16-char hex, computed client-side
+```
+*(After schema edit, must run: `npm run db:generate && npm run db:push`)*
+
+### New API routes
+
+#### `PATCH /api/albums/[albumId]` — `src/app/api/albums/[albumId]/route.ts`
+- Add a `PATCH` handler to the existing file (has `GET` and `DELETE`).
+- Accepts `{ compressionQuality?, compressionFormat?, dedupThreshold? }` in body.
+- Updates only the provided fields on the album row.
+- Returns `200 { ok: true }`.
+- Auth: guarded by middleware.
+
+#### `POST /api/photos/blur-batch` — `src/app/api/photos/blur-batch/route.ts`
+- Body: `{ photoIds: string[], isBlurred: boolean }`.
+- Bulk-updates `photos.isBlurred` for all matching IDs in a single query.
+- Returns `200 { ok: true, updatedCount: N }`.
+
+#### Extend `PATCH /api/photos/[photoId]` — `src/app/api/photos/[photoId]/route.ts`
+- Existing handler accepts `{ isSelected }`. Extend to also accept `{ imageHash }`.
+- When `imageHash` is provided in the body, update `photos.imageHash` for that photo.
+- This lets the browser persist computed perceptual hashes after scanning.
+
+### UI changes (`src/app/albums/[albumId]/page.tsx`)
+
+#### A. Upload Settings Panel (Compression)
+- Below the drag-and-drop zone, add a collapsible "⚙ Upload Settings" section.
+- Contains:
+  - **Format selector**: radio/toggle between `JPEG` and `WebP` (default WebP).
+  - **Quality slider**: 10–100 (default 80), labelled "Quality: N%".
+  - "Save as album default" button → calls `PATCH /api/albums/[albumId]`.
+- In `onDrop`: before queueing each file, run client-side compression:
+  ```
+  canvas.drawImage(img) → canvas.toBlob(blob, 'image/webp', quality/100)
+  ```
+  The compressed blob replaces the original file in the upload queue; filename is preserved with the correct extension.
+
+#### B. Perceptual Duplicate Detection
+- Add a "🔍 Find Duplicates" button in the ceremony header area.
+- On click, for each photo in the active ceremony:
+  1. Load `photo.url` (thumbnail) into an `<img>` element.
+  2. Draw to an offscreen 9×8 Canvas in grayscale.
+  3. Compute dHash: compare each adjacent pixel pair across rows → 64-bit integer → 16-char hex.
+  4. If `photo.imageHash` is already stored (from DB), use it; skip re-computation.
+  5. If newly computed, persist via `PATCH /api/photos/:id` with `{ imageHash }`.
+- Group photos whose hashes are within Hamming distance ≤ `album.dedupThreshold`.
+- Show a results modal listing each duplicate group with thumbnails.
+- "Select All Duplicates" button: for each group, keeps the oldest photo (by `createdAt`) and adds the rest to `selectedPhotos`.
+- `dedupThreshold` is shown as a configurable slider (1–20) in the same panel; changes auto-filter results.
+
+#### C. Blur Toggle
+- In the floating selection action bar (shown when ≥1 photo selected), add:
+  - "🔒 Blur Selected" button → calls `POST /api/photos/blur-batch` with `{ photoIds, isBlurred: true }`.
+  - "🔓 Unblur Selected" button → same with `isBlurred: false`.
+- After API call, update local album state to reflect new `isBlurred` value.
+- `PhotoCard` applies `filter: blur(12px) saturate(0)` on the `<img>` when `isBlurred` is true.
+- A small 🔒 badge appears top-left on blurred PhotoCards (alongside or replacing the checkbox when not in selection mode).
+- Add `isBlurred` to the local `Photo` interface.
+
+#### D. Lightbox Viewer (NEW — currently missing on album page)
+- Clicking the photo image area (not the checkbox, not delete) opens a full-screen lightbox.
+- Lightbox shows:
+  - Full-resolution image with progressive loading: render `photo.url` (thumbnail) blurred as placeholder, overlay the `originalUrl` (full-res) which fades in when loaded.
+  - Left / right navigation arrows.
+  - Keyboard: ArrowLeft, ArrowRight, Escape.
+  - Close button (top-right ×).
+  - Photo name and index counter (e.g. "3 / 47").
+  - "Select" toggle button in the lightbox so photographer can select/deselect without closing.
+
+### UI changes (`src/app/share/[token]/page.tsx`)
+- **Blur: NO changes.** Share page renders photos normally regardless of `isBlurred`. Blur is admin-only.
+- **Progressive lightbox loading**: Apply the same progressive-load technique to the existing share page lightbox:
+  - Show `photo.url` (thumbnail) as a blurred background placeholder immediately.
+  - Overlay a second `<img>` loading `photo.originalUrl`; fade it in on `onLoad`.
+  - This eliminates the blank/slow wait when opening large originals.
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/middleware.ts` — no changes (new routes fall under already-guarded `/api/photos/*` and `/api/albums/*`)
+
+### Acceptance criteria
+- [x] Schema updated: `albums` gets `compressionQuality`, `compressionFormat`, `dedupThreshold`; `photos` gets `isBlurred`, `imageHash`.
+- [x] `PATCH /api/albums/[albumId]` persists compression + dedup settings.
+- [x] `POST /api/photos/blur-batch` bulk-toggles `isBlurred` in DB.
+- [x] `PATCH /api/photos/[photoId]` accepts and persists `imageHash`.
+- [x] dHash algorithm computes a stable 16-char hex fingerprint for any image.
+- [ ] "Find Duplicates" groups photos by Hamming distance ≤ configurable threshold (default 10).
+- [ ] Duplicate threshold slider (1–20) filters results live; default saved to album.
+- [x] Compression Format selector (JPEG / WebP) and Quality slider work before upload.
+- [x] "Save as album default" persists compression settings to DB.
+- [ ] Blurred photos show `blur(12px) saturate(0)` + 🔒 badge in album manager.
+- [ ] Share page is NOT affected by `isBlurred` — photos render normally.
+- [ ] Album manager has a working lightbox with progressive thumbnail→full-res loading.
+- [ ] Share page lightbox uses progressive loading (thumbnail placeholder → full-res fade).
+- [x] `npx tsc --noEmit` passes with zero errors.

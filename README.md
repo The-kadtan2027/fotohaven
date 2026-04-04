@@ -43,6 +43,7 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
 - **Client photo selection** — clients star/select photos on the share page; selections persist across sessions and are visible to the photographer in the album manager
 - **Batch photo management** — select multiple photos to delete or download as a ZIP
+- **Advanced album management** — per-album upload compression defaults, duplicate review, admin-only blur tools, and progressive lightbox viewing
 - **Server-side ZIP streaming** — large albums download efficiently without crashing mobile browsers
 - **Fast thumbnail generation** — uploads are automatically downscaled for quick gallery viewing; original high-res photos are kept for ZIP downloads
 - **Per-photo comments** — photographer and client can annotate individual photos with notes
@@ -801,10 +802,20 @@ npm run dev
 **Useful dev commands:**
 ```bash
 npm run db:generate   # generate a new migration from schema changes
-npm run db:push       # apply schema to local.db directly (dev workflow)
+npm run db:push       # apply schema to local.db directly (back up production DB first on phone)
 npm run db:studio     # open Drizzle Studio GUI for DB browsing
 npm run lint
 ```
+
+Before running schema changes on your phone:
+```bash
+cd ~/fotohaven
+cp local.db "local.db.bak.$(date +%Y%m%d-%H%M%S)"
+npm run db:push
+```
+The Advanced Album Management migration is additive only. It adds:
+`Album.compressionQuality`, `Album.compressionFormat`, `Album.dedupThreshold`,
+`Photo.isBlurred`, and `Photo.imageHash`.
 
 > **Note on Vercel:** SQLite doesn't work on serverless. For Vercel deployment, switch to a Postgres provider (Neon, Supabase) and update `src/lib/db.ts` to use `drizzle-orm/postgres-js`.
 
@@ -816,8 +827,10 @@ npm run lint
 1. Dashboard → all your albums
 2. New Album → 3-step form: name + photographer → ceremonies → settings (expiry, password, notify email)
 3. Open album → drag photos into ceremony folder → upload
-4. Share Link → copy and send to photographer
-5. Receive email when photographer first opens the gallery
+4. Optionally save upload compression defaults and tune duplicate threshold in the album manager
+5. Review duplicates, use admin-only blur tools, and preview via progressive lightbox
+6. Share Link → copy and send to photographer
+7. Receive email when photographer first opens the gallery
 
 **Photographer (share link recipient)**
 1. Opens share link — no account needed
@@ -848,6 +861,11 @@ npm run lint
 
 **`GET /api/albums/:albumId`** — full album with photos and presigned URLs
 
+**`PATCH /api/albums/:albumId`** — save album defaults
+```json
+{ "compressionFormat": "webp", "compressionQuality": 80, "dedupThreshold": 10 }
+```
+
 **`DELETE /api/albums/:albumId`** — delete album and cascade all data
 
 **`POST /api/upload`** — get presigned upload URL (admin use)
@@ -872,6 +890,11 @@ Creates a photo record with `isReturn: true`. Returns same presigned URL flow as
 **`POST /api/comments`** — add a comment
 ```json
 { "photoId": "uuid", "body": "Please crop tighter on the left", "author": "photographer" }
+```
+
+**`POST /api/photos/blur-batch`** — bulk toggle admin blur
+```json
+{ "photoIds": ["uuid-1", "uuid-2"], "isBlurred": true }
 ```
 
 ---

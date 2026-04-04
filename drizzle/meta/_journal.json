@@ -22,6 +22,13 @@
       "when": 1774322822652,
       "tag": "0002_salty_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1775281989622,
+      "tag": "0003_sweet_skreet",
+      "breakpoints": true
     }
   ]
 }

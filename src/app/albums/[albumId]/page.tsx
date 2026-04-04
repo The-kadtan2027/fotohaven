@@ -1,25 +1,36 @@
 "use client";
-// src/app/albums/[albumId]/page.tsx
-import { useEffect, useState, useCallback } from "react";
+
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useDropzone } from "react-dropzone";
 import {
-  ArrowLeft, Share2, Upload, Check, X, Image as ImageIcon,
-  FolderOpen, Loader2, Copy, ExternalLink, Trash2, PackageCheck,
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  FolderOpen,
+  Image as ImageIcon,
+  Loader2,
+  PackageCheck,
+  Search,
+  Settings2,
+  Share2,
+  Trash2,
+  Upload,
+  X,
 } from "lucide-react";
 import FaceProcessor from "./FaceProcessor";
+import AlbumLightbox, { type LightboxState } from "./AlbumLightbox";
+import DuplicateModal from "./DuplicateModal";
+import { buildDuplicateGroups, type AlbumPhoto } from "./album-utils";
+import { compressImageFile, computeDHashFromUrl, type CompressionFormat } from "@/lib/image-utils";
 
-interface Photo {
-  id: string;
-  originalName: string;
+interface Photo extends AlbumPhoto {
   size: number;
-  url: string;
-  originalUrl?: string;
   storageKey: string;
-  comments?: any[];
-  isReturn?: boolean;
-  isSelected?: boolean;
+  comments?: Array<{ id: string }>;
   faceProcessed?: boolean;
 }
 
@@ -36,6 +47,9 @@ interface Album {
   clientName: string;
   shareToken: string;
   expiresAt: string | null;
+  compressionQuality?: number;
+  compressionFormat?: CompressionFormat;
+  dedupThreshold?: number;
   ceremonies: Ceremony[];
 }
 
@@ -56,37 +70,74 @@ export default function AlbumPage() {
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPreparingUploads, setIsPreparingUploads] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
+  const [isApplyingBlur, setIsApplyingBlur] = useState(false);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [compressionFormat, setCompressionFormat] = useState<CompressionFormat>("webp");
+  const [compressionQuality, setCompressionQuality] = useState(80);
+  const [dedupThreshold, setDedupThreshold] = useState(10);
+  const [isSavingDefaults, setIsSavingDefaults] = useState(false);
+  const [isFindingDuplicates, setIsFindingDuplicates] = useState(false);
+  const [duplicateScanError, setDuplicateScanError] = useState("");
+  const [duplicateSourcePhotos, setDuplicateSourcePhotos] = useState<Photo[] | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+
+  const fetchAlbum = useCallback(async () => {
+    const response = await fetch(`/api/albums/${albumId}`);
+    const data = await response.json();
+    setAlbum(data);
+    setCompressionFormat(data.compressionFormat ?? "webp");
+    setCompressionQuality(data.compressionQuality ?? 80);
+    setDedupThreshold(data.dedupThreshold ?? 10);
+    setActiveCeremony((current) => (data.ceremonies?.some((c: Ceremony) => c.id === current) ? current : data.ceremonies?.[0]?.id ?? null));
+    const validPhotoIds = new Set((data.ceremonies ?? []).flatMap((c: Ceremony) => c.photos.map((photo) => photo.id)));
+    setSelectedPhotos((prev) => prev.filter((id) => validPhotoIds.has(id)));
+    setLoading(false);
+  }, [albumId]);
 
   useEffect(() => {
     fetchAlbum();
-  }, [albumId]);
+  }, [fetchAlbum]);
 
-  const fetchAlbum = async () => {
-    const res = await fetch(`/api/albums/${albumId}`);
-    const data = await res.json();
-    setAlbum(data);
-    if (!activeCeremony && data.ceremonies?.[0]) {
-      setActiveCeremony(data.ceremonies[0].id);
+  useEffect(() => {
+    if (!lightbox) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLightbox(null);
+      if (event.key === "ArrowRight") setLightbox((current) => current ? { ...current, index: Math.min(current.index + 1, current.photos.length - 1) } : null);
+      if (event.key === "ArrowLeft") setLightbox((current) => current ? { ...current, index: Math.max(current.index - 1, 0) } : null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [lightbox]);
+
+  useEffect(() => {
+    setDuplicateSourcePhotos(null);
+    setShowDuplicateModal(false);
+    setDuplicateScanError("");
+  }, [activeCeremony]);
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (!activeCeremony || acceptedFiles.length === 0) return;
+    setIsPreparingUploads(true);
+    try {
+      const prepared: UploadItem[] = [];
+      for (const file of acceptedFiles) {
+        prepared.push({
+          file: await compressImageFile(file, compressionFormat, compressionQuality),
+          ceremonyId: activeCeremony,
+          status: "pending",
+          progress: 0,
+        });
+      }
+      setUploads((prev) => [...prev, ...prepared]);
+    } finally {
+      setIsPreparingUploads(false);
     }
-    setLoading(false);
-  };
-
-  const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      if (!activeCeremony) return;
-      const items: UploadItem[] = acceptedFiles.map((file) => ({
-        file,
-        ceremonyId: activeCeremony,
-        status: "pending",
-        progress: 0,
-      }));
-      setUploads((prev) => [...prev, ...items]);
-    },
-    [activeCeremony]
-  );
+  }, [activeCeremony, compressionFormat, compressionQuality]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -94,122 +145,51 @@ export default function AlbumPage() {
     multiple: true,
   });
 
-  // ── Upload helper: XHR with progress tracking + retry ──
-  // Strict concurrency = 1: upload one file at a time to prevent OOM on 6 GB device.
-  const xhrUploadWithProgress = (
-    url: string,
-    file: File,
-    onProgress: (pct: number) => void,
-    retries = 3
-  ): Promise<void> => {
-    return new Promise((resolve, reject) => {
+  const xhrUploadWithProgress = (url: string, file: File, onProgress: (pct: number) => void, retries = 3) =>
+    new Promise<void>((resolve, reject) => {
       let attempt = 0;
-
       const tryUpload = () => {
-        attempt++;
+        attempt += 1;
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", url, true);
         xhr.setRequestHeader("Content-Type", file.type);
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            onProgress(Math.round((e.loaded / e.total) * 100));
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            onProgress(100);
-            resolve();
-          } else {
-            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
-          }
-        };
-
-        xhr.onerror = () => {
-          if (attempt < retries) {
-            // Exponential backoff: 1s, 2s, 4s
-            const delay = Math.pow(2, attempt - 1) * 1000;
-            console.warn(`[Upload] Retry ${attempt}/${retries} after ${delay}ms`);
-            setTimeout(tryUpload, delay);
-          } else {
-            reject(new Error(`Upload failed after ${retries} retries`));
-          }
-        };
-
+        xhr.upload.onprogress = (event) => event.lengthComputable && onProgress(Math.round((event.loaded / event.total) * 100));
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? (onProgress(100), resolve()) : reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+        xhr.onerror = () => attempt < retries ? window.setTimeout(tryUpload, Math.pow(2, attempt - 1) * 1000) : reject(new Error(`Upload failed after ${retries} retries`));
         xhr.send(file);
       };
-
       tryUpload();
     });
-  };
+
+  const duplicateGroups = buildDuplicateGroups(duplicateSourcePhotos ?? [], dedupThreshold);
 
   const uploadAll = async () => {
-    const pending = uploads.filter((u) => u.status === "pending");
+    const pending = uploads.filter((item) => item.status === "pending");
     if (!pending.length) return;
     setIsUploading(true);
-
-    // Strict sequential: one file at a time (concurrency = 1)
     for (const item of pending) {
-      const idx = uploads.findIndex((u) => u.file === item.file && u.ceremonyId === item.ceremonyId);
-
-      setUploads((prev) => {
-        const next = [...prev];
-        next[idx] = { ...next[idx], status: "uploading", progress: 0 };
-        return next;
-      });
-
+      const index = uploads.findIndex((entry) => entry.file === item.file && entry.ceremonyId === item.ceremonyId);
+      setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "uploading", progress: 0 } : entry));
       try {
-        // Step 1: Request presigned upload URL
         const metaRes = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ceremonyId: item.ceremonyId,
-            filename: item.file.name,
-            contentType: item.file.type,
-            size: item.file.size,
-          }),
+          body: JSON.stringify({ ceremonyId: item.ceremonyId, filename: item.file.name, contentType: item.file.type, size: item.file.size }),
         });
         if (!metaRes.ok) throw new Error("Failed to get upload URL");
         const { uploadUrl } = await metaRes.json();
-
-        // Step 2: Upload via XHR with real progress + retry
-        await xhrUploadWithProgress(
-          uploadUrl,
-          item.file,
-          (pct) => {
-            setUploads((prev) => {
-              const next = [...prev];
-              next[idx] = { ...next[idx], progress: pct };
-              return next;
-            });
-          }
-        );
-
-        setUploads((prev) => {
-          const next = [...prev];
-          next[idx] = { ...next[idx], status: "done", progress: 100 };
-          return next;
+        await xhrUploadWithProgress(uploadUrl, item.file, (progress) => {
+          setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, progress } : entry));
         });
-      } catch (err) {
-        setUploads((prev) => {
-          const next = [...prev];
-          next[idx] = { ...next[idx], status: "error", error: String(err) };
-          return next;
-        });
+        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "done", progress: 100 } : entry));
+      } catch (error) {
+        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "error", error: String(error) } : entry));
       }
     }
-
     setIsUploading(false);
-    // Refresh album to show new photos
     await fetchAlbum();
-    // Clear done uploads after a delay
-    setTimeout(() => setUploads((prev) => prev.filter((u) => u.status !== "done")), 2000);
+    window.setTimeout(() => setUploads((prev) => prev.filter((entry) => entry.status !== "done")), 2000);
   };
-
-  const clearUpload = (idx: number) =>
-    setUploads((prev) => prev.filter((_, i) => i !== idx));
 
   const copyShareLink = async () => {
     if (!album) return;
@@ -227,425 +207,241 @@ export default function AlbumPage() {
       textArea.remove();
     }
     setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2500);
-  };
-
-  const downloadFinals = (ceremony: Ceremony) => {
-    if (!album) return;
-    const finals = ceremony.photos.filter((p) => p.isReturn);
-    if (!finals.length) return;
-    
-    // Trigger download via native browser form submission (streaming)
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = `/api/albums/${album.id}/download`;
-    
-    const inputIds = document.createElement("input");
-    inputIds.type = "hidden";
-    inputIds.name = "photoIds";
-    inputIds.value = JSON.stringify(finals.map(p => p.id));
-    form.appendChild(inputIds);
-
-    const inputName = document.createElement("input");
-    inputName.type = "hidden";
-    inputName.name = "bundleName";
-    inputName.value = `${ceremony.name} — Finals`;
-    form.appendChild(inputName);
-
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
+    window.setTimeout(() => setLinkCopied(false), 2500);
   };
 
   const deleteAlbum = async () => {
-    if (!album) return;
-    if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
-    try {
-      const res = await fetch(`/api/albums/${album.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
-      window.location.href = "/";
-    } catch {
-      alert("Failed to delete album.");
-    }
+    if (!album || !window.confirm("Delete this entire album and all photos?")) return;
+    const response = await fetch(`/api/albums/${album.id}`, { method: "DELETE" });
+    if (response.ok) window.location.href = "/";
+    else window.alert("Failed to delete album.");
   };
 
   const addCeremony = async () => {
     const name = window.prompt("New Ceremony Name:");
-    if (!name || !name.trim()) return;
-    try {
-      const res = await fetch("/api/ceremonies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), albumId }),
-      });
-      if (!res.ok) throw new Error();
-      await fetchAlbum();
-    } catch {
-      alert("Failed to add ceremony.");
-    }
+    if (!name?.trim()) return;
+    const response = await fetch("/api/ceremonies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), albumId }),
+    });
+    if (response.ok) await fetchAlbum();
+    else window.alert("Failed to add ceremony.");
   };
 
   const deleteCeremony = async (ceremonyId: string) => {
-    if (!confirm("Are you sure you want to delete this ceremony and ALL its photos permanently?")) return;
-    try {
-      const res = await fetch(`/api/ceremonies/${ceremonyId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
-      if (activeCeremony === ceremonyId) setActiveCeremony(null);
-      await fetchAlbum();
-    } catch {
-      alert("Failed to delete ceremony.");
-    }
+    if (!window.confirm("Delete this ceremony and all of its photos permanently?")) return;
+    const response = await fetch(`/api/ceremonies/${ceremonyId}`, { method: "DELETE" });
+    if (response.ok) await fetchAlbum();
+    else window.alert("Failed to delete ceremony.");
   };
 
   const deletePhoto = async (photoId: string) => {
-    if (!confirm("Are you sure you want to delete this photo forever?")) return;
-    try {
-      const res = await fetch(`/api/photos/${photoId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
-      await fetchAlbum();
-    } catch {
-      alert("Failed to delete photo.");
-    }
+    if (!window.confirm("Delete this photo forever?")) return;
+    const response = await fetch(`/api/photos/${photoId}`, { method: "DELETE" });
+    if (response.ok) await fetchAlbum();
+    else window.alert("Failed to delete photo.");
   };
 
-  const togglePhotoSelection = (id: string, selected: boolean) => {
-    if (selected) {
-      setSelectedPhotos(prev => [...prev, id]);
-    } else {
-      setSelectedPhotos(prev => prev.filter(p => p !== id));
-    }
+  const togglePhotoSelection = (photoId: string, selected: boolean) => {
+    setSelectedPhotos((prev) => selected ? (prev.includes(photoId) ? prev : [...prev, photoId]) : prev.filter((id) => id !== photoId));
   };
 
-  const clearSelection = () => setSelectedPhotos([]);
-
-  const deleteSelectedPhotos = async () => {
-    if (!confirm(`Are you sure you want to delete ${selectedPhotos.length} photo(s)?`)) return;
-    setIsDeletingBatch(true);
+  const applyBlur = async (isBlurred: boolean) => {
+    if (!selectedPhotos.length) return;
+    setIsApplyingBlur(true);
     try {
-      const res = await fetch("/api/photos/delete-batch", {
+      const response = await fetch("/api/photos/blur-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoIds: selectedPhotos })
+        body: JSON.stringify({ photoIds: selectedPhotos, isBlurred }),
       });
-      if (!res.ok) throw new Error();
-      await fetchAlbum();
-      clearSelection();
+      if (!response.ok) throw new Error();
+      setAlbum((current) => current ? ({
+        ...current,
+        ceremonies: current.ceremonies.map((ceremony) => ({
+          ...ceremony,
+          photos: ceremony.photos.map((photo) => selectedPhotos.includes(photo.id) ? { ...photo, isBlurred } : photo),
+        })),
+      }) : current);
     } catch {
-      alert("Failed to delete photos.");
+      window.alert(`Failed to ${isBlurred ? "blur" : "unblur"} selected photos.`);
+    } finally {
+      setIsApplyingBlur(false);
+    }
+  };
+
+  const deleteSelectedPhotos = async () => {
+    if (!window.confirm(`Delete ${selectedPhotos.length} selected photo(s)?`)) return;
+    setIsDeletingBatch(true);
+    try {
+      const response = await fetch("/api/photos/delete-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoIds: selectedPhotos }),
+      });
+      if (!response.ok) throw new Error();
+      setSelectedPhotos([]);
+      await fetchAlbum();
+    } catch {
+      window.alert("Failed to delete photos.");
     } finally {
       setIsDeletingBatch(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)" }}>
-        <Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
+  const saveAlbumDefaults = async () => {
+    if (!album) return;
+    setIsSavingDefaults(true);
+    try {
+      const response = await fetch(`/api/albums/${album.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ compressionFormat, compressionQuality, dedupThreshold }),
+      });
+      if (!response.ok) throw new Error();
+      setAlbum((current) => current ? { ...current, compressionFormat, compressionQuality, dedupThreshold } : current);
+    } catch {
+      window.alert("Failed to save album defaults.");
+    } finally {
+      setIsSavingDefaults(false);
+    }
+  };
 
-  if (!album) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)" }}>
-        <p>Album not found.</p>
-      </div>
-    );
-  }
+  const findDuplicates = async () => {
+    const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
+    if (!activeCeremonyData) return;
+    setIsFindingDuplicates(true);
+    setDuplicateScanError("");
+    try {
+      const originals = activeCeremonyData.photos.filter((photo) => !photo.isReturn);
+      const hashedPhotos: Photo[] = [];
+      const newHashes: Array<{ photoId: string; imageHash: string }> = [];
+      for (const photo of originals) {
+        if (photo.imageHash) {
+          hashedPhotos.push(photo);
+          continue;
+        }
+        const imageHash = await computeDHashFromUrl(photo.url);
+        hashedPhotos.push({ ...photo, imageHash });
+        newHashes.push({ photoId: photo.id, imageHash });
+      }
+      setDuplicateSourcePhotos(hashedPhotos);
+      setShowDuplicateModal(true);
+      if (newHashes.length) {
+        void Promise.all(newHashes.map(({ photoId, imageHash }) => fetch(`/api/photos/${photoId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageHash }),
+        })));
+        setAlbum((current) => current ? ({
+          ...current,
+          ceremonies: current.ceremonies.map((ceremony) => ceremony.id !== activeCeremonyData.id ? ceremony : {
+            ...ceremony,
+            photos: ceremony.photos.map((photo) => {
+              const match = hashedPhotos.find((candidate) => candidate.id === photo.id);
+              return match ? { ...photo, imageHash: match.imageHash } : photo;
+            }),
+          }),
+        }) : current);
+      }
+    } catch {
+      setDuplicateScanError("Could not scan for duplicates in this ceremony.");
+    } finally {
+      setIsFindingDuplicates(false);
+    }
+  };
 
-  const activeCeremonyData = album.ceremonies.find((c) => c.id === activeCeremony);
-  const totalPhotos = album.ceremonies.reduce((sum, c) => sum + c.photos.length, 0);
+  const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
+
+  if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
+  if (!album || !activeCeremonyData) return <CenteredState><p>Album not found.</p></CenteredState>;
+
+  const totalPhotos = album.ceremonies.reduce((sum, ceremony) => sum + ceremony.photos.length, 0);
+  const originalCount = activeCeremonyData.photos.filter((photo) => !photo.isReturn).length;
+  const selectedCount = activeCeremonyData.photos.filter((photo) => !photo.isReturn && photo.isSelected).length;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      {/* Header */}
-      <header
-        className="glass px-4 md:px-8"
-        style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}
-      >
-        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Link href="/" className="btn-ghost" style={{ textDecoration: "none", padding: "8px 12px", fontSize: 13 }}>
-              <ArrowLeft size={14} />
-              Albums
-            </Link>
+      <header className="glass px-4 md:px-8" style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+            <Link href="/" className="btn-ghost" style={{ textDecoration: "none", padding: "8px 12px", fontSize: 13 }}><ArrowLeft size={14} />Albums</Link>
             <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
-            <div>
-              <span style={{ fontFamily: "var(--font-display)", fontSize: 18, color: "var(--espresso)" }}>{album.title}</span>
-              <span style={{ fontSize: 13, color: "var(--taupe)", marginLeft: 10 }}>{album.clientName}</span>
-            </div>
+            <div><span style={{ fontFamily: "var(--font-display)", fontSize: 18, color: "var(--espresso)" }}>{album.title}</span><span style={{ fontSize: 13, color: "var(--taupe)", marginLeft: 10 }}>{album.clientName}</span></div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              className="btn-ghost"
-              onClick={deleteAlbum}
-              style={{ textDecoration: "none", fontSize: 13, color: "var(--blush)" }}
-              title="Delete Album"
-            >
-              <Trash2 size={14} />
-              Delete Album
-            </button>
-            <Link
-              href={`/share/${album.shareToken}`}
-              target="_blank"
-              className="btn-ghost"
-              style={{ textDecoration: "none", fontSize: 13 }}
-            >
-              <ExternalLink size={14} />
-              Preview
-            </Link>
-            <button className="btn-gold" onClick={copyShareLink} style={{ fontSize: 13 }}>
-              {linkCopied ? <Check size={14} /> : <Share2 size={14} />}
-              {linkCopied ? "Copied!" : "Share Link"}
-            </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button className="btn-ghost" onClick={deleteAlbum} style={{ fontSize: 13, color: "var(--blush)" }}><Trash2 size={14} />Delete Album</button>
+            <Link href={`/share/${album.shareToken}`} target="_blank" className="btn-ghost" style={{ textDecoration: "none", fontSize: 13 }}><ExternalLink size={14} />Preview</Link>
+            <button className="btn-gold" onClick={copyShareLink} style={{ fontSize: 13 }}>{linkCopied ? <Check size={14} /> : <Share2 size={14} />}{linkCopied ? "Copied!" : "Share Link"}</button>
           </div>
         </div>
       </header>
 
       <div className="flex flex-col md:flex-row" style={{ maxWidth: 1400, margin: "0 auto", minHeight: "calc(100vh - 64px)" }}>
-        {/* Sidebar — ceremony list */}
         <aside className="w-full md:w-[240px] border-b md:border-b-0 md:border-r border-[var(--sand)] py-4 md:py-7 flex-shrink-0 overflow-x-auto whitespace-nowrap">
           <div className="px-4 md:px-5 mb-0 md:mb-5 inline-block md:block align-middle">
-            <p className="hidden md:block" style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>
-              Ceremonies
-            </p>
+            <p className="hidden md:block" style={{ fontSize: 11, color: "var(--taupe)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Ceremonies</p>
             <p className="hidden md:block" style={{ fontSize: 12, color: "var(--brown)" }}>{totalPhotos} photos total</p>
           </div>
-
           <div className="inline-flex md:block items-center gap-2 px-4 md:px-0 py-2 md:py-0">
-          {album.ceremonies.map((c) => {
-            const origCount = c.photos.filter((p) => !p.isReturn).length;
-            const finCount = c.photos.filter((p) => p.isReturn).length;
-            const selCount = c.photos.filter((p) => !p.isReturn && p.isSelected).length;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setActiveCeremony(c.id)}
-                className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]"
-                style={{
-                  background: activeCeremony === c.id ? "var(--warm-white)" : "transparent",
-                  borderColor: activeCeremony === c.id ? "var(--gold)" : "var(--sand)",
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === c.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === c.id ? 500 : 400 }}>
-                  <FolderOpen size={14} />
-                  {c.name}
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {finCount > 0 && (
-                    <span title={`${finCount} finals`} style={{ fontSize: 9, background: "rgba(201,150,58,0.2)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>FINALS</span>
-                  )}
-                  {selCount > 0 && (
-                    <span title={`${selCount} client-selected`} style={{ fontSize: 9, background: "rgba(201,150,58,0.12)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>★{selCount}</span>
-                  )}
-                  <span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>
-                    {origCount}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-            <button
-              onClick={addCeremony}
-              className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full"
-              style={{ fontSize: 13, fontWeight: 500 }}
-            >
-              <span style={{ fontSize: 18 }}>+</span> Add Ceremony
-            </button>
+            {album.ceremonies.map((ceremony) => {
+              const originals = ceremony.photos.filter((photo) => !photo.isReturn);
+              const finals = ceremony.photos.filter((photo) => photo.isReturn);
+              const selected = originals.filter((photo) => photo.isSelected).length;
+              return <button key={ceremony.id} onClick={() => setActiveCeremony(ceremony.id)} className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]" style={{ background: activeCeremony === ceremony.id ? "var(--warm-white)" : "transparent", borderColor: activeCeremony === ceremony.id ? "var(--gold)" : "var(--sand)", cursor: "pointer" }}><span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === ceremony.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === ceremony.id ? 500 : 400 }}><FolderOpen size={14} />{ceremony.name}</span><div style={{ display: "flex", alignItems: "center", gap: 4 }}>{finals.length > 0 ? <span style={pill("rgba(201,150,58,0.2)", "var(--gold)")}>FINALS</span> : null}{selected > 0 ? <span style={pill("rgba(201,150,58,0.12)", "var(--gold)")}>S:{selected}</span> : null}<span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>{originals.length}</span></div></button>;
+            })}
+            <button onClick={addCeremony} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500 }}><span style={{ fontSize: 18 }}>+</span> Add Ceremony</button>
           </div>
         </aside>
 
-        {/* Main content */}
         <main className="flex-1 p-4 md:p-8 overflow-auto">
-          {activeCeremonyData && (
-            <>
-              {/* Ceremony header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
-                      {activeCeremonyData.name}
-                    </h2>
-                    <button
-                      onClick={() => deleteCeremony(activeCeremonyData.id)}
-                      title="Delete Ceremony"
-                      style={{ color: "var(--blush)", opacity: 0.6, cursor: "pointer", background: "none", border: "none", padding: 0 }}
-                      onMouseOver={(e) => (e.currentTarget.style.opacity = "1")}
-                      onMouseOut={(e) => (e.currentTarget.style.opacity = "0.6")}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2 }}>
-                    {activeCeremonyData.photos.filter((p) => !p.isReturn).length} photos uploaded
-                    {activeCeremonyData.photos.filter((p) => p.isReturn).length > 0 && (
-                      <span style={{ color: "var(--gold)", marginLeft: 8 }}>
-                        · {activeCeremonyData.photos.filter((p) => p.isReturn).length} finals delivered
-                      </span>
-                    )}
-                  </p>
-                  {(() => {
-                    const selN = activeCeremonyData.photos.filter((p) => !p.isReturn && p.isSelected).length;
-                    const totN = activeCeremonyData.photos.filter((p) => !p.isReturn).length;
-                    return selN > 0 ? (
-                      <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 4 }}>
-                        ★ Client has selected {selN} of {totN} original photo{totN !== 1 ? 's' : ''}
-                      </p>
-                    ) : null;
-                  })()}
-                </div>
-                {activeCeremonyData.photos.some((p) => p.isReturn) && (
-                  <button
-                    className="btn-gold"
-                    onClick={() => downloadFinals(activeCeremonyData)}
-                    style={{ fontSize: 12 }}
-                  >
-                    <><PackageCheck size={12} /> Download Finals</>
-                  </button>
-                )}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>{activeCeremonyData.name}</h2>
+                <button onClick={() => deleteCeremony(activeCeremonyData.id)} title="Delete Ceremony" style={{ color: "var(--blush)", opacity: 0.7, cursor: "pointer", background: "none", border: "none", padding: 0 }}><Trash2 size={16} /></button>
               </div>
+              <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2 }}>{originalCount} photos uploaded{activeCeremonyData.photos.some((photo) => photo.isReturn) ? <span style={{ color: "var(--gold)", marginLeft: 8 }}>· {activeCeremonyData.photos.filter((photo) => photo.isReturn).length} finals delivered</span> : null}</p>
+              {selectedCount > 0 ? <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 4 }}>Client has selected {selectedCount} of {originalCount} original photos.</p> : null}
+              {duplicateScanError ? <p style={{ fontSize: 12, color: "var(--blush)", marginTop: 6 }}>{duplicateScanError}</p> : null}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-ghost" onClick={findDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Find Duplicates"}</button>
+              {activeCeremonyData.photos.some((photo) => photo.isReturn) ? <button className="btn-gold" onClick={() => downloadFinals(album, activeCeremonyData)} style={{ fontSize: 12 }}><PackageCheck size={12} />Download Finals</button> : null}
+            </div>
+          </div>
 
-              {/* Drop zone */}
-              <div
-                {...getRootProps()}
-                style={{
-                  border: `2px dashed ${isDragActive ? "var(--gold)" : "var(--sand)"}`,
-                  borderRadius: 16,
-                  padding: "32px 24px",
-                  textAlign: "center",
-                  background: isDragActive ? "rgba(201, 150, 58, 0.04)" : "var(--warm-white)",
-                  cursor: "pointer",
-                  transition: "all 0.2s ease",
-                  marginBottom: 24,
-                }}
-              >
-                <input {...getInputProps()} />
-                <div style={{ width: 48, height: 48, borderRadius: "50%", background: isDragActive ? "var(--gold)" : "var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-                  <Upload size={20} color={isDragActive ? "#fff" : "var(--brown)"} />
-                </div>
-                <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>
-                  {isDragActive ? "Drop photos here" : "Drag & drop photos"}
-                </p>
-                <p style={{ fontSize: 13, color: "var(--brown)" }}>
-                  or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 25MB
-                </p>
-              </div>
+          <div {...getRootProps()} style={{ border: `2px dashed ${isDragActive ? "var(--gold)" : "var(--sand)"}`, borderRadius: 16, padding: "32px 24px", textAlign: "center", background: isDragActive ? "rgba(201, 150, 58, 0.04)" : "var(--warm-white)", cursor: "pointer", transition: "all 0.2s ease", marginBottom: 16 }}>
+            <input {...getInputProps()} />
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: isDragActive ? "var(--gold)" : "var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}><Upload size={20} color={isDragActive ? "#fff" : "var(--brown)"} /></div>
+            <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>{isDragActive ? "Drop photos here" : "Drag & drop photos"}</p>
+            <p style={{ fontSize: 13, color: "var(--brown)" }}>or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 100MB</p>
+            {isPreparingUploads ? <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 10 }}>Preparing files with album compression settings...</p> : null}
+          </div>
 
-              {/* Upload queue */}
-              {uploads.length > 0 && (
-                <div className="card" style={{ padding: 20, marginBottom: 24 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                    <p style={{ fontSize: 13, fontWeight: 500, color: "var(--espresso)" }}>
-                      Upload Queue ({uploads.filter((u) => u.status === "pending").length} pending)
-                    </p>
-                    <button
-                      className="btn-primary"
-                      onClick={uploadAll}
-                      disabled={isUploading || uploads.every((u) => u.status !== "pending")}
-                      style={{ fontSize: 12, padding: "8px 16px" }}
-                    >
-                      {isUploading ? (
-                        <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Uploading…</>
-                      ) : (
-                        <><Upload size={12} /> Upload All</>
-                      )}
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {uploads.map((u, i) => (
-                      <div key={i} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px" }}>
-                          <StatusIcon status={u.status} />
-                          <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {u.file.name}
-                          </span>
-                          {u.status === "uploading" && (
-                            <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>
-                              {u.progress}%
-                            </span>
-                          )}
-                          <span style={{ fontSize: 11, color: "var(--taupe)" }}>
-                            {(u.file.size / 1024 / 1024).toFixed(1)} MB
-                          </span>
-                          {u.status !== "uploading" && (
-                            <button onClick={() => clearUpload(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}>
-                              <X size={12} />
-                            </button>
-                          )}
-                        </div>
-                        {u.status === "uploading" && (
-                          <div style={{ height: 3, background: "var(--sand)", borderRadius: "0 0 8px 8px" }}>
-                            <div style={{ height: "100%", width: `${u.progress}%`, background: "var(--gold)", borderRadius: "0 0 8px 8px", transition: "width 0.3s ease" }} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+          <div className="card" style={{ padding: 18, marginBottom: 24 }}>
+            <button onClick={() => setSettingsOpen((prev) => !prev)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", cursor: "pointer", color: "var(--espresso)" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600 }}><Settings2 size={16} color="var(--gold)" />Upload Settings</span>{settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+            {settingsOpen ? <div style={{ marginTop: 18, display: "grid", gap: 18 }}><div><p style={settingsLabel}>Compression Format</p><div style={{ display: "flex", gap: 8 }}>{(["webp", "jpeg"] as CompressionFormat[]).map((format) => <button key={format} onClick={() => setCompressionFormat(format)} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${compressionFormat === format ? "var(--gold)" : "var(--sand)"}`, background: compressionFormat === format ? "rgba(201,150,58,0.08)" : "var(--warm-white)", color: compressionFormat === format ? "var(--espresso)" : "var(--brown)", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>{format.toUpperCase()}</button>)}</div></div><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Quality: {compressionQuality}%</span><input type="range" min={10} max={100} value={compressionQuality} onChange={(event) => setCompressionQuality(Number(event.target.value))} /></label><label style={{ display: "grid", gap: 8 }}><span style={settingsLabel}>Duplicate Threshold: {dedupThreshold}</span><input type="range" min={1} max={20} value={dedupThreshold} onChange={(event) => setDedupThreshold(Number(event.target.value))} /><span style={{ fontSize: 12, color: "var(--brown)" }}>Lower values are stricter. Higher values group looser visual matches.</span></label><div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><p style={{ fontSize: 12, color: "var(--brown)" }}>New uploads are compressed in the browser before they enter the queue.</p><button className="btn-gold" onClick={saveAlbumDefaults} disabled={isSavingDefaults} style={{ fontSize: 12 }}>{isSavingDefaults ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={12} />}Save as album default</button></div></div> : null}
+          </div>
 
-              {/* Photo grid */}
-              {activeCeremonyData.photos.length > 0 ? (
-                <div className="photo-grid">
-                  {activeCeremonyData.photos.map((photo) => (
-                    <PhotoCard 
-                      key={photo.id} 
-                      photo={photo} 
-                      onDelete={deletePhoto} 
-                      onSelect={togglePhotoSelection}
-                      isSelected={selectedPhotos.includes(photo.id)}
-                      showCheckbox={selectedPhotos.length > 0}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--taupe)" }}>
-                  <ImageIcon size={40} style={{ marginBottom: 12, opacity: 0.4 }} />
-                  <p style={{ fontSize: 14 }}>No photos yet. Drop some above to get started.</p>
-                </div>
-              )}
-            </>
-          )}
+          {uploads.length > 0 ? <UploadQueue uploads={uploads} isUploading={isUploading} onUploadAll={uploadAll} onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))} /> : null}
+
+          {activeCeremonyData.photos.length > 0 ? <div className="photo-grid">{activeCeremonyData.photos.map((photo, index) => <PhotoCard key={photo.id} photo={photo} onDelete={deletePhoto} onSelect={togglePhotoSelection} onOpen={() => setLightbox({ photos: activeCeremonyData.photos, index })} isSelected={selectedPhotos.includes(photo.id)} showCheckbox={selectedPhotos.length > 0} />)}</div> : <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--taupe)" }}><ImageIcon size={40} style={{ marginBottom: 12, opacity: 0.4 }} /><p style={{ fontSize: 14 }}>No photos yet. Drop some above to get started.</p></div>}
         </main>
       </div>
 
-      {/* Selection Action Bar */}
-      {selectedPhotos.length > 0 && (
-        <div style={{
-          position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)",
-          background: "var(--espresso)", color: "#fff", padding: "12px 24px",
-          borderRadius: 100, display: "flex", alignItems: "center", gap: 16,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 100
-        }}>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>
-            {selectedPhotos.length} photo{selectedPhotos.length === 1 ? "" : "s"} selected
-          </span>
-          <div style={{ width: 1, height: 16, background: "rgba(255,255,255,0.2)" }} />
-          <button onClick={clearSelection} style={{ background: "none", border: "none", color: "var(--sand)", cursor: "pointer", fontSize: 13 }}>
-            Cancel
-          </button>
-          <button onClick={deleteSelectedPhotos} disabled={isDeletingBatch} style={{ background: "var(--blush)", border: "none", color: "#fff", borderRadius: 100, padding: "6px 16px", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-            {isDeletingBatch ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Trash2 size={14} />}
-            Delete
-          </button>
-        </div>
-      )}
-
-      <FaceProcessor
-        photos={album.ceremonies.flatMap((ceremony) =>
-          ceremony.photos.map((photo) => ({
-            id: photo.id,
-            url: photo.url,
-            faceProcessed: Boolean(photo.faceProcessed),
-          }))
-        )}
-      />
-
+      {selectedPhotos.length > 0 ? <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "var(--espresso)", color: "#fff", padding: "12px 24px", borderRadius: 100, display: "flex", alignItems: "center", gap: 14, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 100, flexWrap: "wrap", justifyContent: "center", maxWidth: "calc(100vw - 32px)" }}><span style={{ fontSize: 13, fontWeight: 500 }}>{selectedPhotos.length} photo{selectedPhotos.length === 1 ? "" : "s"} selected</span><div style={{ width: 1, height: 16, background: "rgba(255,255,255,0.2)" }} /><button onClick={() => setSelectedPhotos([])} style={{ background: "none", border: "none", color: "var(--sand)", cursor: "pointer", fontSize: 13 }}>Cancel</button><button onClick={() => applyBlur(true)} disabled={isApplyingBlur} style={selectionAction("var(--gold)")}>{isApplyingBlur ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : null}Blur Selected</button><button onClick={() => applyBlur(false)} disabled={isApplyingBlur} style={selectionAction("rgba(250,247,242,0.14)")}>{isApplyingBlur ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : null}Unblur Selected</button><button onClick={deleteSelectedPhotos} disabled={isDeletingBatch} style={selectionAction("var(--blush)")}>{isDeletingBatch ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Trash2 size={14} />}Delete</button></div> : null}
+      {lightbox ? <AlbumLightbox lightbox={lightbox} selectedPhotos={selectedPhotos} onClose={() => setLightbox(null)} onNavigate={(direction) => setLightbox((current) => current ? { ...current, index: direction === "next" ? Math.min(current.index + 1, current.photos.length - 1) : Math.max(current.index - 1, 0) } : null)} onToggleSelect={(photoId) => togglePhotoSelection(photoId, !selectedPhotos.includes(photoId))} /> : null}
+      {showDuplicateModal ? <DuplicateModal groups={duplicateGroups} threshold={dedupThreshold} onClose={() => setShowDuplicateModal(false)} onSelectDuplicates={() => { setSelectedPhotos((prev) => Array.from(new Set([...prev, ...duplicateGroups.flatMap((group) => group.duplicates.map((photo) => photo.id))]))); setShowDuplicateModal(false); }} /> : null}
+      <FaceProcessor photos={album.ceremonies.flatMap((ceremony) => ceremony.photos.map((photo) => ({ id: photo.id, url: photo.url, faceProcessed: Boolean(photo.faceProcessed) })))} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+function UploadQueue({ uploads, isUploading, onUploadAll, onClear }: { uploads: UploadItem[]; isUploading: boolean; onUploadAll: () => void; onClear: (index: number) => void; }) {
+  return <div className="card" style={{ padding: 20, marginBottom: 24 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}><p style={{ fontSize: 13, fontWeight: 500, color: "var(--espresso)" }}>Upload Queue ({uploads.filter((item) => item.status === "pending").length} pending)</p><button className="btn-primary" onClick={onUploadAll} disabled={isUploading || uploads.every((item) => item.status !== "pending")} style={{ fontSize: 12, padding: "8px 16px" }}>{isUploading ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />Uploading...</> : <><Upload size={12} />Upload All</>}</button></div><div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{uploads.map((item, index) => <div key={`${item.file.name}-${index}`} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}><div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px" }}><StatusIcon status={item.status} /><span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.file.name}</span>{item.status === "uploading" ? <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>{item.progress}%</span> : null}<span style={{ fontSize: 11, color: "var(--taupe)" }}>{(item.file.size / 1024 / 1024).toFixed(1)} MB</span>{item.status !== "uploading" ? <button onClick={() => onClear(index)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}><X size={12} /></button> : null}</div>{item.status === "uploading" ? <div style={{ height: 3, background: "var(--sand)" }}><div style={{ height: "100%", width: `${item.progress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} /></div> : null}</div>)}</div></div>;
 }
 
 function StatusIcon({ status }: { status: UploadStatus }) {
@@ -655,103 +451,38 @@ function StatusIcon({ status }: { status: UploadStatus }) {
   return <div style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />;
 }
 
-function PhotoCard({ photo, onDelete, onSelect, isSelected, showCheckbox }: { photo: Photo, onDelete?: (id: string) => void, onSelect?: (id: string, selected: boolean) => void, isSelected?: boolean, showCheckbox?: boolean }) {
+function PhotoCard({ photo, onDelete, onSelect, onOpen, isSelected, showCheckbox }: { photo: Photo; onDelete: (id: string) => void; onSelect: (id: string, selected: boolean) => void; onOpen: () => void; isSelected: boolean; showCheckbox: boolean; }) {
   const [loaded, setLoaded] = useState(false);
   const [hovered, setHovered] = useState(false);
-  
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onClick={() => {
-        if ((showCheckbox || hovered) && onSelect) {
-          onSelect(photo.id, !isSelected);
-        }
-      }}
-      style={{
-        aspectRatio: "1",
-        borderRadius: 10,
-        overflow: "hidden",
-        background: "var(--sand)",
-        position: "relative",
-        cursor: "pointer",
-      }}
-    >
-      {!loaded && <div className="skeleton" style={{ position: "absolute", inset: 0 }} />}
-      <img
-        src={photo.url}
-        alt={photo.originalName}
-        onLoad={() => setLoaded(true)}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          opacity: loaded ? 1 : 0,
-          transition: "opacity 0.3s ease",
-        }}
-      />
-      {(showCheckbox || hovered || isSelected) && onSelect && (
-        <div 
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(photo.id, !isSelected);
-          }}
-          style={{
-            position: "absolute", top: 8, left: 8, zIndex: 10,
-            width: 20, height: 20, borderRadius: 4,
-            background: isSelected ? "var(--gold)" : "rgba(255,255,255,0.8)",
-            border: isSelected ? "none" : "2px solid var(--taupe)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", opacity: (!isSelected && !hovered && showCheckbox) ? 0.5 : 1
-          }}
-        >
-          {isSelected && <Check size={14} color="#fff" strokeWidth={3} />}
-        </div>
-      )}
-      {photo.comments && photo.comments.length > 0 && (
-        <div 
-          title={`${photo.comments.length} note(s)`}
-          style={{ 
-            position: "absolute", top: 10, right: 10, 
-            width: 10, height: 10, borderRadius: "50%", 
-            background: "var(--gold)", border: "2px solid #fff",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-            zIndex: 5
-          }} 
-        />
-      )}
-      {photo.isSelected && (
-        <div
-          title="Client selected"
-          style={{
-            position: "absolute", bottom: 8, right: 8,
-            fontSize: 14, lineHeight: 1,
-            color: "var(--gold)",
-            textShadow: "0 1px 3px rgba(0,0,0,0.5)",
-            zIndex: 5,
-            pointerEvents: "none",
-          }}
-        >
-          ★
-        </div>
-      )}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "24px 8px 8px", background: "linear-gradient(transparent, rgba(26,18,8,0.5))", opacity: 0, transition: "opacity 0.2s" }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
-      >
-        <p style={{ fontSize: 11, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: onDelete ? 24 : 0 }}>
-          {photo.originalName}
-        </p>
-        {onDelete && (
-          <button 
-            onClick={(e) => { e.stopPropagation(); onDelete(photo.id); }}
-            style={{ position: "absolute", bottom: 6, right: 6, background: "var(--blush)", border: "none", color: "#fff", borderRadius: 4, padding: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-            title="Delete Photo"
-          >
-            <Trash2 size={12} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  const checkboxVisible = showCheckbox || hovered || isSelected;
+  return <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onOpen} style={{ aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: "var(--sand)", position: "relative", cursor: "pointer" }}>{!loaded ? <div className="skeleton" style={{ position: "absolute", inset: 0 }} /> : null}<img src={photo.url} alt={photo.originalName} onLoad={() => setLoaded(true)} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: loaded ? 1 : 0, transition: "opacity 0.3s ease, transform 0.25s ease, filter 0.25s ease", transform: hovered ? "scale(1.02)" : "scale(1)", filter: photo.isBlurred ? "blur(12px) saturate(0)" : "none" }} />{checkboxVisible ? <div onClick={(event) => { event.stopPropagation(); onSelect(photo.id, !isSelected); }} style={{ position: "absolute", top: 8, left: 8, zIndex: 10, width: 20, height: 20, borderRadius: 4, background: isSelected ? "var(--gold)" : "rgba(255,255,255,0.86)", border: isSelected ? "none" : "2px solid var(--taupe)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>{isSelected ? <Check size={14} color="#fff" strokeWidth={3} /> : null}</div> : null}{photo.isBlurred ? <div style={{ position: "absolute", top: 8, left: checkboxVisible ? 36 : 8, zIndex: 10, borderRadius: 999, padding: "4px 7px", fontSize: 11, background: "rgba(26,18,8,0.75)", color: "#fff", lineHeight: 1 }}>BLUR</div> : null}{photo.comments?.length ? <div title={`${photo.comments.length} note(s)`} style={{ position: "absolute", top: 10, right: 10, width: 10, height: 10, borderRadius: "50%", background: "var(--gold)", border: "2px solid #fff", boxShadow: "0 2px 4px rgba(0,0,0,0.2)", zIndex: 5 }} /> : null}{photo.isSelected ? <div title="Client selected" style={{ position: "absolute", bottom: 8, right: 8, fontSize: 14, lineHeight: 1, color: "var(--gold)", textShadow: "0 1px 3px rgba(0,0,0,0.5)", zIndex: 5, pointerEvents: "none" }}>★</div> : null}<div style={{ position: "absolute", inset: 0, background: hovered ? "rgba(26,18,8,0.16)" : "transparent", transition: "background 0.2s ease" }} /><div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "24px 8px 8px", background: "linear-gradient(transparent, rgba(26,18,8,0.58))", opacity: hovered ? 1 : 0, transition: "opacity 0.2s" }}><p style={{ fontSize: 11, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 24 }}>{photo.originalName}</p><button onClick={(event) => { event.stopPropagation(); onDelete(photo.id); }} style={{ position: "absolute", bottom: 6, right: 6, background: "var(--blush)", border: "none", color: "#fff", borderRadius: 4, padding: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Trash2 size={12} /></button></div></div>;
 }
+
+function CenteredState({ children }: { children: ReactNode }) {
+  return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)" }}>{children}<style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style></div>;
+}
+
+function downloadFinals(album: Album, ceremony: Ceremony) {
+  const finals = ceremony.photos.filter((photo) => photo.isReturn);
+  if (!finals.length) return;
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `/api/albums/${album.id}/download`;
+  appendHidden(form, "photoIds", JSON.stringify(finals.map((photo) => photo.id)));
+  appendHidden(form, "bundleName", `${ceremony.name} - Finals`);
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
+}
+
+function appendHidden(form: HTMLFormElement, name: string, value: string) {
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = name;
+  input.value = value;
+  form.appendChild(input);
+}
+
+const settingsLabel = { fontSize: 12, color: "var(--taupe)", textTransform: "uppercase" as const, letterSpacing: "0.08em" };
+const pill = (background: string, color: string) => ({ fontSize: 9, background, color, padding: "1px 5px", borderRadius: 100, fontWeight: 600 } as const);
+const selectionAction = (background: string) => ({ background, border: "none", color: "#fff", borderRadius: 100, padding: "6px 16px", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 } as const);

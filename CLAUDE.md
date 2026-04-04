@@ -75,6 +75,9 @@ fotohaven/
 - `shareToken`: 16-char URL-safe token
 - `password`: Bcrypt hash (optional)
 - `notifyEmail`: Email to alert on first view (optional)
+- `compressionQuality`: Integer 10-100, default 80
+- `compressionFormat`: `"jpeg" | "webp"`, default `"webp"`
+- `dedupThreshold`: Integer 1-20, default 10
 - `firstViewedAt`: Timestamp of first client access
 - `expiresAt`: Link expiry timestamp
 - `createdAt` / `updatedAt`: Timestamps
@@ -94,6 +97,8 @@ fotohaven/
 - `isReturn`: Boolean — true = edited final delivered by photographer
 - `returnOf`: Optional photoId linking to original (nullable)
 - `isSelected`: Boolean (default false) — client-marked selection, persistent across sessions
+- `isBlurred`: Boolean (default false) — admin-side visual blur only
+- `imageHash`: Optional 16-char perceptual dHash fingerprint
 - `comments`: Relation to Comment table
 
 ### Comment
@@ -120,9 +125,21 @@ fotohaven/
 
 ### PATCH /api/photos/:photoId
 - **Auth**: **Not required** — called from the unauthenticated share page.
-- **Body**: `{ isSelected: boolean }`
+- **Body**: `{ isSelected?: boolean, imageHash?: string | null }`
 - **Response**: `{ ok: true }` or `404`.
-- **Purpose**: Persists client photo selection to the database.
+- **Purpose**: Persists client photo selection and browser-computed dHash values.
+
+### PATCH /api/albums/:albumId
+- **Auth**: Required (session cookie, guarded by middleware).
+- **Body**: `{ compressionQuality?, compressionFormat?, dedupThreshold? }`
+- **Response**: `{ ok: true }`
+- **Purpose**: Saves per-album upload compression and duplicate-detection defaults.
+
+### POST /api/photos/blur-batch
+- **Auth**: Required (session cookie, guarded by middleware).
+- **Body**: `{ photoIds: string[], isBlurred: boolean }`
+- **Response**: `{ ok: true, updatedCount: number }`
+- **Purpose**: Bulk toggles admin-side blur state.
 
 ### POST /api/photos/:photoId/faces
 - **Auth**: Required (photographer session cookie / JWT).
@@ -175,7 +192,7 @@ fotohaven/
 ```bash
 npm run dev           # Start Next.js dev server
 npm run db:generate   # Generate migrations from schema.ts
-npm run db:push       # Sync local.db with latest schema
+npm run db:push       # Sync local.db with latest schema; back up production DB first on phone
 npm run db:studio     # Open Drizzle GUI for DB browsing
 ```
 
@@ -192,6 +209,11 @@ pm2 start ecosystem.config.js
 - **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries). `db.ts` uses WAL mode and custom timeouts for concurrency.
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
+- **Album manager extras**:
+  - Uploads can be client-side compressed to JPEG or WebP before queueing.
+  - Duplicate review uses browser-side dHash and persists `Photo.imageHash`.
+  - Admin blur is visual-only in `/albums/[albumId]`; share pages ignore `isBlurred`.
+  - Album and share lightboxes progressively swap thumbnail → original image.
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
 - **Face processing architecture**:
   - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
@@ -201,4 +223,3 @@ pm2 start ecosystem.config.js
   - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
-

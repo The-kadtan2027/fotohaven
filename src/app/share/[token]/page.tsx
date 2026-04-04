@@ -66,6 +66,7 @@ export default function SharePage() {
   const [authError, setAuthError] = useState("");
   const [returnUploads, setReturnUploads] = useState<ReturnUploadItem[]>([]);
   const [isReturning, setIsReturning] = useState(false);
+  const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
 
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
@@ -330,6 +331,10 @@ export default function SharePage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [lightbox]);
+
+  useEffect(() => {
+    setLightboxFullLoaded(false);
+  }, [lightbox?.index, lightbox?.photos]);
 
   // Fetch comments when lightbox photo changes
   useEffect(() => {
@@ -752,19 +757,41 @@ export default function SharePage() {
               </button>
             )}
 
-            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <img
-                src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
-                alt={lightbox.photos[lightbox.index].originalName}
-                onClick={(e) => e.stopPropagation()}
-                style={{ 
-                  maxWidth: "100%", 
-                  maxHeight: "85vh", 
-                  objectFit: "contain", 
-                  borderRadius: 8, 
-                  boxShadow: "0 20px 80px rgba(0,0,0,0.6)" 
-                }}
-              />
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", minHeight: "70vh" }}>
+                <img
+                  src={lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    filter: "blur(18px)",
+                    transform: "scale(1.02)",
+                    opacity: lightboxFullLoaded ? 0 : 0.85,
+                    transition: "opacity 0.25s ease",
+                  }}
+                />
+                <img
+                  src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  onLoad={() => setLightboxFullLoaded(true)}
+                  style={{ 
+                    position: "relative",
+                    maxWidth: "100%", 
+                    maxHeight: "85vh", 
+                    objectFit: "contain", 
+                    borderRadius: 8, 
+                    boxShadow: "0 20px 80px rgba(0,0,0,0.6)",
+                    opacity: lightboxFullLoaded ? 1 : 0,
+                    transition: "opacity 0.35s ease",
+                  }}
+                />
+              </div>
               <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
                 {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
               </div>
