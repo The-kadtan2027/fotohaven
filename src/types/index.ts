@@ -40,7 +40,7 @@ export interface Album {
   shareToken: string;
   expiresAt: string | null;
   compressionQuality?: number;
-  compressionFormat?: "jpeg" | "webp";
+  compressionFormat?: "jpeg" | "webp" | "original";
   dedupThreshold?: number;
   ceremonies: Ceremony[];
 }

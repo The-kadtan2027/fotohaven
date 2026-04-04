@@ -1,4 +1,4 @@
-export type CompressionFormat = "jpeg" | "webp";
+export type CompressionFormat = "jpeg" | "webp" | "original";
 
 function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -30,6 +30,10 @@ export async function compressImageFile(
   format: CompressionFormat,
   quality: number
 ): Promise<File> {
+  if (format === "original") {
+    return file;
+  }
+
   const objectUrl = URL.createObjectURL(file);
 
   try {

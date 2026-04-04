@@ -77,7 +77,7 @@ export async function PATCH(
     const body = await req.json();
     const updates: Partial<{
       compressionQuality: number;
-      compressionFormat: "jpeg" | "webp";
+      compressionFormat: "jpeg" | "webp" | "original";
       dedupThreshold: number;
       updatedAt: Date;
     }> = {};
@@ -90,8 +90,8 @@ export async function PATCH(
     }
 
     if (body.compressionFormat !== undefined) {
-      if (body.compressionFormat !== "jpeg" && body.compressionFormat !== "webp") {
-        return NextResponse.json({ error: "compressionFormat must be jpeg or webp" }, { status: 400 });
+      if (body.compressionFormat !== "jpeg" && body.compressionFormat !== "webp" && body.compressionFormat !== "original") {
+        return NextResponse.json({ error: "compressionFormat must be jpeg, webp, or original" }, { status: 400 });
       }
       updates.compressionFormat = body.compressionFormat;
     }
