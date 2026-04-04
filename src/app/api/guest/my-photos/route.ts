@@ -33,7 +33,7 @@ export async function GET() {
     }
 
     if (!guest.faceDescriptor) {
-      return NextResponse.json({ photos: [] }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ photos: [], guest: { name: guest.name } }, { headers: { "Cache-Control": "no-store" } });
     }
 
     const guestDescriptor = parseDescriptor(guest.faceDescriptor);
@@ -58,7 +58,7 @@ export async function GET() {
       .all();
 
     if (!faces.length) {
-      return NextResponse.json({ photos: [] }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ photos: [], guest: { name: guest.name } }, { headers: { "Cache-Control": "no-store" } });
     }
 
     // Track best (lowest) distance per photo — a photo with multiple faces
@@ -89,12 +89,13 @@ export async function GET() {
         score: Math.round(score * 1000) / 1000,
       }));
 
-    return NextResponse.json({ photos: matched }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ photos: matched, guest: { name: guest.name } }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[GET /api/guest/my-photos]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
+
 
 
 

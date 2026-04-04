@@ -42,6 +42,7 @@ export default function GuestFaceDiscoveryPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
+  const [guestName, setGuestName] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
@@ -107,7 +108,13 @@ export default function GuestFaceDiscoveryPage() {
       if (!resp.ok) {
         throw new Error(data.error || "OTP verification failed");
       }
-      setStep("consent");
+      const resolvedName = data.name || name;
+      setGuestName(resolvedName);
+      if (data.hasFaceDescriptor) {
+        await loadMatchedPhotos(resolvedName);
+      } else {
+        setStep("consent");
+      }
     } catch (err: any) {
       setError(err.message || "OTP verification failed");
     } finally {
@@ -134,6 +141,44 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  async function loadMatchedPhotos(fallbackName?: string) {
+    setStatus("Finding your photos...");
+    const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
+    const matchData = await matchResp.json();
+    if (!matchResp.ok) {
+      throw new Error(matchData.error || "Failed to find matches");
+    }
+
+    setGuestName(matchData.guest?.name || fallbackName || "");
+
+    const scored: { photoId: string; score: number }[] = matchData.photos || [];
+    if (!scored.length) {
+      setMatchedPhotos([]);
+      setStep("results");
+      setStatus("");
+      return;
+    }
+
+    const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
+    if (!albumResp.ok) {
+      throw new Error("Face matched photos found, but gallery is unavailable right now.");
+    }
+    const album = (await albumResp.json()) as Album;
+    const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
+    const photoMap = new Map(all.map((p) => [p.id, p]));
+
+    const matched: MatchedPhoto[] = scored
+      .map((m) => {
+        const photo = photoMap.get(m.photoId);
+        return photo ? { ...photo, score: m.score } : null;
+      })
+      .filter((p): p is MatchedPhoto => p !== null);
+
+    setMatchedPhotos(matched);
+    setStep("results");
+    setStatus("");
+  }
+
   async function scanAndMatch() {
     if (!videoRef.current) return;
     setBusy(true);
@@ -149,7 +194,7 @@ export default function GuestFaceDiscoveryPage() {
 
       for (let i = 0; i < SAMPLES; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
-        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} — hold still...`);
+        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} - hold still...`);
 
         const video = videoRef.current;
         if (!video) break;
@@ -204,40 +249,7 @@ export default function GuestFaceDiscoveryPage() {
         throw new Error(data.error || "Failed to save face profile");
       }
 
-      setStatus("Finding your photos...");
-      const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
-      const matchData = await matchResp.json();
-      if (!matchResp.ok) {
-        throw new Error(matchData.error || "Failed to find matches");
-      }
-
-      // New response: { photos: [{ photoId, score }] } sorted best-first
-      const scored: { photoId: string; score: number }[] = matchData.photos || [];
-      if (!scored.length) {
-        setMatchedPhotos([]);
-        setStep("results");
-        setStatus("");
-        return;
-      }
-
-      const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
-      if (!albumResp.ok) {
-        throw new Error("Face matched photos found, but gallery is unavailable right now.");
-      }
-      const album = (await albumResp.json()) as Album;
-      const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
-      const photoMap = new Map(all.map((p) => [p.id, p]));
-
-      const matched: MatchedPhoto[] = scored
-        .map((m) => {
-          const photo = photoMap.get(m.photoId);
-          return photo ? { ...photo, score: m.score } : null;
-        })
-        .filter((p): p is MatchedPhoto => p !== null);
-
-      setMatchedPhotos(matched);
-      setStep("results");
-      setStatus("");
+      await loadMatchedPhotos();
     } catch (err: any) {
       setError(err.message || "Scan failed");
       setStatus("");
@@ -246,6 +258,12 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  function rescanFace() {
+    setLightbox(null);
+    setMatchedPhotos([]);
+    setStep("scan");
+    void startCamera();
+  }
   useEffect(() => {
     if (!lightbox) return;
     const handler = (e: KeyboardEvent) => {
@@ -398,15 +416,25 @@ export default function GuestFaceDiscoveryPage() {
 
         {step === "results" && (
           <div style={{ marginTop: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
-                Your matched photos ({matchedPhotos.length})
-              </h2>
-              {matchedPhotos.length > 0 && (
-                <button className="btn-gold" onClick={downloadMatched}>
-                  Download matched ZIP
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
+                  Your matched photos ({matchedPhotos.length})
+                </h2>
+                {guestName ? (
+                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>Welcome, {guestName}.</p>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn-ghost" onClick={rescanFace}>
+                  Rescan Face
                 </button>
-              )}
+                {matchedPhotos.length > 0 && (
+                  <button className="btn-gold" onClick={downloadMatched}>
+                    Download matched ZIP
+                  </button>
+                )}
+              </div>
             </div>
 
             {matchedPhotos.length === 0 ? (
@@ -528,7 +556,7 @@ export default function GuestFaceDiscoveryPage() {
                 />
               </div>
               <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
-                {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
+                {lightbox.index + 1} / {lightbox.photos.length} - {lightbox.photos[lightbox.index].originalName}
               </div>
             </div>
 

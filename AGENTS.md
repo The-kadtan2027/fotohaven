@@ -1034,6 +1034,54 @@ inference ever runs on the Android device.
 
 ---
 
+## Task: Returning guest skip-scan flow
+
+**Status:** Not started  
+**Scope:** When a guest logs back in with the same email for the same album and already has a saved face descriptor, skip the consent/scan step and take them straight to the matched-photo discovery view. Also show the guest's name on the discovery page and add a button there to rescan their face if they want to refresh their matches.
+
+### Schema change
+None. Reuse existing `Guest.name`, `Guest.email`, `Guest.faceDescriptor`, and `Guest.sessionToken`.
+
+### API changes
+- `POST /api/guest/verify-otp` — `src/app/api/guest/verify-otp/route.ts`
+  - Continue validating OTP and issuing the guest session cookie as today.
+  - Include `hasFaceDescriptor: boolean` in the success JSON so the client knows whether this guest already completed a face scan for this album/email.
+  - Include the resolved guest `name` in the success JSON so the UI can render a greeting immediately.
+
+- `GET /api/guest/my-photos` — `src/app/api/guest/my-photos/route.ts`
+  - Continue returning matched photos as today.
+  - Also return minimal guest metadata needed by the client for the discovery view, specifically the guest `name`.
+
+### UI changes
+- `src/app/share/[token]/guest/page.tsx`
+  - After successful OTP verification:
+    - if `hasFaceDescriptor === true`, skip the consent and scan steps and go directly to the matched-photo discovery results flow by calling the existing matched-photos loader.
+    - if `hasFaceDescriptor === false`, keep the current consent -> scan flow unchanged.
+  - Show the guest name in the discovery/results view, e.g. `Welcome back, {name}` or equivalent.
+  - Add a `Rescan Face` button inside the discovery/results view:
+    - returns the guest to the scan flow
+    - allows them to capture a new face profile
+    - after rescan, refreshes matched photos using the new descriptor
+  - Do not require the guest to re-enter OTP just to rescan once already authenticated in the same session.
+
+### Modified files
+- `AGENTS.md` — this task spec
+- `src/app/api/guest/verify-otp/route.ts`
+- `src/app/api/guest/my-photos/route.ts`
+- `src/app/share/[token]/guest/page.tsx`
+
+### Acceptance criteria
+- [ ] Guest logs in again with the same email for the same album and, if `Guest.faceDescriptor` already exists, does not see the consent/scan step
+- [ ] Returning guest lands directly on the matched-photo discovery view after OTP verification
+- [ ] Discovery view shows the guest name
+- [ ] Discovery view includes a working `Rescan Face` action
+- [ ] Rescanning updates the stored guest face descriptor and refreshes matched photos
+- [ ] First-time guests without a saved face descriptor still follow the current OTP -> consent -> scan -> results flow
+- [ ] No schema changes are introduced
+- [ ] `npx tsc --noEmit` passes with zero errors
+
+---
+
 ## Task: Advanced Album Management (Duplicates, Blur, Compression, Lightbox)
 
 **Status:** Completed
