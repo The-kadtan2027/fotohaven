@@ -12,7 +12,7 @@ type Photo = {
   originalUrl?: string;
 };
 
-// Extends Photo with the cosine-distance score returned by /api/guest/my-photos
+// Extends Photo with the Euclidean distance score returned by /api/guest/my-photos
 type MatchedPhoto = Photo & { score: number };
 
 type Ceremony = {
@@ -413,7 +413,7 @@ export default function GuestFaceDiscoveryPage() {
                         bottom: 6,
                         left: 6,
                         background:
-                          photo.score < 0.3
+                          photo.score < 0.42
                             ? "rgba(34,197,94,0.88)"
                             : "rgba(234,179,8,0.88)",
                         color: "#fff",
@@ -424,7 +424,7 @@ export default function GuestFaceDiscoveryPage() {
                         letterSpacing: "0.03em",
                       }}
                     >
-                      {photo.score < 0.3 ? "Strong match" : "Possible match"}
+                      {photo.score < 0.42 ? "Strong match" : "Possible match"}
                     </span>
                   </div>
                 ))}
@@ -443,5 +443,6 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
 
 

@@ -4,13 +4,13 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
-import { cosineDistance, parseDescriptor } from "@/lib/face-math";
+import { euclideanDistance, parseDescriptor } from "@/lib/face-math";
 
 export const dynamic = "force-dynamic";
 
 // Tightened from 0.5 — reduces false positives in large crowds (e.g. Indian weddings).
 // face-api.js same-person threshold is typically = 0.6; = 0.35 is a stricter crowded-album cutoff.
-const DISTANCE_THRESHOLD = 0.35;
+const DISTANCE_THRESHOLD = 0.5;
 
 export async function GET() {
   try {
@@ -66,7 +66,7 @@ export async function GET() {
     const bestDistanceByPhoto = new Map<string, number>();
     for (const face of faces) {
       try {
-        const distance = cosineDistance(
+        const distance = euclideanDistance(
           guestDescriptor,
           parseDescriptor(face.descriptor)
         );
@@ -95,6 +95,7 @@ export async function GET() {
     return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
+
 
 
 
