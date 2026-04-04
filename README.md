@@ -49,6 +49,8 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Per-photo comments** — photographer and client can annotate individual photos with notes
 - **Email notifications** — photographer receives an email on first gallery view (via Resend)
 - **Upload-back flow** — photographer can upload edited finals back into the album via share link; client downloads them in a separate "Delivered Finals" tab
+- **Guest face discovery** — guests can verify via OTP, scan once, and see likely photo matches ranked by confidence
+- **Face reprocessing reset** — photographer can clear stale face descriptors for an album and rebuild them with the latest browser-side pipeline
 
 ---
 
@@ -840,6 +842,7 @@ The Advanced Album Management migration is additive only. It adds:
 5. Downloads ZIP — per ceremony, selected, or everything
 6. Uploads edited finals via **Upload Returns** dropzone at the bottom of the page
 7. Client sees finals appear in the **Delivered Finals** tab and can download them as a separate ZIP
+8. If guest face matching quality changes after an update, use **Reprocess Faces** in the album manager to rebuild descriptors for that album
 
 ---
 
@@ -891,6 +894,8 @@ Creates a photo record with `isReturn: true`. Returns same presigned URL flow as
 ```json
 { "photoId": "uuid", "body": "Please crop tighter on the left", "author": "photographer" }
 ```
+
+**`POST /api/albums/:albumId/reprocess-faces`** — clear saved face descriptors for an album and mark its original photos for reprocessing on the next album-manager visit
 
 **`POST /api/photos/blur-batch`** — bulk toggle admin blur
 ```json

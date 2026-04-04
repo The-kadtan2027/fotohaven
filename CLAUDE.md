@@ -150,11 +150,16 @@ fotohaven/
   - Sets `Photo.faceProcessed = true`.
 - **Purpose**: Stores browser-extracted descriptors; no server-side neural inference.
 
+### POST /api/albums/:albumId/reprocess-faces
+- **Auth**: Required (session cookie, guarded by middleware).
+- **Effect**: Deletes stored `PhotoFace` rows for the album's original photos and sets `Photo.faceProcessed = false`.
+- **Purpose**: Forces browser-side descriptor regeneration after pipeline or threshold improvements.
+
 ### GET /api/guest/my-photos
 - **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
 - **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending cosine distance (best matches first).
-- **Threshold**: `0.4` cosine distance (high-confidence match range for face-api.js embeddings).
-- **Score meaning**: `< 0.3` = strong match, `0.3–0.4` = possible match.
+- **Threshold**: `0.35` cosine distance (stricter crowded-album cutoff).
+- **Score meaning**: `< 0.3` = strong match, `0.3–0.35` = possible match.
 - **Enrollment**: Guest page captures 3 selfie frames at 500ms intervals, averages descriptors via `averageDescriptors()` for robustness.
 
 ### DELETE /api/photos/:photoId
@@ -218,8 +223,10 @@ pm2 start ecosystem.config.js
 - **Face processing architecture**:
   - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
   - Browser loads models from `/public/models` with `loadFromUri('/models')`.
+  - Album indexing now uses `detectAllFaces(...).withFaceLandmarks().withFaceDescriptors()` for aligned descriptors rather than raw crop descriptors.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs cosine distance matching; heavy inference is offloaded from Android phone CPU.
+  - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
   - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---

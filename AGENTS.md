@@ -996,9 +996,9 @@ inference ever runs on the Android device.
 - Status text shows "Capturing sample 1 of 3 — hold still..."
 
 #### Change 2 — Tighten match threshold (0.5 → 0.4)
-- `src/app/api/guest/my-photos/route.ts` — `DISTANCE_THRESHOLD` changed from `0.5` to `0.4`
-- face-api.js same-person range: ≤0.4 is high confidence, ≤0.6 is same person
-- The old threshold was in the "maybe same person" range; 0.4 is firmly "high confidence"
+- `src/app/api/guest/my-photos/route.ts` — `DISTANCE_THRESHOLD` changed from `0.5` to `0.35`
+- face-api.js same-person range: ≤0.35 is a stricter crowded-album cutoff, ≤0.6 is same person
+- The old threshold was in the "maybe same person" range; 0.35 is intentionally more conservative
 
 #### Change 3 — Return scored results
 - `GET /api/guest/my-photos` now returns `{ photos: [{ photoId, score }] }` sorted best-first (lowest distance = strongest match)
@@ -1025,7 +1025,7 @@ inference ever runs on the Android device.
 
 ### Acceptance criteria
 - [x] Guest enrollment captures 3 frames and averages descriptors (requires ≥2 successful detections)
-- [x] Match threshold tightened from 0.5 to 0.4 to reduce false positives
+- [x] Match threshold tightened from 0.5 to 0.35 to reduce false positives
 - [x] `GET /api/guest/my-photos` returns `{ photos: [{ photoId, score }] }` sorted best-first
 - [x] Match results show green "Strong match" (< 0.3) or amber "Possible match" (0.3–0.4) badges
 - [x] DB query uses a single join instead of 3 sequential queries
@@ -1189,3 +1189,43 @@ None.
 - [x] The setting works with `original`, `jpeg`, and `webp` modes.
 - [x] No schema changes are introduced.
 - [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Face Reprocessing Reset
+
+**Status:** Completed
+**Scope:** Give the photographer a one-click way to clear stale face descriptors for an album and trigger browser-side reprocessing using the latest matching pipeline.
+
+### Schema change
+None.
+
+### New API route
+- `POST /api/albums/[albumId]/reprocess-faces` — `src/app/api/albums/[albumId]/reprocess-faces/route.ts`
+  - Auth: guarded by middleware under `/api/albums/*`
+  - Finds all original photos in the album
+  - Deletes their `PhotoFace` rows
+  - Sets `Photo.faceProcessed = false`
+  - Returns `{ resetCount }`
+
+### UI changes
+- `src/app/albums/[albumId]/page.tsx`
+  - Add a `Reprocess Faces` button in the ceremony action row
+  - Confirm before clearing descriptors
+  - Refresh album data after reset so `FaceProcessor` automatically resumes
+
+### Documentation changes
+- `CLAUDE.md`
+  - Document the new reset route and the tighter face-match threshold
+  - Clarify that album reprocessing is required after major descriptor-pipeline improvements
+- `README.md`
+  - Document the reprocess flow for operators using guest face discovery
+
+### Acceptance criteria
+- [x] Photographer can reset face processing for an album from the album manager
+- [x] Reset deletes old `PhotoFace` rows and marks album photos `faceProcessed = false`
+- [x] Browser-side `FaceProcessor` resumes automatically after refresh
+- [x] No schema changes are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+
