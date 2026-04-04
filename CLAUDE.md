@@ -157,9 +157,9 @@ fotohaven/
 
 ### GET /api/guest/my-photos
 - **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
-- **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending cosine distance (best matches first).
-- **Threshold**: `0.35` cosine distance (stricter crowded-album cutoff).
-- **Score meaning**: `< 0.3` = strong match, `0.3–0.35` = possible match.
+- **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending Euclidean distance (best matches first).
+- **Threshold**: `0.5` Euclidean distance (`face-api.js`-style same-person matching).
+- **Score meaning**: `< 0.42` = strong match, `0.42–0.5` = possible match.
 - **Enrollment**: Guest page captures 3 selfie frames at 500ms intervals, averages descriptors via `averageDescriptors()` for robustness.
 
 ### DELETE /api/photos/:photoId
@@ -225,7 +225,7 @@ pm2 start ecosystem.config.js
   - Browser loads models from `/public/models` with `loadFromUri('/models')`.
   - Album indexing now uses `detectAllFaces(...).withFaceLandmarks().withFaceDescriptors()` for aligned descriptors rather than raw crop descriptors.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
-  - Server only stores descriptors and runs cosine distance matching; heavy inference is offloaded from Android phone CPU.
+  - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
   - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
   - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 

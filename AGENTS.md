@@ -850,7 +850,7 @@ After schema edits run:
 - `POST /api/guest/request-otp` — send 6-digit OTP via Resend and persist hashed OTP.
 - `POST /api/guest/verify-otp` — validate OTP, create guest session, set signed guest cookie for 24h.
 - `POST /api/guest/enroll-face` — accept 128-float descriptor from browser and store on guest.
-- `GET /api/guest/my-photos` — cosine-distance match against `photoFaces` in same album, threshold `< 0.5`.
+- `GET /api/guest/my-photos` — Euclidean-distance match against `photoFaces` in same album, threshold `< 0.5`.
 
 ### Background extraction
 New script: `scripts/process-faces.ts`
@@ -890,7 +890,7 @@ New page: `src/app/share/[token]/guest/page.tsx`
 - [x] `POST /api/guest/enroll-face` stores 128-float descriptor JSON on guest record
 - [x] `scripts/process-faces.ts` extracts faces and writes descriptors + bounding boxes
 - [x] Background face extraction is non-blocking and not part of upload requests
-- [x] `GET /api/guest/my-photos` returns photo IDs by cosine distance threshold `0.5`
+- [x] `GET /api/guest/my-photos` returns photo IDs by Euclidean distance threshold `0.5`
 - [x] Guest page supports OTP → consent → scan → matched grid flow
 - [x] Consent screen explicitly allows skip with "Browse all photos instead"
 - [x] Guest can download matched photos as ZIP through existing download route
@@ -911,7 +911,7 @@ inference ever runs on the Android device.
 - A background React worker processes unprocessed photos silently after page load
 - Descriptors (128 floats per face) are POSTed to a new API endpoint on the phone
 - The phone stores them in the existing PhotoFace table and marks faceProcessed=true
-- Guest matching (cosine distance) remains server-side — pure arithmetic, no TF
+- Guest matching (Euclidean distance) remains server-side — pure arithmetic, no TF
 
 ### New files
 - `src/app/albums/[albumId]/FaceProcessor.tsx` — Client Component, background worker
@@ -995,14 +995,14 @@ inference ever runs on the Android device.
 - Requires at least 2 of 3 successful detections; shows per-sample status text
 - Status text shows "Capturing sample 1 of 3 — hold still..."
 
-#### Change 2 — Tighten match threshold (0.5 → 0.4)
-- `src/app/api/guest/my-photos/route.ts` — `DISTANCE_THRESHOLD` changed from `0.5` to `0.35`
-- face-api.js same-person range: ≤0.35 is a stricter crowded-album cutoff, ≤0.6 is same person
-- The old threshold was in the "maybe same person" range; 0.35 is intentionally more conservative
+#### Change 2 — Finalize distance metric and threshold
+- `src/app/api/guest/my-photos/route.ts` now uses Euclidean distance with `DISTANCE_THRESHOLD = 0.5`
+- `face-api.js` descriptors are conventionally compared with Euclidean distance, not cosine distance
+- The previous cosine matcher was too permissive and produced huge false-positive result sets
 
 #### Change 3 — Return scored results
 - `GET /api/guest/my-photos` now returns `{ photos: [{ photoId, score }] }` sorted best-first (lowest distance = strongest match)
-- Guest page shows confidence badges: green "Strong match" (score < 0.3) or amber "Possible match" (score 0.3–0.4)
+- Guest page shows confidence badges: green "Strong match" (score < 0.42) or amber "Possible match" (score 0.42–0.5)
 - Results are sorted best-first so most confident matches appear at top of grid
 
 #### Change 4 — Single-join DB query
@@ -1013,7 +1013,7 @@ inference ever runs on the Android device.
 | File | Change |
 |------|--------|
 | `src/lib/face-math.ts` | Added `averageDescriptors()` helper |
-| `src/app/api/guest/my-photos/route.ts` | Threshold 0.5→0.4, single join query, scored response |
+| `src/app/api/guest/my-photos/route.ts` | Euclidean distance matcher, threshold `0.5`, single join query, scored response |
 | `src/app/share/[token]/guest/page.tsx` | Multi-frame capture, MatchedPhoto type, confidence badges |
 
 ### Files NOT touched
@@ -1025,9 +1025,9 @@ inference ever runs on the Android device.
 
 ### Acceptance criteria
 - [x] Guest enrollment captures 3 frames and averages descriptors (requires ≥2 successful detections)
-- [x] Match threshold tightened from 0.5 to 0.35 to reduce false positives
+- [x] Guest matching uses Euclidean distance with threshold `0.5`
 - [x] `GET /api/guest/my-photos` returns `{ photos: [{ photoId, score }] }` sorted best-first
-- [x] Match results show green "Strong match" (< 0.3) or amber "Possible match" (0.3–0.4) badges
+- [x] Match results show green "Strong match" (< 0.42) or amber "Possible match" (0.42–0.5) badges
 - [x] DB query uses a single join instead of 3 sequential queries
 - [x] `averageDescriptors()` correctly averages N Float32Array descriptors
 - [x] `npx tsc --noEmit` passes with zero errors

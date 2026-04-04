@@ -897,6 +897,11 @@ Creates a photo record with `isReturn: true`. Returns same presigned URL flow as
 
 **`POST /api/albums/:albumId/reprocess-faces`** — clear saved face descriptors for an album and mark its original photos for reprocessing on the next album-manager visit
 
+Guest face discovery notes:
+- matching now uses Euclidean distance on `face-api.js` descriptors
+- current threshold is `0.5`
+- UI labels use `< 0.42` = `Strong match`, `0.42–0.5` = `Possible match`
+
 **`POST /api/photos/blur-batch`** — bulk toggle admin blur
 ```json
 { "photoIds": ["uuid-1", "uuid-2"], "isBlurred": true }
