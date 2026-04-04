@@ -8,7 +8,7 @@ import { cosineDistance, parseDescriptor } from "@/lib/face-math";
 
 // Tightened from 0.5 — reduces false positives in large crowds (e.g. Indian weddings).
 // face-api.js same-person threshold is typically ≤ 0.6; ≤ 0.4 is high confidence.
-const DISTANCE_THRESHOLD = 0.4;
+const DISTANCE_THRESHOLD = 0.35;
 
 export async function GET() {
   try {
@@ -93,3 +93,4 @@ export async function GET() {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+

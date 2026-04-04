@@ -21,7 +21,7 @@ async function ensureModelsLoaded() {
     modelLoadPromise = (async () => {
       console.log("[FaceProcessor] Loading models from /models...");
       await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-      await faceapi.nets.faceLandmark68TinyNet.loadFromUri("/models");
+      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
       await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
       console.log("[FaceProcessor] Models loaded.");
     })();
@@ -126,10 +126,12 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
                 minConfidence: 0.3,
                 inputSize: 416,
               } as any)
-            );
+            )
+              .withFaceLandmarks()
+              .withFaceDescriptors();
 
             const validDetections = detections.filter((det) => {
-              const box = det.box;
+              const box = det.detection.box;
               return (
                 Number.isFinite(box.x) &&
                 Number.isFinite(box.y) &&
@@ -146,34 +148,16 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             }> = [];
 
             for (const det of validDetections) {
-              try {
-                const crops = await faceapi.extractFaces(canvas as any, [det]);
-                const crop = crops[0];
-                if (!crop || crop.width < 2 || crop.height < 2) continue;
-
-                const landmarks = await faceapi.detectFaceLandmarksTiny(crop as any);
-                if (!landmarks) continue;
-                if (Array.isArray(landmarks)) continue;
-                const descriptor = await faceapi.computeFaceDescriptor(crop as any);
-
-                faces.push({
-                  descriptor: Array.from(descriptor as Float32Array),
-                  boundingBox: {
-                    x: det.box.x,
-                    y: det.box.y,
-                    width: det.box.width,
-                    height: det.box.height,
-                  },
-                });
-              } catch (singleFaceError) {
-                const message =
-                  singleFaceError instanceof Error
-                    ? singleFaceError.message
-                    : String(singleFaceError);
-                console.warn(
-                  `[FaceProcessor] Skipped invalid face crop in ${photo.id}: ${message}`
-                );
-              }
+              const box = det.detection.box;
+              faces.push({
+                descriptor: Array.from(det.descriptor as Float32Array),
+                boundingBox: {
+                  x: box.x,
+                  y: box.y,
+                  width: box.width,
+                  height: box.height,
+                },
+              });
             }
 
             const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
@@ -267,3 +251,4 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
     </div>
   );
 }
+
