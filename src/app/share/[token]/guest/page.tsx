@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { averageDescriptors } from "@/lib/face-math";
 
 type Photo = {
@@ -42,6 +43,8 @@ export default function GuestFaceDiscoveryPage() {
   const [status, setStatus] = useState("");
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
+  const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
+  const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -243,6 +246,21 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  useEffect(() => {
+    if (!lightbox) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
+      if (e.key === "ArrowLeft") setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [lightbox]);
+
+  useEffect(() => {
+    setLightboxFullLoaded(false);
+  }, [lightbox?.index, lightbox?.photos]);
+
   function downloadMatched() {
     if (!matchedPhotos.length) return;
 
@@ -397,10 +415,12 @@ export default function GuestFaceDiscoveryPage() {
               </p>
             ) : (
               <div className="photo-grid" style={{ marginTop: 16 }}>
-                {matchedPhotos.map((photo) => (
-                  <div
+                {matchedPhotos.map((photo, index) => (
+                  <button
                     key={photo.id}
-                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)" }}
+                    type="button"
+                    onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
                   >
                     <img
                       src={photo.url}
@@ -426,7 +446,7 @@ export default function GuestFaceDiscoveryPage() {
                     >
                       {photo.score < 0.42 ? "Strong match" : "Possible match"}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -440,9 +460,90 @@ export default function GuestFaceDiscoveryPage() {
           <p style={{ marginTop: 14, color: "var(--blush)", fontSize: 13 }}>{error}</p>
         )}
       </div>
+
+      {lightbox && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex" }}
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              padding: "40px"
+            }}
+          >
+            <button
+              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+              style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+            >
+              <X size={18} />
+            </button>
+
+            {lightbox.index > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index - 1 }); }}
+                style={{ position: "absolute", left: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronLeft size={20} />
+              </button>
+            )}
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", minHeight: "70vh" }}>
+                <img
+                  src={lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    filter: "blur(18px)",
+                    transform: "scale(1.02)",
+                    opacity: lightboxFullLoaded ? 0 : 0.85,
+                    transition: "opacity 0.25s ease",
+                  }}
+                />
+                <img
+                  src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  onLoad={() => setLightboxFullLoaded(true)}
+                  style={{
+                    position: "relative",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    boxShadow: "0 20px 80px rgba(0,0,0,0.6)",
+                    opacity: lightboxFullLoaded ? 1 : 0,
+                    transition: "opacity 0.35s ease",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
+                {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
+              </div>
+            </div>
+
+            {lightbox.index < lightbox.photos.length - 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index + 1 }); }}
+                style={{ position: "absolute", right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronRight size={20} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-
 
