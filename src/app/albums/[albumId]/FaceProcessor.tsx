@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
+import { FACE_CONFIG } from "@/lib/face-config";
 
 type FaceProcessorPhoto = {
   id: string;
@@ -123,7 +124,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             const detections = await faceapi.detectAllFaces(
               canvas as any,
               new faceapi.SsdMobilenetv1Options({
-                minConfidence: 0.3,
+                minConfidence: FACE_CONFIG.detectionMinConfidence,
                 inputSize: 416,
               } as any)
             )
@@ -137,8 +138,9 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
                 Number.isFinite(box.y) &&
                 Number.isFinite(box.width) &&
                 Number.isFinite(box.height) &&
-                box.width >= 2 &&
-                box.height >= 2
+                det.detection.score >= FACE_CONFIG.detectionMinConfidence &&
+                box.width >= FACE_CONFIG.minFaceBoxSize &&
+                box.height >= FACE_CONFIG.minFaceBoxSize
               );
             });
 
@@ -251,4 +253,8 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
     </div>
   );
 }
+
+
+
+
 

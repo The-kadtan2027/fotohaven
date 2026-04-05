@@ -1,4 +1,4 @@
-# CLAUDE.md — FotoHaven Agent Context
+﻿# CLAUDE.md â€” FotoHaven Agent Context
 
 > This file is read automatically by Claude Code at the start of every session.
 > It tells the agent everything about this project: what it is, how it's built,
@@ -11,13 +11,13 @@
 **FotoHaven** is a photo handoff platform for event photographers and clients.
 The primary use case is Indian weddings: a client selects photos from a multi-ceremony
 event (Mehndi, Sangeet, Wedding, Reception) and hands them off to a photographer
-via a secure share link — no WhatsApp, no Google Drive.
+via a secure share link â€” no WhatsApp, no Google Drive.
 
 The app runs on a **Next.js 15 App Router** server. The primary deployment target
 is an **old Android phone running Termux + PM2 + Cloudflare Tunnel (or Tailscale Funnel)**.
 Always keep ARM compatibility and low memory footprint in mind.
 
-## Tech stack — exact versions
+## Tech stack â€” exact versions
 
 | Package | Version | Purpose |
 |---------|---------|---------|
@@ -39,29 +39,29 @@ Always keep ARM compatibility and low memory footprint in mind.
 
 ```
 fotohaven/
-├── src/
-│   ├── lib/
-│   │   ├── schema.ts          ← SINGLE SOURCE OF TRUTH (Drizzle tables)
-│   │   ├── db.ts              ← Drizzle client (better-sqlite3)
-│   │   ├── storage.ts         ← Storage abstraction (R2 or local)
-│   │   └── email.ts           ← Email utility (Resend)
-│   ├── app/                   ← Next.js App Router
-│   │   ├── api/
-│   │   │   ├── albums/        ← CRUD for albums + download
-│   │   │   ├── share/         ← Public gallery data (password guarded, upload-returns, download)
-│   │   │   ├── upload/        ← S3/Local upload handler
-│   │   │   ├── photos/        ← Photo DELETE (auth), PATCH isSelected (public), batch-delete
-│   │   │   ├── ceremonies/    ← Add/Delete ceremony folders
-│   │   │   ├── auth/          ← login, logout, me (JWT cookie)
-│   │   │   ├── comments/      ← Per-photo comments (POST/GET)
-│   │   │   └── files/         ← Local file serving (Range request support)
-│   │   ├── share/[token]/     ← Public gallery UI (challenge screen)
-│   │   └── albums/[id]/       ← Admin manage view
-│   └── types/                 ← Shared TS interfaces
-├── drizzle/                   ← Generated SQL migrations
-├── drizzle.config.js          ← Drizzle-kit configuration
-├── .env                       ← Secret keys (local)
-└── CLAUDE.md                  ← This file
+â”œâ”€â”€ src/
+â”‚   â”œâ”€â”€ lib/
+â”‚   â”‚   â”œâ”€â”€ schema.ts          â† SINGLE SOURCE OF TRUTH (Drizzle tables)
+â”‚   â”‚   â”œâ”€â”€ db.ts              â† Drizzle client (better-sqlite3)
+â”‚   â”‚   â”œâ”€â”€ storage.ts         â† Storage abstraction (R2 or local)
+â”‚   â”‚   â””â”€â”€ email.ts           â† Email utility (Resend)
+â”‚   â”œâ”€â”€ app/                   â† Next.js App Router
+â”‚   â”‚   â”œâ”€â”€ api/
+â”‚   â”‚   â”‚   â”œâ”€â”€ albums/        â† CRUD for albums + download
+â”‚   â”‚   â”‚   â”œâ”€â”€ share/         â† Public gallery data (password guarded, upload-returns, download)
+â”‚   â”‚   â”‚   â”œâ”€â”€ upload/        â† S3/Local upload handler
+â”‚   â”‚   â”‚   â”œâ”€â”€ photos/        â† Photo DELETE (auth), PATCH isSelected (public), batch-delete
+â”‚   â”‚   â”‚   â”œâ”€â”€ ceremonies/    â† Add/Delete ceremony folders
+â”‚   â”‚   â”‚   â”œâ”€â”€ auth/          â† login, logout, me (JWT cookie)
+â”‚   â”‚   â”‚   â”œâ”€â”€ comments/      â† Per-photo comments (POST/GET)
+â”‚   â”‚   â”‚   â””â”€â”€ files/         â† Local file serving (Range request support)
+â”‚   â”‚   â”œâ”€â”€ share/[token]/     â† Public gallery UI (challenge screen)
+â”‚   â”‚   â””â”€â”€ albums/[id]/       â† Admin manage view
+â”‚   â””â”€â”€ types/                 â† Shared TS interfaces
+â”œâ”€â”€ drizzle/                   â† Generated SQL migrations
+â”œâ”€â”€ drizzle.config.js          â† Drizzle-kit configuration
+â”œâ”€â”€ .env                       â† Secret keys (local)
+â””â”€â”€ CLAUDE.md                  â† This file
 ```
 
 ---
@@ -94,10 +94,10 @@ fotohaven/
 - `storageKey`: Path in R2/Local storage
 - `thumbnailKey`: Path to 800px downscaled JPEG (optional)
 - `ceremonyId`: Foreign key to Ceremony (Cascade)
-- `isReturn`: Boolean — true = edited final delivered by photographer
+- `isReturn`: Boolean â€” true = edited final delivered by photographer
 - `returnOf`: Optional photoId linking to original (nullable)
-- `isSelected`: Boolean (default false) — client-marked selection, persistent across sessions
-- `isBlurred`: Boolean (default false) — admin-side visual blur only
+- `isSelected`: Boolean (default false) â€” client-marked selection, persistent across sessions
+- `isBlurred`: Boolean (default false) â€” admin-side visual blur only
 - `imageHash`: Optional 16-char perceptual dHash fingerprint
 - `comments`: Relation to Comment table
 
@@ -124,7 +124,7 @@ fotohaven/
 - **Response**: Full gallery data including comments and `isSelected` per photo.
 
 ### PATCH /api/photos/:photoId
-- **Auth**: **Not required** — called from the unauthenticated share page.
+- **Auth**: **Not required** â€” called from the unauthenticated share page.
 - **Body**: `{ isSelected?: boolean, imageHash?: string | null }`
 - **Response**: `{ ok: true }` or `404`.
 - **Purpose**: Persists client photo selection and browser-computed dHash values.
@@ -157,10 +157,10 @@ fotohaven/
 
 ### GET /api/guest/my-photos
 - **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
-- **Response**: `{ photos: [{ photoId: string, score: number }] }` — sorted by ascending Euclidean distance (best matches first).
-- **Threshold**: `0.5` Euclidean distance (`face-api.js`-style same-person matching).
-- **Score meaning**: `< 0.42` = strong match, `0.42–0.5` = possible match.
-- **Enrollment**: Guest page captures 3 selfie frames at 500ms intervals, averages descriptors via `averageDescriptors()` for robustness.
+- **Response**: `{ photos: [{ photoId: string, score: number }] }` â€” sorted by ascending Euclidean distance (best matches first).
+- **Threshold**: Configurable via `src/lib/face-config.ts` / `NEXT_PUBLIC_FACE_MATCH_THRESHOLD` (default `0.40` Euclidean distance).
+- **Score meaning**: Configurable via `NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD` (default `< 0.36` = strong match) and `NEXT_PUBLIC_FACE_POSSIBLE_MATCH_THRESHOLD` (default `< 0.40` = possible match).
+- **Enrollment**: Guest page uses configurable sample/min-success settings from `src/lib/face-config.ts` (defaults: 5 samples, at least 3 successful detections) and averages descriptors via `averageDescriptors()` for robustness.
 
 ### DELETE /api/photos/:photoId
 - **Auth**: Required (session cookie, guarded by middleware).
@@ -184,7 +184,7 @@ fotohaven/
 - **Response**: List of comments for the photo.
 
 ### Middleware guards (src/middleware.ts)
-- **Redirects** unauthenticated browser requests to `/` and `/albums/*` → `/login`.
+- **Redirects** unauthenticated browser requests to `/` and `/albums/*` â†’ `/login`.
 - **Returns 401** for unauthenticated API calls to `/api/albums`, `/api/upload`, `/api/ceremonies`.
 - **`/api/photos` PATCH + GET are public** (client selection from share page). DELETE is guarded.
 - **Public**: `/api/auth/*`, `/api/share/*`, `/api/comments/*`, `/api/files/*`, `/login`, `/share/*`.
@@ -218,15 +218,19 @@ pm2 start ecosystem.config.js
   - Uploads can be client-side compressed to JPEG or WebP before queueing.
   - Duplicate review uses browser-side dHash and persists `Photo.imageHash`.
   - Admin blur is visual-only in `/albums/[albumId]`; share pages ignore `isBlurred`.
-  - Album and share lightboxes progressively swap thumbnail → original image.
+  - Album and share lightboxes progressively swap thumbnail â†’ original image.
 - **Next.js**: Uses `transpilePackages: ['lucide-react']` and `serverExternalPackages: ['better-sqlite3', 'sharp']` in `next.config.mjs` for build compatibility.
 - **Face processing architecture**:
   - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
   - Browser loads models from `/public/models` with `loadFromUri('/models')`.
   - Album indexing now uses `detectAllFaces(...).withFaceLandmarks().withFaceDescriptors()` for aligned descriptors rather than raw crop descriptors.
+  - Shared calibration lives in `src/lib/face-config.ts`; use the `NEXT_PUBLIC_FACE_*` env vars to tune match threshold, enrollment sample count, minimum detection confidence, minimum face size, and max returned results without touching code.
+  - After changing these values, use the album-page `Reprocess Faces` button so stored `PhotoFace` rows are regenerated under the new quality gates.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
   - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
-  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
+  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` â€” kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
+
+

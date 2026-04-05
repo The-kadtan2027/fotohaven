@@ -1278,3 +1278,50 @@ None.
 
 
 
+## Task: Configurable Face Matching Calibration
+
+**Status:** Completed  
+**Scope:** Reduce false-positive guest face matches, especially in child-heavy albums, by centralizing face-discovery thresholds and quality gates into one shared config with safe defaults and env overrides.
+
+### Schema change
+None.
+
+### New file
+- `src/lib/face-config.ts`
+  - Exports shared defaults + `NEXT_PUBLIC_FACE_*` env overrides for matching, enrollment, and indexing.
+
+### Modified files
+- `src/app/api/guest/my-photos/route.ts`
+  - Uses shared match threshold and max-results cap instead of hardcoded values.
+- `src/app/albums/[albumId]/FaceProcessor.tsx`
+  - Uses shared detection confidence and minimum face box size before persisting descriptors.
+- `src/app/share/[token]/guest/page.tsx`
+  - Uses shared enrollment sample/min-success settings and shared strong-match threshold for result badges.
+- `.env.example`
+  - Documents the configurable face-discovery env vars.
+- `CLAUDE.md`
+  - Documents the centralized face-config defaults and reprocessing guidance.
+- `AGENTS.md`
+  - This task spec.
+
+### Configurable values
+- `NEXT_PUBLIC_FACE_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_POSSIBLE_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_ENROLLMENT_SAMPLES`
+- `NEXT_PUBLIC_FACE_ENROLLMENT_MIN_SUCCESS`
+- `NEXT_PUBLIC_FACE_DETECTION_MIN_CONFIDENCE`
+- `NEXT_PUBLIC_FACE_MIN_BOX_SIZE`
+- `NEXT_PUBLIC_FACE_MAX_RESULTS`
+
+### Acceptance criteria
+- [x] Face-discovery thresholds and quality gates are centralized in one shared config module
+- [x] Guest matching no longer hardcodes the distance threshold in the API route
+- [x] Guest matching caps returned results via configurable max-results control
+- [x] Face indexing filters out weak/tiny detections using configurable quality gates
+- [x] Guest enrollment uses configurable sample count and minimum-success requirements
+- [x] `.env.example` documents the new tuning knobs
+- [x] No schema changes are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

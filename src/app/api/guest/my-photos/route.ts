@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
+import { FACE_CONFIG } from "@/lib/face-config";
 import { euclideanDistance, parseDescriptor } from "@/lib/face-math";
 
 export const dynamic = "force-dynamic";
-
-// Tightened from 0.5 — reduces false positives in large crowds (e.g. Indian weddings).
-// face-api.js same-person threshold is typically = 0.6; = 0.35 is a stricter crowded-album cutoff.
-const DISTANCE_THRESHOLD = 0.5;
 
 export async function GET() {
   try {
@@ -38,8 +35,6 @@ export async function GET() {
 
     const guestDescriptor = parseDescriptor(guest.faceDescriptor);
 
-    // Single join query: photoFaces → photos → ceremonies filtered by albumId.
-    // Replaces the previous 3-query chain and avoids loading all photo IDs into memory.
     const faces = db
       .select({
         id: photoFaces.id,
@@ -61,8 +56,6 @@ export async function GET() {
       return NextResponse.json({ photos: [], guest: { name: guest.name } }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    // Track best (lowest) distance per photo — a photo with multiple faces
-    // is matched if ANY face is close enough, and we keep the strongest signal.
     const bestDistanceByPhoto = new Map<string, number>();
     for (const face of faces) {
       try {
@@ -70,7 +63,7 @@ export async function GET() {
           guestDescriptor,
           parseDescriptor(face.descriptor)
         );
-        if (distance < DISTANCE_THRESHOLD) {
+        if (distance < FACE_CONFIG.matchThreshold) {
           const current = bestDistanceByPhoto.get(face.photoId);
           if (current === undefined || distance < current) {
             bestDistanceByPhoto.set(face.photoId, distance);
@@ -81,9 +74,9 @@ export async function GET() {
       }
     }
 
-    // Sort ascending by distance — strongest matches (score closest to 0) come first.
     const matched = Array.from(bestDistanceByPhoto.entries())
       .sort((a, b) => a[1] - b[1])
+      .slice(0, FACE_CONFIG.maxResults)
       .map(([photoId, score]) => ({
         photoId,
         score: Math.round(score * 1000) / 1000,
@@ -95,8 +88,3 @@ export async function GET() {
     return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
-
-
-
-
-

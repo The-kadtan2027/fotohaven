@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
 type Photo = {
@@ -192,7 +193,7 @@ export default function GuestFaceDiscoveryPage() {
       // Multi-frame enrollment: capture 3 frames 500 ms apart and average the
       // descriptors. A single selfie frame is sensitive to momentary expression,
       // angle, and lighting; an average of 3 is far more stable.
-      const SAMPLES = 3;
+      const SAMPLES = FACE_CONFIG.enrollmentSamples;
       const DELAY_MS = 500;
       const canvases: HTMLCanvasElement[] = [];
 
@@ -233,9 +234,9 @@ export default function GuestFaceDiscoveryPage() {
         }
       }
 
-      if (collectedDescriptors.length < 2) {
+      if (collectedDescriptors.length < FACE_CONFIG.enrollmentMinSuccess) {
         throw new Error(
-          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. ` +
+          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. Need at least ${FACE_CONFIG.enrollmentMinSuccess}. ` +
           "Make sure your face is well-lit and centred in the frame."
         );
       }
@@ -475,7 +476,7 @@ export default function GuestFaceDiscoveryPage() {
                         bottom: 6,
                         left: 6,
                         background:
-                          photo.score < 0.42
+                          photo.score < FACE_CONFIG.strongMatchThreshold
                             ? "rgba(34,197,94,0.88)"
                             : "rgba(234,179,8,0.88)",
                         color: "#fff",
@@ -486,7 +487,7 @@ export default function GuestFaceDiscoveryPage() {
                         letterSpacing: "0.03em",
                       }}
                     >
-                      {photo.score < 0.42 ? "Strong match" : "Possible match"}
+                      {photo.score < FACE_CONFIG.strongMatchThreshold ? "Strong match" : "Possible match"}
                     </span>
                   </button>
                 ))}
@@ -597,6 +598,8 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
+
 
 
 
