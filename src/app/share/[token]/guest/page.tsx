@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -43,6 +43,7 @@ export default function GuestFaceDiscoveryPage() {
   const [status, setStatus] = useState("");
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
   const [guestName, setGuestName] = useState("");
+  const [isReturningGuest, setIsReturningGuest] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
@@ -111,8 +112,11 @@ export default function GuestFaceDiscoveryPage() {
       const resolvedName = data.name || name;
       setGuestName(resolvedName);
       if (data.hasFaceDescriptor) {
+        setIsReturningGuest(true);
+        setStatus("Face profile found. Loading your matched photos...");
         await loadMatchedPhotos(resolvedName);
       } else {
+        setIsReturningGuest(false);
         setStep("consent");
       }
     } catch (err: any) {
@@ -261,6 +265,7 @@ export default function GuestFaceDiscoveryPage() {
   function rescanFace() {
     setLightbox(null);
     setMatchedPhotos([]);
+    setIsReturningGuest(false);
     setStep("scan");
     void startCamera();
   }
@@ -422,7 +427,7 @@ export default function GuestFaceDiscoveryPage() {
                   Your matched photos ({matchedPhotos.length})
                 </h2>
                 {guestName ? (
-                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>Welcome, {guestName}.</p>
+                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>{isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`}</p>
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -574,4 +579,7 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
+
+
 
