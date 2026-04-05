@@ -158,8 +158,8 @@ fotohaven/
 ### GET /api/guest/my-photos
 - **Auth**: Requires `guest_session` cookie (JWT, 24h TTL).
 - **Response**: `{ photos: [{ photoId: string, score: number }] }` â€” sorted by ascending Euclidean distance (best matches first).
-- **Threshold**: Configurable via `src/lib/face-config.ts` / `NEXT_PUBLIC_FACE_MATCH_THRESHOLD` (default `0.40` Euclidean distance).
-- **Score meaning**: Configurable via `NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD` (default `< 0.36` = strong match) and `NEXT_PUBLIC_FACE_POSSIBLE_MATCH_THRESHOLD` (default `< 0.40` = possible match).
+- **Threshold**: Configurable via `src/lib/face-config.ts` / `FACE_MATCH_THRESHOLD` (server-preferred, default `0.40` Euclidean distance). `NEXT_PUBLIC_FACE_MATCH_THRESHOLD` is a browser fallback.
+- **Score meaning**: Configurable via `FACE_STRONG_MATCH_THRESHOLD` (default `< 0.36` = strong match) and `FACE_POSSIBLE_MATCH_THRESHOLD` (default `< 0.40` = possible match). `NEXT_PUBLIC_FACE_*` values are browser fallbacks.
 - **Enrollment**: Guest page uses configurable sample/min-success settings from `src/lib/face-config.ts` (defaults: 5 samples, at least 3 successful detections) and averages descriptors via `averageDescriptors()` for robustness.
 
 ### DELETE /api/photos/:photoId
@@ -224,7 +224,7 @@ pm2 start ecosystem.config.js
   - **Active path**: Browser-side extraction via `src/app/albums/[albumId]/FaceProcessor.tsx`.
   - Browser loads models from `/public/models` with `loadFromUri('/models')`.
   - Album indexing now uses `detectAllFaces(...).withFaceLandmarks().withFaceDescriptors()` for aligned descriptors rather than raw crop descriptors.
-  - Shared calibration lives in `src/lib/face-config.ts`; use the `NEXT_PUBLIC_FACE_*` env vars to tune match threshold, enrollment sample count, minimum detection confidence, minimum face size, and max returned results without touching code.
+  - Shared calibration lives in `src/lib/face-config.ts`; prefer `FACE_*` env vars for server/runtime tuning and keep `NEXT_PUBLIC_FACE_*` as browser fallbacks for client-side enrollment/detection settings.
   - After changing these values, use the album-page `Reprocess Faces` button so stored `PhotoFace` rows are regenerated under the new quality gates.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
