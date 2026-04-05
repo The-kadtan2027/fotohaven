@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { averageDescriptors } from "@/lib/face-math";
 
 type Photo = {
@@ -308,6 +308,15 @@ export default function GuestFaceDiscoveryPage() {
     document.body.removeChild(form);
   }
 
+  function downloadPhoto(photo: MatchedPhoto) {
+    const link = document.createElement("a");
+    link.href = photo.originalUrl || photo.url;
+    link.download = photo.originalName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)", padding: "32px 16px" }}>
       <div className="card" style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
@@ -509,12 +518,21 @@ export default function GuestFaceDiscoveryPage() {
               padding: "40px"
             }}
           >
-            <button
-              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
-              style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
-            >
-              <X size={18} />
-            </button>
+            <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 8, zIndex: 10 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); downloadPhoto(lightbox.photos[lightbox.index]); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 999, minWidth: 40, height: 40, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", gap: 8 }}
+              >
+                <Download size={16} />
+                <span style={{ fontSize: 12 }}>Download</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
 
             {lightbox.index > 0 && (
               <button
@@ -579,6 +597,8 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
+
+
 
 
 
