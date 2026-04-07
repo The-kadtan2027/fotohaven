@@ -1,8 +1,10 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
 type Photo = {
@@ -12,7 +14,7 @@ type Photo = {
   originalUrl?: string;
 };
 
-// Extends Photo with the cosine-distance score returned by /api/guest/my-photos
+// Extends Photo with the Euclidean distance score returned by /api/guest/my-photos
 type MatchedPhoto = Photo & { score: number };
 
 type Ceremony = {
@@ -41,16 +43,29 @@ export default function GuestFaceDiscoveryPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
+  const [guestName, setGuestName] = useState("");
+  const [isReturningGuest, setIsReturningGuest] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
+  const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  }
+
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
+      stopCamera();
     };
   }, []);
 
@@ -95,7 +110,16 @@ export default function GuestFaceDiscoveryPage() {
       if (!resp.ok) {
         throw new Error(data.error || "OTP verification failed");
       }
-      setStep("consent");
+      const resolvedName = data.name || name;
+      setGuestName(resolvedName);
+      if (data.hasFaceDescriptor) {
+        setIsReturningGuest(true);
+        setStatus("Face profile found. Loading your matched photos...");
+        await loadMatchedPhotos(resolvedName);
+      } else {
+        setIsReturningGuest(false);
+        setStep("consent");
+      }
     } catch (err: any) {
       setError(err.message || "OTP verification failed");
     } finally {
@@ -122,28 +146,60 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  async function loadMatchedPhotos(fallbackName?: string) {
+    setStatus("Finding your photos...");
+    const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
+    const matchData = await matchResp.json();
+    if (!matchResp.ok) {
+      throw new Error(matchData.error || "Failed to find matches");
+    }
+
+    setGuestName(matchData.guest?.name || fallbackName || "");
+
+    const scored: { photoId: string; score: number }[] = matchData.photos || [];
+    if (!scored.length) {
+      setMatchedPhotos([]);
+      setStep("results");
+      setStatus("");
+      return;
+    }
+
+    const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
+    if (!albumResp.ok) {
+      throw new Error("Face matched photos found, but gallery is unavailable right now.");
+    }
+    const album = (await albumResp.json()) as Album;
+    const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
+    const photoMap = new Map(all.map((p) => [p.id, p]));
+
+    const matched: MatchedPhoto[] = scored
+      .map((m) => {
+        const photo = photoMap.get(m.photoId);
+        return photo ? { ...photo, score: m.score } : null;
+      })
+      .filter((p): p is MatchedPhoto => p !== null);
+
+    setMatchedPhotos(matched);
+    setStep("results");
+    setStatus("");
+  }
+
   async function scanAndMatch() {
     if (!videoRef.current) return;
     setBusy(true);
     setError("");
-    setStatus("Loading models...");
 
     try {
-      const faceapi = await import("face-api.js");
-      await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
-      await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
-
       // Multi-frame enrollment: capture 3 frames 500 ms apart and average the
       // descriptors. A single selfie frame is sensitive to momentary expression,
       // angle, and lighting; an average of 3 is far more stable.
-      const SAMPLES = 3;
+      const SAMPLES = FACE_CONFIG.enrollmentSamples;
       const DELAY_MS = 500;
-      const collectedDescriptors: Float32Array[] = [];
+      const canvases: HTMLCanvasElement[] = [];
 
       for (let i = 0; i < SAMPLES; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
-        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} — hold still...`);
+        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} - hold still...`);
 
         const video = videoRef.current;
         if (!video) break;
@@ -154,7 +210,20 @@ export default function GuestFaceDiscoveryPage() {
         const ctx = canvas.getContext("2d");
         if (!ctx) continue;
         ctx.drawImage(video, 0, 0);
+        canvases.push(canvas);
+      }
 
+      stopCamera();
+
+      setStatus("Loading models...");
+      const faceapi = await import("face-api.js");
+      await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
+      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
+      await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
+
+      setStatus("Computing face profile...");
+      const collectedDescriptors: Float32Array[] = [];
+      for (const canvas of canvases) {
         const detection = await faceapi
           .detectSingleFace(canvas)
           .withFaceLandmarks()
@@ -165,14 +234,13 @@ export default function GuestFaceDiscoveryPage() {
         }
       }
 
-      if (collectedDescriptors.length < 2) {
+      if (collectedDescriptors.length < FACE_CONFIG.enrollmentMinSuccess) {
         throw new Error(
-          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. ` +
+          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. Need at least ${FACE_CONFIG.enrollmentMinSuccess}. ` +
           "Make sure your face is well-lit and centred in the frame."
         );
       }
 
-      setStatus("Computing face profile...");
       const averaged = averageDescriptors(collectedDescriptors);
       const descriptor = Array.from(averaged);
 
@@ -186,40 +254,7 @@ export default function GuestFaceDiscoveryPage() {
         throw new Error(data.error || "Failed to save face profile");
       }
 
-      setStatus("Finding your photos...");
-      const matchResp = await fetch("/api/guest/my-photos");
-      const matchData = await matchResp.json();
-      if (!matchResp.ok) {
-        throw new Error(matchData.error || "Failed to find matches");
-      }
-
-      // New response: { photos: [{ photoId, score }] } sorted best-first
-      const scored: { photoId: string; score: number }[] = matchData.photos || [];
-      if (!scored.length) {
-        setMatchedPhotos([]);
-        setStep("results");
-        setStatus("");
-        return;
-      }
-
-      const albumResp = await fetch(`/api/share/${token}`);
-      if (!albumResp.ok) {
-        throw new Error("Face matched photos found, but gallery is unavailable right now.");
-      }
-      const album = (await albumResp.json()) as Album;
-      const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
-      const photoMap = new Map(all.map((p) => [p.id, p]));
-
-      const matched: MatchedPhoto[] = scored
-        .map((m) => {
-          const photo = photoMap.get(m.photoId);
-          return photo ? { ...photo, score: m.score } : null;
-        })
-        .filter((p): p is MatchedPhoto => p !== null);
-
-      setMatchedPhotos(matched);
-      setStep("results");
-      setStatus("");
+      await loadMatchedPhotos();
     } catch (err: any) {
       setError(err.message || "Scan failed");
       setStatus("");
@@ -227,6 +262,28 @@ export default function GuestFaceDiscoveryPage() {
       setBusy(false);
     }
   }
+
+  function rescanFace() {
+    setLightbox(null);
+    setMatchedPhotos([]);
+    setIsReturningGuest(false);
+    setStep("scan");
+    void startCamera();
+  }
+  useEffect(() => {
+    if (!lightbox) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
+      if (e.key === "ArrowLeft") setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [lightbox]);
+
+  useEffect(() => {
+    setLightboxFullLoaded(false);
+  }, [lightbox?.index, lightbox?.photos]);
 
   function downloadMatched() {
     if (!matchedPhotos.length) return;
@@ -250,6 +307,15 @@ export default function GuestFaceDiscoveryPage() {
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
+  }
+
+  function downloadPhoto(photo: MatchedPhoto) {
+    const link = document.createElement("a");
+    link.href = photo.originalUrl || photo.url;
+    link.download = photo.originalName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   return (
@@ -365,15 +431,25 @@ export default function GuestFaceDiscoveryPage() {
 
         {step === "results" && (
           <div style={{ marginTop: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
-                Your matched photos ({matchedPhotos.length})
-              </h2>
-              {matchedPhotos.length > 0 && (
-                <button className="btn-gold" onClick={downloadMatched}>
-                  Download matched ZIP
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)" }}>
+                  Your matched photos ({matchedPhotos.length})
+                </h2>
+                {guestName ? (
+                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>{isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`}</p>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn-ghost" onClick={rescanFace}>
+                  Rescan Face
                 </button>
-              )}
+                {matchedPhotos.length > 0 && (
+                  <button className="btn-gold" onClick={downloadMatched}>
+                    Download matched ZIP
+                  </button>
+                )}
+              </div>
             </div>
 
             {matchedPhotos.length === 0 ? (
@@ -382,10 +458,12 @@ export default function GuestFaceDiscoveryPage() {
               </p>
             ) : (
               <div className="photo-grid" style={{ marginTop: 16 }}>
-                {matchedPhotos.map((photo) => (
-                  <div
+                {matchedPhotos.map((photo, index) => (
+                  <button
                     key={photo.id}
-                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)" }}
+                    type="button"
+                    onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
                   >
                     <img
                       src={photo.url}
@@ -398,7 +476,7 @@ export default function GuestFaceDiscoveryPage() {
                         bottom: 6,
                         left: 6,
                         background:
-                          photo.score < 0.3
+                          photo.score < FACE_CONFIG.strongMatchThreshold
                             ? "rgba(34,197,94,0.88)"
                             : "rgba(234,179,8,0.88)",
                         color: "#fff",
@@ -409,9 +487,9 @@ export default function GuestFaceDiscoveryPage() {
                         letterSpacing: "0.03em",
                       }}
                     >
-                      {photo.score < 0.3 ? "Strong match" : "Possible match"}
+                      {photo.score < FACE_CONFIG.strongMatchThreshold ? "Strong match" : "Possible match"}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -425,6 +503,106 @@ export default function GuestFaceDiscoveryPage() {
           <p style={{ marginTop: 14, color: "var(--blush)", fontSize: 13 }}>{error}</p>
         )}
       </div>
+
+      {lightbox && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex" }}
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              padding: "40px"
+            }}
+          >
+            <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 8, zIndex: 10 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); downloadPhoto(lightbox.photos[lightbox.index]); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 999, minWidth: 40, height: 40, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", gap: 8 }}
+              >
+                <Download size={16} />
+                <span style={{ fontSize: 12 }}>Download</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {lightbox.index > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index - 1 }); }}
+                style={{ position: "absolute", left: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronLeft size={20} />
+              </button>
+            )}
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", minHeight: "70vh" }}>
+                <img
+                  src={lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    filter: "blur(18px)",
+                    transform: "scale(1.02)",
+                    opacity: lightboxFullLoaded ? 0 : 0.85,
+                    transition: "opacity 0.25s ease",
+                  }}
+                />
+                <img
+                  src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  onLoad={() => setLightboxFullLoaded(true)}
+                  style={{
+                    position: "relative",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    boxShadow: "0 20px 80px rgba(0,0,0,0.6)",
+                    opacity: lightboxFullLoaded ? 1 : 0,
+                    transition: "opacity 0.35s ease",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
+                {lightbox.index + 1} / {lightbox.photos.length} - {lightbox.photos[lightbox.index].originalName}
+              </div>
+            </div>
+
+            {lightbox.index < lightbox.photos.length - 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index + 1 }); }}
+                style={{ position: "absolute", right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+              >
+                <ChevronRight size={20} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+
+
+
+
+
+
+

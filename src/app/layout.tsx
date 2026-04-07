@@ -24,8 +24,21 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">
-        {children}
+      <body className="antialiased" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1 }}>
+          {children}
+        </div>
+        <footer
+          style={{
+            padding: "10px 16px 18px",
+            textAlign: "center",
+            fontSize: 12,
+            color: "var(--taupe)",
+            background: "transparent",
+          }}
+        >
+          made by gaju ❤️
+        </footer>
       </body>
     </html>
   );

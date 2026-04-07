@@ -59,6 +59,65 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ albumId: string }> }
+) {
+  try {
+    const { albumId } = await params;
+    const album = await db.query.albums.findFirst({
+      where: eq(albums.id, albumId),
+      columns: { id: true },
+    });
+
+    if (!album) {
+      return NextResponse.json({ error: "Album not found" }, { status: 404 });
+    }
+
+    const body = await req.json();
+    const updates: Partial<{
+      compressionQuality: number;
+      compressionFormat: "jpeg" | "webp" | "original";
+      dedupThreshold: number;
+      updatedAt: Date;
+    }> = {};
+
+    if (body.compressionQuality !== undefined) {
+      if (typeof body.compressionQuality !== "number" || body.compressionQuality < 10 || body.compressionQuality > 100) {
+        return NextResponse.json({ error: "compressionQuality must be between 10 and 100" }, { status: 400 });
+      }
+      updates.compressionQuality = Math.round(body.compressionQuality);
+    }
+
+    if (body.compressionFormat !== undefined) {
+      if (body.compressionFormat !== "jpeg" && body.compressionFormat !== "webp" && body.compressionFormat !== "original") {
+        return NextResponse.json({ error: "compressionFormat must be jpeg, webp, or original" }, { status: 400 });
+      }
+      updates.compressionFormat = body.compressionFormat;
+    }
+
+    if (body.dedupThreshold !== undefined) {
+      if (typeof body.dedupThreshold !== "number" || body.dedupThreshold < 1 || body.dedupThreshold > 20) {
+        return NextResponse.json({ error: "dedupThreshold must be between 1 and 20" }, { status: 400 });
+      }
+      updates.dedupThreshold = Math.round(body.dedupThreshold);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No valid fields provided" }, { status: 400 });
+    }
+
+    updates.updatedAt = new Date();
+
+    await db.update(albums).set(updates).where(eq(albums.id, albumId)).run();
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[PATCH /api/albums]", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ albumId: string }> }

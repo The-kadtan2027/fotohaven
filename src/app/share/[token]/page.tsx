@@ -66,6 +66,8 @@ export default function SharePage() {
   const [authError, setAuthError] = useState("");
   const [returnUploads, setReturnUploads] = useState<ReturnUploadItem[]>([]);
   const [isReturning, setIsReturning] = useState(false);
+  const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
 
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
@@ -160,6 +162,15 @@ export default function SharePage() {
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
+  };
+
+  const downloadPhoto = (photo: Photo) => {
+    const link = document.createElement("a");
+    link.href = photo.originalUrl || photo.url;
+    link.download = photo.originalName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const downloadCeremony = (ceremony: Ceremony) => {
@@ -330,6 +341,14 @@ export default function SharePage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [lightbox]);
+
+  useEffect(() => {
+    setLightboxFullLoaded(false);
+  }, [lightbox?.index, lightbox?.photos]);
+
+  useEffect(() => {
+    setCommentsOpen(false);
+  }, [lightbox?.index, lightbox?.photos]);
 
   // Fetch comments when lightbox photo changes
   useEffect(() => {
@@ -736,12 +755,28 @@ export default function SharePage() {
               padding: "40px"
             }}
           >
-            <button
-              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
-              style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
-            >
-              <X size={18} />
-            </button>
+            <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 8, zIndex: 10 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); downloadPhoto(lightbox.photos[lightbox.index]); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 999, minWidth: 40, height: 40, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", gap: 8 }}
+              >
+                <Download size={16} />
+                <span style={{ fontSize: 12 }}>Download</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setCommentsOpen((prev) => !prev); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 999, minWidth: 40, height: 40, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", gap: 8 }}
+              >
+                <MessageSquare size={16} />
+                <span style={{ fontSize: 12 }}>{commentsOpen ? "Hide Notes" : "Show Notes"}</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
 
             {lightbox.index > 0 && (
               <button
@@ -752,19 +787,41 @@ export default function SharePage() {
               </button>
             )}
 
-            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <img
-                src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
-                alt={lightbox.photos[lightbox.index].originalName}
-                onClick={(e) => e.stopPropagation()}
-                style={{ 
-                  maxWidth: "100%", 
-                  maxHeight: "85vh", 
-                  objectFit: "contain", 
-                  borderRadius: 8, 
-                  boxShadow: "0 20px 80px rgba(0,0,0,0.6)" 
-                }}
-              />
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", minHeight: "70vh" }}>
+                <img
+                  src={lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    maxWidth: "100%",
+                    maxHeight: "85vh",
+                    objectFit: "contain",
+                    borderRadius: 8,
+                    filter: "blur(18px)",
+                    transform: "scale(1.02)",
+                    opacity: lightboxFullLoaded ? 0 : 0.85,
+                    transition: "opacity 0.25s ease",
+                  }}
+                />
+                <img
+                  src={lightbox.photos[lightbox.index].originalUrl || lightbox.photos[lightbox.index].url}
+                  alt={lightbox.photos[lightbox.index].originalName}
+                  onClick={(e) => e.stopPropagation()}
+                  onLoad={() => setLightboxFullLoaded(true)}
+                  style={{ 
+                    position: "relative",
+                    maxWidth: "100%", 
+                    maxHeight: "85vh", 
+                    objectFit: "contain", 
+                    borderRadius: 8, 
+                    boxShadow: "0 20px 80px rgba(0,0,0,0.6)",
+                    opacity: lightboxFullLoaded ? 1 : 0,
+                    transition: "opacity 0.35s ease",
+                  }}
+                />
+              </div>
               <div style={{ marginTop: 16, color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
                 {lightbox.index + 1} / {lightbox.photos.length} · {lightbox.photos[lightbox.index].originalName}
               </div>
@@ -781,9 +838,10 @@ export default function SharePage() {
           </div>
 
           {/* Comments Sidebar */}
+          {commentsOpen && (
           <div 
             style={{ 
-              width: 350, 
+              width: "min(350px, 85vw)", 
               background: "var(--espresso)", 
               borderLeft: "1px solid rgba(255,255,255,0.1)",
               display: "flex", 
@@ -860,6 +918,7 @@ export default function SharePage() {
               </div>
             </form>
           </div>
+          )}
         </div>
       )}
 

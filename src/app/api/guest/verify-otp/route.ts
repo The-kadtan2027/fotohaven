@@ -135,7 +135,12 @@ export async function POST(request: Request) {
       st: sessionToken,
     });
 
-    const response = NextResponse.json({ ok: true, bypass });
+    const response = NextResponse.json({
+      ok: true,
+      bypass,
+      name,
+      hasFaceDescriptor: Boolean(existingGuest?.faceDescriptor),
+    });
     response.cookies.set(getGuestCookieName(), guestJwt, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -150,3 +155,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+

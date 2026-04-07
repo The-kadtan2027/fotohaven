@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
+import { FACE_CONFIG } from "@/lib/face-config";
 
 type FaceProcessorPhoto = {
   id: string;
@@ -21,7 +22,7 @@ async function ensureModelsLoaded() {
     modelLoadPromise = (async () => {
       console.log("[FaceProcessor] Loading models from /models...");
       await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-      await faceapi.nets.faceLandmark68TinyNet.loadFromUri("/models");
+      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
       await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
       console.log("[FaceProcessor] Models loaded.");
     })();
@@ -36,7 +37,16 @@ async function blobToImageElement(
   const img = new Image();
   img.src = objectUrl;
 
-  await img.decode();
+  await img
+    .decode()
+    .catch(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () =>
+            reject(new Error("The source image cannot be decoded."));
+        })
+    );
   return { img, objectUrl };
 }
 
@@ -114,20 +124,23 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             const detections = await faceapi.detectAllFaces(
               canvas as any,
               new faceapi.SsdMobilenetv1Options({
-                minConfidence: 0.3,
+                minConfidence: FACE_CONFIG.detectionMinConfidence,
                 inputSize: 416,
               } as any)
-            );
+            )
+              .withFaceLandmarks()
+              .withFaceDescriptors();
 
             const validDetections = detections.filter((det) => {
-              const box = det.box;
+              const box = det.detection.box;
               return (
                 Number.isFinite(box.x) &&
                 Number.isFinite(box.y) &&
                 Number.isFinite(box.width) &&
                 Number.isFinite(box.height) &&
-                box.width >= 2 &&
-                box.height >= 2
+                det.detection.score >= FACE_CONFIG.detectionMinConfidence &&
+                box.width >= FACE_CONFIG.minFaceBoxSize &&
+                box.height >= FACE_CONFIG.minFaceBoxSize
               );
             });
 
@@ -137,34 +150,16 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             }> = [];
 
             for (const det of validDetections) {
-              try {
-                const crops = await faceapi.extractFaces(canvas as any, [det]);
-                const crop = crops[0];
-                if (!crop || crop.width < 2 || crop.height < 2) continue;
-
-                const landmarks = await faceapi.detectFaceLandmarksTiny(crop as any);
-                if (!landmarks) continue;
-                if (Array.isArray(landmarks)) continue;
-                const descriptor = await faceapi.computeFaceDescriptor(crop as any);
-
-                faces.push({
-                  descriptor: Array.from(descriptor as Float32Array),
-                  boundingBox: {
-                    x: det.box.x,
-                    y: det.box.y,
-                    width: det.box.width,
-                    height: det.box.height,
-                  },
-                });
-              } catch (singleFaceError) {
-                const message =
-                  singleFaceError instanceof Error
-                    ? singleFaceError.message
-                    : String(singleFaceError);
-                console.warn(
-                  `[FaceProcessor] Skipped invalid face crop in ${photo.id}: ${message}`
-                );
-              }
+              const box = det.detection.box;
+              faces.push({
+                descriptor: Array.from(det.descriptor as Float32Array),
+                boundingBox: {
+                  x: box.x,
+                  y: box.y,
+                  width: box.width,
+                  height: box.height,
+                },
+              });
             }
 
             const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
@@ -258,3 +253,8 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
     </div>
   );
 }
+
+
+
+
+

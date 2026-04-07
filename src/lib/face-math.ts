@@ -29,6 +29,20 @@ export function cosineDistance(a: Float32Array, b: Float32Array): number {
   return 1 - similarity;
 }
 
+export function euclideanDistance(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) {
+    throw new Error("Descriptor length mismatch");
+  }
+
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const delta = a[i] - b[i];
+    sum += delta * delta;
+  }
+
+  return Math.sqrt(sum);
+}
+
 /**
  * Averages multiple 128-float face descriptors into a single representative descriptor.
  * Used for multi-sample guest enrollment — averaging 3 frames across slightly different
@@ -53,3 +67,4 @@ export function averageDescriptors(descriptors: Float32Array[]): Float32Array {
   }
   return result;
 }
+

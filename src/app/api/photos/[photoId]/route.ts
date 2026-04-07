@@ -58,18 +58,37 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const { isSelected } = body;
+    const updates: Partial<{ isSelected: boolean; imageHash: string | null }> = {};
 
-    if (typeof isSelected !== "boolean") {
+    if ("isSelected" in body) {
+      if (typeof body.isSelected !== "boolean") {
+        return NextResponse.json(
+          { error: "isSelected must be a boolean" },
+          { status: 400 }
+        );
+      }
+      updates.isSelected = body.isSelected;
+    }
+
+    if ("imageHash" in body) {
+      if (body.imageHash !== null && (typeof body.imageHash !== "string" || !/^[0-9a-f]{16}$/i.test(body.imageHash))) {
+        return NextResponse.json(
+          { error: "imageHash must be a 16-character hex string or null" },
+          { status: 400 }
+        );
+      }
+      updates.imageHash = body.imageHash;
+    }
+
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json(
-        { error: "isSelected must be a boolean" },
+        { error: "No supported fields provided" },
         { status: 400 }
       );
     }
 
-    // Update isSelected
     db.update(photos)
-      .set({ isSelected })
+      .set(updates)
       .where(eq(photos.id, photoId))
       .run();
 
