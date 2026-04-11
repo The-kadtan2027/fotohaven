@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Image as ImageIcon, Share2, Clock, FolderOpen, Trash2, LogOut, User, Eye, Star, Settings } from "lucide-react";
+import { useToast } from "@/components/ToastProvider";
 
 interface Photo {
   isReturn: boolean;
@@ -30,6 +31,7 @@ interface AlbumSummary {
 
 export default function Home() {
   const router = useRouter();
+  const { toast, confirm } = useToast();
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
@@ -90,18 +92,20 @@ export default function Home() {
       document.execCommand("copy");
       textArea.remove();
     }
-    alert("Share link copied to clipboard!");
+    toast("Share link copied to clipboard!", "success");
   };
 
   const deleteAlbum = async (albumId: string) => {
-    if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
+    const ok = await confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.");
+    if (!ok) return;
     try {
       const res = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       // Remove from state immediately
       setAlbums(prev => prev.filter(a => a.id !== albumId));
+      toast("Album deleted.", "success");
     } catch {
-      alert("Failed to delete album.");
+      toast("Failed to delete album.", "error");
     }
   };
 

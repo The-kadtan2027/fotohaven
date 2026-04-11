@@ -1,9 +1,9 @@
-﻿"use client";
+"use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
@@ -14,7 +14,8 @@ type Photo = {
   originalUrl?: string;
 };
 
-// Extends Photo with the Euclidean distance score returned by /api/guest/my-photos
+type MatchSource = "selfie" | "refined";
+
 type MatchedPhoto = Photo & { score: number };
 
 type Ceremony = {
@@ -31,6 +32,13 @@ type Album = {
 
 type Step = "otp" | "consent" | "scan" | "results";
 
+type MatchResponse = {
+  photos?: { photoId: string; score: number }[];
+  guest?: { name?: string };
+  source?: MatchSource;
+  error?: string;
+};
+
 export default function GuestFaceDiscoveryPage() {
   const { token } = useParams<{ token: string }>();
   const [step, setStep] = useState<Step>("otp");
@@ -46,6 +54,8 @@ export default function GuestFaceDiscoveryPage() {
   const [guestName, setGuestName] = useState("");
   const [isReturningGuest, setIsReturningGuest] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [confirmedPhotoIds, setConfirmedPhotoIds] = useState<string[]>([]);
+  const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
 
@@ -115,7 +125,7 @@ export default function GuestFaceDiscoveryPage() {
       if (data.hasFaceDescriptor) {
         setIsReturningGuest(true);
         setStatus("Face profile found. Loading your matched photos...");
-        await loadMatchedPhotos(resolvedName);
+        await loadMatchedPhotos({ source: "selfie", fallbackName: resolvedName });
       } else {
         setIsReturningGuest(false);
         setStep("consent");
@@ -146,17 +156,33 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
-  async function loadMatchedPhotos(fallbackName?: string) {
-    setStatus("Finding your photos...");
-    const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
-    const matchData = await matchResp.json();
+  async function loadMatchedPhotos(options?: {
+    source?: MatchSource;
+    photoIds?: string[];
+    fallbackName?: string;
+  }) {
+    const source = options?.source || "selfie";
+    setStatus(source === "refined" ? "Finding more photos like these..." : "Finding your photos...");
+
+    const matchResp = await fetch("/api/guest/my-photos", {
+      method: source === "refined" ? "POST" : "GET",
+      cache: "no-store",
+      headers: source === "refined" ? { "Content-Type": "application/json" } : undefined,
+      body: source === "refined" ? JSON.stringify({ photoIds: options?.photoIds || [] }) : undefined,
+    });
+    const matchData = (await matchResp.json()) as MatchResponse;
     if (!matchResp.ok) {
       throw new Error(matchData.error || "Failed to find matches");
     }
 
-    setGuestName(matchData.guest?.name || fallbackName || "");
+    const resolvedSource = matchData.source || source;
+    setMatchSource(resolvedSource);
+    setGuestName(matchData.guest?.name || options?.fallbackName || "");
+    if (resolvedSource === "selfie") {
+      setConfirmedPhotoIds([]);
+    }
 
-    const scored: { photoId: string; score: number }[] = matchData.photos || [];
+    const scored = matchData.photos || [];
     if (!scored.length) {
       setMatchedPhotos([]);
       setStep("results");
@@ -190,9 +216,6 @@ export default function GuestFaceDiscoveryPage() {
     setError("");
 
     try {
-      // Multi-frame enrollment: capture 3 frames 500 ms apart and average the
-      // descriptors. A single selfie frame is sensitive to momentary expression,
-      // angle, and lighting; an average of 3 is far more stable.
       const SAMPLES = FACE_CONFIG.enrollmentSamples;
       const DELAY_MS = 500;
       const canvases: HTMLCanvasElement[] = [];
@@ -254,7 +277,7 @@ export default function GuestFaceDiscoveryPage() {
         throw new Error(data.error || "Failed to save face profile");
       }
 
-      await loadMatchedPhotos();
+      await loadMatchedPhotos({ source: "selfie" });
     } catch (err: any) {
       setError(err.message || "Scan failed");
       setStatus("");
@@ -263,13 +286,49 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  function toggleConfirmedPhoto(photoId: string) {
+    setError("");
+    setConfirmedPhotoIds((prev) => {
+      if (prev.includes(photoId)) {
+        return prev.filter((id) => id !== photoId);
+      }
+      if (prev.length >= 3) {
+        setError("Choose up to 3 confirmed photos for refined discovery.");
+        return prev;
+      }
+      return [...prev, photoId];
+    });
+  }
+
+  async function refineMatches() {
+    if (!confirmedPhotoIds.length) {
+      setError("Choose at least 1 confirmed photo first.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      await loadMatchedPhotos({ source: "refined", photoIds: confirmedPhotoIds });
+    } catch (err: any) {
+      setError(err.message || "Failed to refine matches");
+      setStatus("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function rescanFace() {
+    stopCamera();
     setLightbox(null);
     setMatchedPhotos([]);
+    setConfirmedPhotoIds([]);
+    setMatchSource("selfie");
     setIsReturningGuest(false);
     setStep("scan");
     void startCamera();
   }
+
   useEffect(() => {
     if (!lightbox) return;
     const handler = (e: KeyboardEvent) => {
@@ -317,6 +376,8 @@ export default function GuestFaceDiscoveryPage() {
     link.click();
     document.body.removeChild(link);
   }
+
+  const matchLabel = matchSource === "refined" ? "Refined matches" : "Initial selfie matches";
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)", padding: "32px 16px" }}>
@@ -437,7 +498,9 @@ export default function GuestFaceDiscoveryPage() {
                   Your matched photos ({matchedPhotos.length})
                 </h2>
                 {guestName ? (
-                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>{isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`}</p>
+                  <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)" }}>
+                    {isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`} {matchLabel}.
+                  </p>
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -452,45 +515,121 @@ export default function GuestFaceDiscoveryPage() {
               </div>
             </div>
 
+            {matchedPhotos.length > 0 && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 14,
+                  borderRadius: 12,
+                  background: "rgba(196, 168, 108, 0.12)",
+                  border: "1px solid rgba(139, 110, 60, 0.18)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ minWidth: 240 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--espresso)", fontWeight: 700, fontSize: 13 }}>
+                    <Sparkles size={14} />
+                    Find more photos like this person
+                  </div>
+                  <p style={{ marginTop: 6, fontSize: 13, color: "var(--brown)", lineHeight: 1.5 }}>
+                    Select 1-3 photos that are definitely you. FotoHaven will use the in-album face descriptors from those photos to run a refined offline search.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: "var(--taupe)" }}>
+                    Selected {confirmedPhotoIds.length}/3
+                  </span>
+                  <button
+                    className="btn-gold"
+                    onClick={refineMatches}
+                    disabled={busy || confirmedPhotoIds.length === 0}
+                  >
+                    {busy && matchSource === "refined" ? "Refining..." : "Find more like these"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {matchedPhotos.length === 0 ? (
               <p style={{ marginTop: 14, color: "var(--brown)", fontSize: 14 }}>
-                No strong matches found yet. You can browse all photos instead.
+                No strong matches found yet. You can browse all photos instead or rescan your face.
               </p>
             ) : (
               <div className="photo-grid" style={{ marginTop: 16 }}>
-                {matchedPhotos.map((photo, index) => (
-                  <button
-                    key={photo.id}
-                    type="button"
-                    onClick={() => setLightbox({ photos: matchedPhotos, index })}
-                    style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "var(--sand)", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
-                  >
-                    <img
-                      src={photo.url}
-                      alt={photo.originalName}
-                      style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1 / 1" }}
-                    />
-                    <span
+                {matchedPhotos.map((photo, index) => {
+                  const selected = confirmedPhotoIds.includes(photo.id);
+                  return (
+                    <div
+                      key={photo.id}
                       style={{
-                        position: "absolute",
-                        bottom: 6,
-                        left: 6,
-                        background:
-                          photo.score < FACE_CONFIG.strongMatchThreshold
-                            ? "rgba(34,197,94,0.88)"
-                            : "rgba(234,179,8,0.88)",
-                        color: "#fff",
-                        borderRadius: 4,
-                        padding: "2px 7px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: "0.03em",
+                        position: "relative",
+                        borderRadius: 10,
+                        overflow: "hidden",
+                        background: "var(--sand)",
+                        width: "100%",
+                        boxShadow: selected ? "0 0 0 3px rgba(196, 168, 108, 0.85)" : undefined,
                       }}
                     >
-                      {photo.score < FACE_CONFIG.strongMatchThreshold ? "Strong match" : "Possible match"}
-                    </span>
-                  </button>
-                ))}
+                      <button
+                        type="button"
+                        onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                        style={{ position: "relative", background: "transparent", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
+                      >
+                        <img
+                          src={photo.url}
+                          alt={photo.originalName}
+                          style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1 / 1" }}
+                        />
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: 6,
+                            left: 6,
+                            background:
+                              photo.score < FACE_CONFIG.strongMatchThreshold
+                                ? "rgba(34,197,94,0.88)"
+                                : "rgba(234,179,8,0.88)",
+                            color: "#fff",
+                            borderRadius: 4,
+                            padding: "2px 7px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: "0.03em",
+                          }}
+                        >
+                          {photo.score < FACE_CONFIG.strongMatchThreshold ? "Strong match" : "Possible match"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleConfirmedPhoto(photo.id)}
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          right: 8,
+                          width: 32,
+                          height: 32,
+                          borderRadius: "50%",
+                          border: selected ? "none" : "1px solid rgba(255,255,255,0.9)",
+                          background: selected ? "rgba(196, 168, 108, 0.96)" : "rgba(26,18,8,0.55)",
+                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          backdropFilter: "blur(6px)",
+                        }}
+                        aria-label={selected ? "Remove confirmed photo" : "Confirm this photo is me"}
+                      >
+                        <Check size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -598,11 +737,3 @@ export default function GuestFaceDiscoveryPage() {
     </div>
   );
 }
-
-
-
-
-
-
-
-

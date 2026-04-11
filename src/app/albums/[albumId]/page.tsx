@@ -27,6 +27,7 @@ import AlbumLightbox, { type LightboxState } from "./AlbumLightbox";
 import DuplicateModal from "./DuplicateModal";
 import { buildDuplicateGroups, type AlbumPhoto } from "./album-utils";
 import { compressImageFile, computeDHashFromUrl, type CompressionFormat } from "@/lib/image-utils";
+import { useToast } from "@/components/ToastProvider";
 
 interface Photo extends AlbumPhoto {
   size: number;
@@ -66,6 +67,7 @@ interface UploadItem {
 
 export default function AlbumPage() {
   const { albumId } = useParams<{ albumId: string }>();
+  const { toast, confirm, prompt } = useToast();
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
@@ -220,18 +222,21 @@ export default function AlbumPage() {
       textArea.remove();
     }
     setLinkCopied(true);
+    toast("Share link copied to clipboard!", "success");
     window.setTimeout(() => setLinkCopied(false), 2500);
   };
 
   const deleteAlbum = async () => {
-    if (!album || !window.confirm("Delete this entire album and all photos?")) return;
+    if (!album) return;
+    const ok = await confirm("Delete this entire album and all photos? This cannot be undone.");
+    if (!ok) return;
     const response = await fetch(`/api/albums/${album.id}`, { method: "DELETE" });
     if (response.ok) window.location.href = "/";
-    else window.alert("Failed to delete album.");
+    else toast("Failed to delete album.", "error");
   };
 
   const addCeremony = async () => {
-    const name = window.prompt("New Ceremony Name:");
+    const name = await prompt("New Ceremony Name:", "e.g. Mehndi, Reception…");
     if (!name?.trim()) return;
     const response = await fetch("/api/ceremonies", {
       method: "POST",
@@ -239,21 +244,23 @@ export default function AlbumPage() {
       body: JSON.stringify({ name: name.trim(), albumId }),
     });
     if (response.ok) await fetchAlbum();
-    else window.alert("Failed to add ceremony.");
+    else toast("Failed to add ceremony.", "error");
   };
 
   const deleteCeremony = async (ceremonyId: string) => {
-    if (!window.confirm("Delete this ceremony and all of its photos permanently?")) return;
+    const ok = await confirm("Delete this ceremony and all of its photos permanently?");
+    if (!ok) return;
     const response = await fetch(`/api/ceremonies/${ceremonyId}`, { method: "DELETE" });
     if (response.ok) await fetchAlbum();
-    else window.alert("Failed to delete ceremony.");
+    else toast("Failed to delete ceremony.", "error");
   };
 
   const deletePhoto = async (photoId: string) => {
-    if (!window.confirm("Delete this photo forever?")) return;
+    const ok = await confirm("Delete this photo forever?");
+    if (!ok) return;
     const response = await fetch(`/api/photos/${photoId}`, { method: "DELETE" });
     if (response.ok) await fetchAlbum();
-    else window.alert("Failed to delete photo.");
+    else toast("Failed to delete photo.", "error");
   };
 
   const togglePhotoSelection = (photoId: string, selected: boolean) => {
@@ -277,15 +284,17 @@ export default function AlbumPage() {
           photos: ceremony.photos.map((photo) => selectedPhotos.includes(photo.id) ? { ...photo, isBlurred } : photo),
         })),
       }) : current);
+      toast(`${selectedPhotos.length} photo(s) ${isBlurred ? "blurred" : "unblurred"}.`, "success");
     } catch {
-      window.alert(`Failed to ${isBlurred ? "blur" : "unblur"} selected photos.`);
+      toast(`Failed to ${isBlurred ? "blur" : "unblur"} selected photos.`, "error");
     } finally {
       setIsApplyingBlur(false);
     }
   };
 
   const deleteSelectedPhotos = async () => {
-    if (!window.confirm(`Delete ${selectedPhotos.length} selected photo(s)?`)) return;
+    const ok = await confirm(`Delete ${selectedPhotos.length} selected photo(s)? This cannot be undone.`);
+    if (!ok) return;
     setIsDeletingBatch(true);
     try {
       const response = await fetch("/api/photos/delete-batch", {
@@ -296,8 +305,9 @@ export default function AlbumPage() {
       if (!response.ok) throw new Error();
       setSelectedPhotos([]);
       await fetchAlbum();
+      toast("Photos deleted.", "success");
     } catch {
-      window.alert("Failed to delete photos.");
+      toast("Failed to delete photos.", "error");
     } finally {
       setIsDeletingBatch(false);
     }
@@ -314,8 +324,9 @@ export default function AlbumPage() {
       });
       if (!response.ok) throw new Error();
       setAlbum((current) => current ? { ...current, compressionFormat, compressionQuality, dedupThreshold } : current);
+      toast("Album defaults saved.", "success");
     } catch {
-      window.alert("Failed to save album defaults.");
+      toast("Failed to save album defaults.", "error");
     } finally {
       setIsSavingDefaults(false);
     }
@@ -378,14 +389,17 @@ export default function AlbumPage() {
   };
 
   const reprocessFaces = async () => {
-    if (!album || !window.confirm("Clear saved face matches for this album and reprocess them with the latest model?")) return;
+    if (!album) return;
+    const ok = await confirm("Clear saved face matches for this album and reprocess them with the latest model?");
+    if (!ok) return;
     setIsReprocessingFaces(true);
     try {
       const response = await fetch(`/api/albums/${album.id}/reprocess-faces`, { method: "POST" });
       if (!response.ok) throw new Error();
       await fetchAlbum();
+      toast("Face data reset. Reprocessing will begin on next album open.", "success");
     } catch {
-      window.alert("Failed to reset face processing for this album.");
+      toast("Failed to reset face processing for this album.", "error");
     } finally {
       setIsReprocessingFaces(false);
     }
