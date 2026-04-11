@@ -1418,7 +1418,7 @@ None required for the first implementation pass. Reuse existing `PhotoFace.descr
 
 ## Task: Toast Notifications (Replace alert/confirm)
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Replace all browser alert() and confirm() calls with an in-app toast/modal system for a premium UX.
 
 ### Problem
@@ -1435,10 +1435,10 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 - Replace all confirm() with an in-app modal with Cancel/Confirm buttons
 
 ### Acceptance criteria
-- [ ] All alert() calls replaced with auto-dismissing toast notifications
-- [ ] All confirm() calls replaced with an in-app modal with Cancel/Confirm buttons
-- [ ] Toast system requires zero new npm packages (pure CSS + React state)
-- [ ] npx tsc --noEmit passes with zero errors
+- [x] All alert() calls replaced with auto-dismissing toast notifications
+- [x] All confirm() calls replaced with an in-app modal with Cancel/Confirm buttons
+- [x] Toast system requires zero new npm packages (pure CSS + React state)
+- [x] npx tsc --noEmit passes with zero errors
 
 ---
 
@@ -1455,7 +1455,7 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 - [ ] Clicking shows a modal with a rendered QR code for the share URL
 - [ ] QR code is downloadable as PNG
 - [ ] Generated client-side (use qrcode npm package or canvas-based generation)
-- [ ] npx tsc --noEmit passes with zero errors
+- [x] npx tsc --noEmit passes with zero errors
 
 ---
 
@@ -1473,7 +1473,7 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 - [ ] og:description shows photo count and ceremony count
 - [ ] og:image points to the first photo thumbnail
 - [ ] Uses Next.js 15 App Router generateMetadata()
-- [ ] npx tsc --noEmit passes with zero errors
+- [x] npx tsc --noEmit passes with zero errors
 
 ---
 
@@ -1500,7 +1500,7 @@ Add ActivityLog table:
 - [ ] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
 - [ ] Album detail page shows a timeline of activity (newest first)
 - [ ] Timeline shows relative times ("2 hours ago")
-- [ ] npx tsc --noEmit passes with zero errors
+- [x] npx tsc --noEmit passes with zero errors
 
 ---
 

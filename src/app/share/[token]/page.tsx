@@ -976,6 +976,7 @@ function GalleryPhoto({
       style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: "var(--sand)", cursor: "pointer" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={onZoom}
     >
       {/* Shimmer: shown until image is both visible AND loaded */}
       {(!visible || !loaded) && <div className="skeleton" style={{ position: "absolute", inset: 0 }} />}

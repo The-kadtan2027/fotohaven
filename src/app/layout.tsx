@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ToastProvider } from "@/components/ToastProvider";
 
 export const metadata: Metadata = {
   title: "FotoHaven | Professional Photo Handoff",
@@ -25,20 +26,22 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ flex: 1 }}>
-          {children}
-        </div>
-        <footer
-          style={{
-            padding: "10px 16px 18px",
-            textAlign: "center",
-            fontSize: 12,
-            color: "var(--taupe)",
-            background: "transparent",
-          }}
-        >
-          made by gaju ❤️
-        </footer>
+        <ToastProvider>
+          <div style={{ flex: 1 }}>
+            {children}
+          </div>
+          <footer
+            style={{
+              padding: "10px 16px 18px",
+              textAlign: "center",
+              fontSize: 12,
+              color: "var(--taupe)",
+              background: "transparent",
+            }}
+          >
+            made by gaju ❤️
+          </footer>
+        </ToastProvider>
       </body>
     </html>
   );
