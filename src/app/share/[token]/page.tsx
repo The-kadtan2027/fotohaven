@@ -1,6 +1,6 @@
 "use client";
 // src/app/share/[token]/page.tsx
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import {
@@ -939,22 +939,63 @@ function GalleryPhoto({
 }) {
   const [loaded, setLoaded] = useState(false);
   const [hovered, setHovered] = useState(false);
+  // Starts false — IntersectionObserver flips this when card nears the viewport
+  const [visible, setVisible] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Fallback: if IntersectionObserver not supported, load immediately
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect(); // One-shot: no ongoing overhead after first fire
+        }
+      },
+      {
+        rootMargin: "200px 0px", // Preload 200px before entering viewport — eliminates pop-in
+        threshold: 0,
+      }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []); // Empty deps: set up once on mount; React key handles ceremony switch
 
   return (
     <div
+      ref={containerRef}
       style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: "var(--sand)", cursor: "pointer" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {!loaded && <div className="skeleton" style={{ position: "absolute", inset: 0 }} />}
-      <img
-        src={photo.url}
-        alt={photo.originalName}
-        onLoad={() => setLoaded(true)}
-        style={{ width: "100%", height: "100%", objectFit: "cover", opacity: loaded ? 1 : 0, transition: "opacity 0.3s, transform 0.3s", transform: hovered ? "scale(1.03)" : "scale(1)" }}
-      />
+      {/* Shimmer: shown until image is both visible AND loaded */}
+      {(!visible || !loaded) && <div className="skeleton" style={{ position: "absolute", inset: 0 }} />}
 
-      {/* Overlay */}
+      {/* Image: only rendered (and fetched) once card is in/near viewport */}
+      {visible && (
+        <img
+          src={photo.url}
+          alt={photo.originalName}
+          onLoad={() => setLoaded(true)}
+          style={{
+            width: "100%", height: "100%", objectFit: "cover",
+            opacity: loaded ? 1 : 0,
+            transition: "opacity 0.3s, transform 0.3s",
+            transform: hovered ? "scale(1.03)" : "scale(1)",
+          }}
+        />
+      )}
+
+      {/* Selection overlay */}
       <div style={{ position: "absolute", inset: 0, background: selected ? "rgba(201,150,58,0.25)" : hovered ? "rgba(26,18,8,0.2)" : "transparent", transition: "background 0.2s", border: selected ? "2px solid var(--gold)" : "2px solid transparent", borderRadius: 10 }} />
 
       {/* Select checkbox */}
@@ -973,15 +1014,16 @@ function GalleryPhoto({
         {selected && <Check size={12} color="#fff" />}
       </button>
 
+      {/* Comment dot badge */}
       {photo.comments && photo.comments.length > 0 && (
-        <div 
-          style={{ 
-            position: "absolute", bottom: 12, left: 12, 
-            width: 8, height: 8, borderRadius: "50%", 
+        <div
+          style={{
+            position: "absolute", bottom: 12, left: 12,
+            width: 8, height: 8, borderRadius: "50%",
             background: "var(--gold)", border: "1.5px solid #fff",
             boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-            zIndex: 5
-          }} 
+            zIndex: 5,
+          }}
         />
       )}
 

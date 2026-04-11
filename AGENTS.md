@@ -1387,3 +1387,138 @@ None required for the first implementation pass. Reuse existing `PhotoFace.descr
 
 
 
+
+---
+
+## Task: Lazy Gallery Loading (IntersectionObserver)
+
+**Status:** Completed
+**Scope:** Eliminate the 3-5 second hang when opening large ceremonies (700+ photos) on the share page by deferring thumbnail loading until cards are near the viewport.
+
+### Modified files
+- `src/app/share/[token]/page.tsx` -- GalleryPhoto gains useRef + IntersectionObserver
+
+### Implementation notes
+- Each card starts visible = false -- only shimmer rendered, no img, no network request
+- IntersectionObserver with rootMargin "200px 0px" watches the card container div
+- On intersection: visible = true, observer disconnects (one-shot)
+- {visible && <img src={photo.url} />} -- image only fetched when in/near viewport
+- Ceremony switch: React key changes unmount/remount cards, each starts fresh with visible=false
+- Fallback: if IntersectionObserver undefined, visible initialises to true (eager load)
+
+### Acceptance criteria
+- [x] Switching to a 700-photo ceremony renders in < 200ms (no images downloading yet)
+- [x] Images load progressively as the user scrolls
+- [x] No pop-in at normal scroll speed (200px preload buffer)
+- [x] Existing selection, hover, zoom, comment-dot behaviour unchanged
+- [x] npx tsc --noEmit passes with zero errors
+- [x] Browsers without IntersectionObserver fall back to eager loading
+
+---
+
+## Task: Toast Notifications (Replace alert/confirm)
+
+**Status:** Planned
+**Scope:** Replace all browser alert() and confirm() calls with an in-app toast/modal system for a premium UX.
+
+### Problem
+alert() is used for copy-link confirmation and errors. confirm() is used for delete confirmations. These block the UI thread and look unprofessional on mobile.
+
+### Affected files
+- `src/app/page.tsx` -- copyLink, deleteAlbum
+- `src/app/albums/[albumId]/page.tsx` -- multiple confirm/alert calls
+- `src/app/share/[token]/page.tsx` -- any alert calls
+
+### Implementation plan
+- Create a shared ToastProvider component (pure React state, zero new packages)
+- Auto-dismissing toasts in top-right corner (3s timeout, slide-in animation)
+- Replace all confirm() with an in-app modal with Cancel/Confirm buttons
+
+### Acceptance criteria
+- [ ] All alert() calls replaced with auto-dismissing toast notifications
+- [ ] All confirm() calls replaced with an in-app modal with Cancel/Confirm buttons
+- [ ] Toast system requires zero new npm packages (pure CSS + React state)
+- [ ] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Share Link QR Code
+
+**Status:** Planned
+**Scope:** Add a QR code popup on the dashboard album cards so photographers can share links via printed cards or WhatsApp image.
+
+### Affected files
+- `src/app/page.tsx` -- dashboard album card actions
+
+### Acceptance criteria
+- [ ] Dashboard gains a "QR Code" button next to "Copy Link"
+- [ ] Clicking shows a modal with a rendered QR code for the share URL
+- [ ] QR code is downloadable as PNG
+- [ ] Generated client-side (use qrcode npm package or canvas-based generation)
+- [ ] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: WhatsApp / Social OG Meta Tags on Share Page
+
+**Status:** Planned
+**Scope:** Add Open Graph and WhatsApp preview meta tags to the share page so the link looks rich when pasted in WhatsApp, iMessage, or any chat app.
+
+### Affected files
+- `src/app/share/[token]/` -- add server component wrapper for generateMetadata()
+
+### Acceptance criteria
+- [ ] Share page has og:title, og:description, og:image meta tags
+- [ ] og:title shows album title and client name
+- [ ] og:description shows photo count and ceremony count
+- [ ] og:image points to the first photo thumbnail
+- [ ] Uses Next.js 15 App Router generateMetadata()
+- [ ] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Album Activity Timeline
+
+**Status:** Planned
+**Scope:** Give the photographer visibility into client engagement: when the gallery was opened, when selections were made, and download events.
+
+### Schema change
+Add ActivityLog table:
+- id: UUID text PK
+- albumId: FK to Album (cascade delete)
+- eventType: text ("gallery_viewed" | "photo_selected" | "photo_deselected" | "download_started" | "face_scan_completed")
+- payload: text (optional JSON metadata)
+- createdAt: integer timestamp_ms
+
+### Affected files
+- `src/lib/schema.ts` -- add activityLogs table
+- `src/app/api/share/[token]/route.ts` -- log gallery_viewed
+- `src/app/api/photos/[photoId]/route.ts` -- log photo_selected/deselected
+- `src/app/albums/[albumId]/page.tsx` -- render timeline panel
+
+### Acceptance criteria
+- [ ] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
+- [ ] Album detail page shows a timeline of activity (newest first)
+- [ ] Timeline shows relative times ("2 hours ago")
+- [ ] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Health Dashboard UI (Complete Existing Stub)
+
+**Status:** Planned (previously mislabeled as Completed -- 0/4 acceptance criteria met)
+**Scope:** Build the /admin/health page and /api/admin/health route.
+
+### New page: `src/app/admin/health/page.tsx`
+Display: PM2 uptime, disk usage, memory usage, DB file size, Cloudflare Tunnel status (auto-refresh every 30s).
+
+### New API route: `src/app/api/admin/health/route.ts`
+Returns JSON with system metrics using Node.js os module and fs.stat.
+Guarded by session cookie via existing middleware (add /api/admin/* to protected paths).
+
+### Acceptance criteria
+- [ ] Page shows real-time stats (auto-refreshes every 30s)
+- [ ] Unauthenticated requests to /api/admin/health return 401
+- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [ ] Works on ARM (no native modules)
+
