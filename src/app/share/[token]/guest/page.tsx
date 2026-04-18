@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X, Maximize } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
@@ -611,6 +611,9 @@ export default function GuestFaceDiscoveryPage() {
                     {isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`} {matchLabel}.
                   </p>
                 ) : null}
+                <p style={{ marginTop: 8, fontSize: 14, color: "var(--brown)" }}>
+                  Missing some photos? Tap up to 3 photos of yourself to improve the search.
+                </p>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn-ghost" onClick={rescanFace}>
@@ -624,44 +627,6 @@ export default function GuestFaceDiscoveryPage() {
               </div>
             </div>
 
-            {matchedPhotos.length > 0 && (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 14,
-                  borderRadius: 12,
-                  background: "rgba(196, 168, 108, 0.12)",
-                  border: "1px solid rgba(139, 110, 60, 0.18)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 240 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--espresso)", fontWeight: 700, fontSize: 13 }}>
-                    <Sparkles size={14} />
-                    Find more photos like this person
-                  </div>
-                  <p style={{ marginTop: 6, fontSize: 13, color: "var(--brown)", lineHeight: 1.5 }}>
-                    Select 1-3 photos that are definitely you. FotoHaven will use the in-album face descriptors from those photos to run a refined offline search.
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--taupe)" }}>
-                    Selected {confirmedPhotoIds.length}/3
-                  </span>
-                  <button
-                    className="btn-gold"
-                    onClick={refineMatches}
-                    disabled={busy || confirmedPhotoIds.length === 0}
-                  >
-                    {busy && matchSource === "refined" ? "Refining..." : "Find more like these"}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {matchedPhotos.length === 0 ? (
               <p style={{ marginTop: 14, color: "var(--brown)", fontSize: 14 }}>
@@ -681,17 +646,26 @@ export default function GuestFaceDiscoveryPage() {
                         background: "var(--sand)",
                         width: "100%",
                         boxShadow: selected ? "0 0 0 3px rgba(196, 168, 108, 0.85)" : undefined,
+                        border: selected ? "3px solid #C4A86C" : "3px solid transparent",
+                        transition: "all 0.2s ease",
                       }}
                     >
                       <button
                         type="button"
-                        onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                        onClick={() => toggleConfirmedPhoto(photo.id)}
                         style={{ position: "relative", background: "transparent", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
                       >
                         <img
                           src={photo.url}
                           alt={photo.originalName}
-                          style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1 / 1" }}
+                          style={{ 
+                            width: "100%", 
+                            height: "100%", 
+                            objectFit: "cover", 
+                            aspectRatio: "1 / 1",
+                            transform: selected ? "scale(0.92)" : "scale(1)",
+                            transition: "transform 0.2s ease" 
+                          }}
                         />
                         <span
                           style={{
@@ -715,7 +689,7 @@ export default function GuestFaceDiscoveryPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => toggleConfirmedPhoto(photo.id)}
+                        onClick={(e) => { e.stopPropagation(); setLightbox({ photos: matchedPhotos, index }); }}
                         style={{
                           position: "absolute",
                           top: 8,
@@ -732,9 +706,9 @@ export default function GuestFaceDiscoveryPage() {
                           cursor: "pointer",
                           backdropFilter: "blur(6px)",
                         }}
-                        aria-label={selected ? "Remove confirmed photo" : "Confirm this photo is me"}
+                        aria-label="View large photo"
                       >
-                        <Check size={16} />
+                        {selected ? <Check size={16} /> : <Maximize size={14} />}
                       </button>
                     </div>
                   );
@@ -751,6 +725,47 @@ export default function GuestFaceDiscoveryPage() {
           <p style={{ marginTop: 14, color: "var(--blush)", fontSize: 13 }}>{error}</p>
         )}
       </div>
+
+      {confirmedPhotoIds.length > 0 && (
+        <div style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          padding: "16px",
+          background: "rgba(255,255,255,0.95)",
+          backdropFilter: "blur(12px)",
+          borderTop: "1px solid rgba(0,0,0,0.08)",
+          boxShadow: "0 -4px 12px rgba(0,0,0,0.05)",
+          display: "flex",
+          justifyContent: "center",
+          zIndex: 50
+        }}>
+          <div style={{ width: "100%", maxWidth: 980, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--espresso)" }}>
+              {confirmedPhotoIds.length} photo{confirmedPhotoIds.length !== 1 ? 's' : ''} selected
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <button 
+                type="button"
+                className="btn-ghost" 
+                onClick={() => setConfirmedPhotoIds([])}
+                style={{ fontSize: 13 }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="btn-gold"
+                onClick={refineMatches}
+                disabled={busy}
+              >
+                {busy && matchSource === "refined" ? "Refining..." : "Find Better Matches"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightbox && (
         <div
