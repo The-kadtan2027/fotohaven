@@ -18,6 +18,14 @@ function readInteger(serverName: string, publicName: string, fallback: number, m
   return Math.round(readNumber(serverName, publicName, fallback, min, max));
 }
 
+function readString(serverName: string, publicName: string, fallback: string, allowedValues: string[]) {
+  const val = readEnvValue(serverName, publicName);
+  if (val && allowedValues.includes(val)) {
+    return val;
+  }
+  return fallback;
+}
+
 const strongMatchThreshold = readNumber(
   "FACE_STRONG_MATCH_THRESHOLD",
   "NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD",
@@ -72,5 +80,6 @@ export const FACE_CONFIG = {
     8,
     512
   ),
-  maxResults: readInteger("FACE_MAX_RESULTS", "NEXT_PUBLIC_FACE_MAX_RESULTS", 60, 1, 500),
+  maxResults: readInteger("FACE_MAX_RESULTS", "NEXT_PUBLIC_FACE_MAX_RESULTS", 60, 1, 5000),
+  scanSource: readString("FACE_SCAN_SOURCE", "NEXT_PUBLIC_FACE_SCAN_SOURCE", "original", ["thumbnail", "original"]),
 } as const;

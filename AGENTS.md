@@ -1082,6 +1082,67 @@ None. Reuse existing `Guest.name`, `Guest.email`, `Guest.faceDescriptor`, and `G
 
 ---
 
+## Task: Guest face-photo upload enrollment
+
+**Status:** Completed
+**Scope:** Let a guest upload a face photo from their device as an alternative to the live selfie scan on the guest discovery flow. This keeps the existing offline face-matching pipeline, but allows the enrollment descriptor to come from a selected image when that better reflects the person in the album.
+
+### Schema change
+None.
+
+### Reuse existing data model
+- Continue storing the final 128-float descriptor in `guests.faceDescriptor`.
+- Do not add file uploads or blob storage for the uploaded face image.
+- Do not touch `src/lib/storage.ts`.
+
+### API changes
+
+#### `POST /api/guest/enroll-face` - `src/app/api/guest/enroll-face/route.ts`
+- Keep the route authenticated by `guest_session` exactly as today.
+- Continue accepting `{ descriptor }`.
+- No new persistence fields are required.
+- Validation should stay strict: descriptor must be an array of 128 numbers.
+
+### UI changes
+
+#### `src/app/share/[token]/guest/page.tsx`
+- Keep the existing OTP -> consent -> scan/results flow intact.
+- On the scan step, add a second path: `Upload a face photo instead`.
+- Add a file input that accepts images only.
+- When a guest selects a photo:
+  - load it in the browser
+  - draw it to a canvas if needed
+  - run the same `face-api.js` detection pipeline used for live enrollment (`detectSingleFace(...).withFaceLandmarks().withFaceDescriptor()`)
+  - if exactly one usable face is found, enroll that descriptor through the existing `/api/guest/enroll-face` route
+  - then load matched photos using the existing selfie-source discovery flow
+- Keep the live camera scan available as the primary option.
+- Add a short explanation that uploaded-photo enrollment can work better when the person looks different in current selfie vs wedding/event photos.
+- If no face is detected in the uploaded image, show a clear inline error and let the guest retry.
+- If multiple faces are detected in the uploaded image, reject it with a clear inline error asking for a photo with only one visible face.
+- `Rescan Face` in the results view should return the guest to a screen where they can again choose either:
+  - live camera scan
+  - uploaded face photo
+
+### Constraints
+- No new npm packages.
+- All face detection/extraction remains browser-side.
+- No server-side image processing.
+- No schema changes.
+- Do not change the refined-match flow; it should continue to work on top of the new enrollment method.
+
+### Acceptance criteria
+- [x] Guest discovery page offers an `upload face photo` option alongside live camera scan
+- [x] Guest can choose an image from their device and generate an enrollment descriptor fully in the browser
+- [x] Successful uploaded-photo enrollment persists via the existing `Guest.faceDescriptor` field
+- [x] Uploaded-photo enrollment loads matched photos through the current discovery flow without regression
+- [x] Uploaded images with no detectable face show a clear retryable error
+- [x] Uploaded images with multiple faces are rejected with a clear retryable error
+- [x] Returning to `Rescan Face` still allows either camera scan or uploaded-photo enrollment
+- [x] No schema changes or new packages are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
 ## Task: Advanced Album Management (Duplicates, Blur, Compression, Lightbox)
 
 **Status:** Completed
@@ -1522,3 +1583,17 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
 - [ ] Works on ARM (no native modules)
 
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging

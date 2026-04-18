@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
@@ -8,6 +8,7 @@ type FaceProcessorPhoto = {
   id: string;
   url: string;
   faceProcessed: boolean;
+  scanSource?: string;
 };
 
 type FaceProcessorProps = {
@@ -175,7 +176,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             successCount += 1;
             setProcessed((prev) => prev + 1);
             console.log(
-              `[FaceProcessor] Processed ${photo.id}: ${faces.length} face(s)`
+              `[FaceProcessor] Processed ${photo.id} (source: ${photo.scanSource || "unknown"}): ${faces.length} face(s)`
             );
           } finally {
             URL.revokeObjectURL(objectUrl);
