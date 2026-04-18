@@ -16,7 +16,7 @@ type Photo = {
 
 type MatchSource = "selfie" | "refined";
 
-type MatchedPhoto = Photo & { score: number };
+type MatchedPhoto = Photo & { score: number; faceCount?: number };
 
 type Ceremony = {
   id: string;
@@ -33,7 +33,7 @@ type Album = {
 type Step = "otp" | "consent" | "scan" | "review" | "results";
 
 type MatchResponse = {
-  photos?: { photoId: string; score: number }[];
+  photos?: { photoId: string; score: number; faceCount?: number }[];
   guest?: { name?: string };
   source?: MatchSource;
   error?: string;
@@ -247,9 +247,22 @@ export default function GuestFaceDiscoveryPage() {
     const matched: MatchedPhoto[] = scored
       .map((m) => {
         const photo = photoMap.get(m.photoId);
-        return photo ? { ...photo, score: m.score } : null;
+        if (!photo) return null;
+        const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
+        return mp;
       })
       .filter((p): p is MatchedPhoto => p !== null);
+
+    if (resolvedSource === "selfie") {
+      matched.sort((a, b) => {
+        const aSingle = a.faceCount === 1 ? 1 : 0;
+        const bSingle = b.faceCount === 1 ? 1 : 0;
+        if (aSingle !== bSingle) return bSingle - aSingle;
+        return a.score - b.score;
+      });
+    } else {
+      matched.sort((a, b) => a.score - b.score);
+    }
 
     setMatchedPhotos(matched);
     setStep(resolvedSource === "selfie" ? "review" : "results");
