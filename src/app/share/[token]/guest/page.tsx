@@ -30,7 +30,7 @@ type Album = {
   ceremonies: Ceremony[];
 };
 
-type Step = "otp" | "consent" | "scan" | "results";
+type Step = "otp" | "consent" | "scan" | "review" | "results";
 
 type MatchResponse = {
   photos?: { photoId: string; score: number }[];
@@ -58,6 +58,8 @@ export default function GuestFaceDiscoveryPage() {
   const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewSelections, setReviewSelections] = useState<string[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
