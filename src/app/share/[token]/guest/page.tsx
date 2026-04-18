@@ -78,10 +78,52 @@ export default function GuestFaceDiscoveryPage() {
   }
 
   useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      try {
+        const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
+        if (!mounted || !matchResp.ok) return;
+        
+        const data = await matchResp.json() as MatchResponse;
+        if (data.guest?.name) {
+          setGuestName(data.guest.name);
+          
+          if (data.photos && data.photos.length > 0) {
+            const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
+            if (albumResp.ok) {
+              const album = await albumResp.json() as Album;
+              const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
+              const photoMap = new Map(all.map((p) => [p.id, p]));
+              
+              const matched: MatchedPhoto[] = data.photos.map((m) => {
+                const photo = photoMap.get(m.photoId);
+                if (!photo) return null;
+                const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
+                return mp;
+              }).filter((p): p is MatchedPhoto => p !== null);
+              
+              setMatchedPhotos(matched);
+              setIsReturningGuest(true);
+              setStep("results");
+              return;
+            }
+          }
+          
+          setStep("consent");
+        }
+      } catch (err) {
+        // Ignore error and stay on OTP step
+      }
+    }
+
+    checkSession();
+
     return () => {
+      mounted = false;
       stopCamera();
     };
-  }, []);
+  }, [token]);
 
   async function requestOtp(e: FormEvent) {
     e.preventDefault();
