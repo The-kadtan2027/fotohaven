@@ -779,6 +779,7 @@ JS
 
 Important implementation detail: face-api.js browser detection must receive `HTMLImageElement`/`HTMLCanvasElement`.
 `ImageBitmap` is not a valid net input. In `FaceProcessor`, always draw bitmap to a canvas and run detection on that canvas.
+It supports configuring `FACE_SCAN_SOURCE="original"` or `"thumbnail"` in `.env.local` to decide which photo quality to download for scanning. The default is `"original"` for maximum accuracy.
 
 If you see this error in console:
 - `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`

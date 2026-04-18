@@ -80,6 +80,6 @@ export const FACE_CONFIG = {
     8,
     512
   ),
-  maxResults: readInteger("FACE_MAX_RESULTS", "NEXT_PUBLIC_FACE_MAX_RESULTS", 60, 1, 500),
+  maxResults: readInteger("FACE_MAX_RESULTS", "NEXT_PUBLIC_FACE_MAX_RESULTS", 60, 1, 5000),
   scanSource: readString("FACE_SCAN_SOURCE", "NEXT_PUBLIC_FACE_SCAN_SOURCE", "original", ["thumbnail", "original"]),
 } as const;

@@ -1583,3 +1583,17 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
 - [ ] Works on ARM (no native modules)
 
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging
