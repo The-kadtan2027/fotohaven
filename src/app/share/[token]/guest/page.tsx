@@ -61,6 +61,8 @@ export default function GuestFaceDiscoveryPage() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const faceApiPromiseRef = useRef<Promise<typeof import("face-api.js")> | null>(null);
 
   function stopCamera() {
     if (streamRef.current) {
@@ -156,6 +158,43 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
+  async function getFaceApi() {
+    if (!faceApiPromiseRef.current) {
+      faceApiPromiseRef.current = (async () => {
+        const faceapi = await import("face-api.js");
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
+          faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
+          faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
+        ]);
+        return faceapi;
+      })();
+    }
+
+    return faceApiPromiseRef.current;
+  }
+
+  async function enrollDescriptor(descriptor: number[]) {
+    const enrollResp = await fetch("/api/guest/enroll-face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descriptor }),
+    });
+    if (!enrollResp.ok) {
+      const data = await enrollResp.json();
+      throw new Error(data.error || "Failed to save face profile");
+    }
+  }
+
+  function loadImageElement(src: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Unable to read that image. Please try another photo."));
+      img.src = src;
+    });
+  }
+
   async function loadMatchedPhotos(options?: {
     source?: MatchSource;
     photoIds?: string[];
@@ -239,10 +278,7 @@ export default function GuestFaceDiscoveryPage() {
       stopCamera();
 
       setStatus("Loading models...");
-      const faceapi = await import("face-api.js");
-      await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-      await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
-      await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
+      const faceapi = await getFaceApi();
 
       setStatus("Computing face profile...");
       const collectedDescriptors: Float32Array[] = [];
@@ -266,16 +302,7 @@ export default function GuestFaceDiscoveryPage() {
 
       const averaged = averageDescriptors(collectedDescriptors);
       const descriptor = Array.from(averaged);
-
-      const enrollResp = await fetch("/api/guest/enroll-face", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descriptor }),
-      });
-      if (!enrollResp.ok) {
-        const data = await enrollResp.json();
-        throw new Error(data.error || "Failed to save face profile");
-      }
+      await enrollDescriptor(descriptor);
 
       await loadMatchedPhotos({ source: "selfie" });
     } catch (err: any) {
@@ -284,6 +311,67 @@ export default function GuestFaceDiscoveryPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleUploadedPhoto(file: File) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+
+    try {
+      stopCamera();
+      setStatus("Loading uploaded photo...");
+
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const image = await loadImageElement(objectUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth || image.width;
+        canvas.height = image.naturalHeight || image.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          throw new Error("Unable to process that image right now. Please try another photo.");
+        }
+        ctx.drawImage(image, 0, 0);
+
+        setStatus("Loading models...");
+        const faceapi = await getFaceApi();
+
+        setStatus("Analyzing uploaded photo...");
+        const detections = await faceapi
+          .detectAllFaces(canvas)
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+
+        if (detections.length === 0) {
+          throw new Error("No face was detected in that photo. Try a clearer photo with one visible face.");
+        }
+        if (detections.length > 1) {
+          throw new Error("Multiple faces were detected. Please upload a photo with only one visible face.");
+        }
+
+        setStatus("Saving face profile...");
+        await enrollDescriptor(Array.from(detections[0].descriptor));
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      await loadMatchedPhotos({ source: "selfie" });
+    } catch (err: any) {
+      setError(err.message || "Photo upload failed");
+      setStatus("");
+    } finally {
+      setBusy(false);
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleUploadSelection(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleUploadedPhoto(file);
   }
 
   function toggleConfirmedPhoto(photoId: string) {
@@ -467,6 +555,9 @@ export default function GuestFaceDiscoveryPage() {
             <p style={{ fontSize: 14, color: "var(--brown)", marginBottom: 12 }}>
               Position your face in frame, then run scan.
             </p>
+            <p style={{ fontSize: 13, color: "var(--taupe)", marginBottom: 16, maxWidth: 620, lineHeight: 1.6 }}>
+              If your current selfie looks quite different from the wedding or event photos, you can upload a face photo instead. FotoHaven will analyze it privately in your browser and use it only to build the same face profile used for matching.
+            </p>
             <video
               ref={videoRef}
               muted
@@ -483,10 +574,28 @@ export default function GuestFaceDiscoveryPage() {
               <button className="btn-gold" onClick={scanAndMatch} disabled={busy || !cameraReady}>
                 {busy ? "Scanning..." : "Scan and find my photos"}
               </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={busy}
+              >
+                Upload a face photo instead
+              </button>
               <Link href={`/share/${token}`} className="btn-ghost">
                 Browse all photos instead
               </Link>
             </div>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleUploadSelection}
+              style={{ display: "none" }}
+            />
+            <p style={{ marginTop: 12, fontSize: 12, color: "var(--taupe)" }}>
+              Choose a clear photo with only one visible face for the best results.
+            </p>
           </div>
         )}
 
