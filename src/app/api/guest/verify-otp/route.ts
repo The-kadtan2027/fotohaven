@@ -3,7 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createHash } from "crypto";
 import { db } from "@/lib/db";
-import { albums, guests, guestOtps } from "@/lib/schema";
+import { activityLogs, albums, guests, guestOtps } from "@/lib/schema";
 import {
   getGuestCookieName,
   getGuestSessionMaxAgeSeconds,
@@ -148,6 +148,18 @@ export async function POST(request: Request) {
       path: "/",
       maxAge: getGuestSessionMaxAgeSeconds(),
     });
+
+    try {
+      db.insert(activityLogs).values({
+        id: uuidv4(),
+        albumId: album.id,
+        guestId,
+        eventType: "guest_login",
+        createdAt: new Date(),
+      }).run();
+    } catch (e) {
+      console.warn("Failed to log activity:", e);
+    }
 
     return response;
   } catch (error) {
