@@ -107,6 +107,14 @@ fotohaven/
 - `author`: "photographer" | "client"
 - `photoId`: Foreign key to Photo (Cascade)
 
+### ActivityLog
+- `id`: UUID string
+- `albumId`: Foreign key to Album (Cascade)
+- `guestId`: Foreign key to Guest (Cascade, nullable)
+- `eventType`: `"guest_login" | "face_scan" | "photo_download"`
+- `payload`: JSON string (optional)
+- `createdAt`: Timestamp
+
 ### Photographer
 - `id`: UUID string
 - `username`: Unique username (for admin login)
@@ -128,6 +136,12 @@ fotohaven/
 - **Body**: `{ isSelected?: boolean, imageHash?: string | null }`
 - **Response**: `{ ok: true }` or `404`.
 - **Purpose**: Persists client photo selection and browser-computed dHash values.
+
+### POST /api/guest/log-activity
+- **Auth**: Requires `guest_session` cookie.
+- **Body**: `{ eventType: string, payload?: any }`
+- **Response**: `{ ok: true }`
+- **Purpose**: Tracks guest engagement (scan, downloads) for the photographers activity feed.
 
 ### PATCH /api/albums/:albumId
 - **Auth**: Required (session cookie, guarded by middleware).
