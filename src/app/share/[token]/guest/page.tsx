@@ -394,6 +394,11 @@ export default function GuestFaceDiscoveryPage() {
       await enrollDescriptor(descriptor);
 
       await loadMatchedPhotos({ source: "selfie" });
+      fetch("/api/guest/log-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType: "face_scan" }),
+      }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Scan failed");
       setStatus("");
@@ -446,6 +451,11 @@ export default function GuestFaceDiscoveryPage() {
       }
 
       await loadMatchedPhotos({ source: "selfie" });
+      fetch("/api/guest/log-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType: "face_scan" }),
+      }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Photo upload failed");
       setStatus("");
@@ -543,6 +553,12 @@ export default function GuestFaceDiscoveryPage() {
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
+
+    fetch("/api/guest/log-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventType: "photo_download", payload: { count: matchedPhotos.length } }),
+    }).catch(console.error);
   }
 
   function downloadPhoto(photo: MatchedPhoto) {
@@ -552,6 +568,12 @@ export default function GuestFaceDiscoveryPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    fetch("/api/guest/log-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventType: "photo_download", payload: { count: 1 } }),
+    }).catch(console.error);
   }
 
   const matchLabel = matchSource === "refined" ? "Refined matches" : "Initial selfie matches";

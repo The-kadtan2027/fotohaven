@@ -20,7 +20,12 @@ import {
   Share2,
   Trash2,
   Upload,
+  User,
   X,
+  Activity,
+  History,
+  Download,
+  Camera,
 } from "lucide-react";
 import FaceProcessor from "./FaceProcessor";
 import AlbumLightbox, { type LightboxState } from "./AlbumLightbox";
@@ -45,6 +50,18 @@ interface Ceremony {
   photos: Photo[];
 }
 
+interface ActivityLog {
+  id: string;
+  guestId: string | null;
+  eventType: string;
+  payload: string | null;
+  createdAt: string;
+  guest?: {
+    name: string;
+    email: string | null;
+  };
+}
+
 interface Album {
   id: string;
   title: string;
@@ -55,6 +72,7 @@ interface Album {
   compressionFormat?: CompressionFormat;
   dedupThreshold?: number;
   ceremonies: Ceremony[];
+  activityLogs?: ActivityLog[];
 }
 
 type UploadStatus = "pending" | "uploading" | "done" | "error";
@@ -410,11 +428,11 @@ export default function AlbumPage() {
   const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
 
   if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
-  if (!album || !activeCeremonyData) return <CenteredState><p>Album not found.</p></CenteredState>;
+  if (!album || (!activeCeremonyData && activeCeremony !== "ACTIVITY")) return <CenteredState><p>Album not found.</p></CenteredState>;
 
   const totalPhotos = album.ceremonies.reduce((sum, ceremony) => sum + ceremony.photos.length, 0);
-  const originalCount = activeCeremonyData.photos.filter((photo) => !photo.isReturn).length;
-  const selectedCount = activeCeremonyData.photos.filter((photo) => !photo.isReturn && photo.isSelected).length;
+  const originalCount = activeCeremonyData ? activeCeremonyData.photos.filter((photo) => !photo.isReturn).length : 0;
+  const selectedCount = activeCeremonyData ? activeCeremonyData.photos.filter((photo) => !photo.isReturn && photo.isSelected).length : 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
@@ -447,10 +465,29 @@ export default function AlbumPage() {
               return <button key={ceremony.id} onClick={() => setActiveCeremony(ceremony.id)} className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]" style={{ background: activeCeremony === ceremony.id ? "var(--warm-white)" : "transparent", borderColor: activeCeremony === ceremony.id ? "var(--gold)" : "var(--sand)", cursor: "pointer" }}><span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === ceremony.id ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === ceremony.id ? 500 : 400 }}><FolderOpen size={14} />{ceremony.name}</span><div style={{ display: "flex", alignItems: "center", gap: 4 }}>{finals.length > 0 ? <span style={pill("rgba(201,150,58,0.2)", "var(--gold)")}>FINALS</span> : null}{selected > 0 ? <span style={pill("rgba(201,150,58,0.12)", "var(--gold)")}>S:{selected}</span> : null}<span style={{ fontSize: 11, color: "var(--taupe)", background: "var(--sand)", padding: "2px 7px", borderRadius: 100 }}>{originals.length}</span></div></button>;
             })}
             <button onClick={addCeremony} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500 }}><span style={{ fontSize: 18 }}>+</span> Add Ceremony</button>
+            <div style={{ height: 1, background: "var(--sand)", margin: "16px 20px" }} />
+            <button onClick={() => setActiveCeremony("ACTIVITY")} className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]" style={{ background: activeCeremony === "ACTIVITY" ? "var(--warm-white)" : "transparent", borderColor: activeCeremony === "ACTIVITY" ? "var(--gold)" : "var(--sand)", cursor: "pointer" }}><span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === "ACTIVITY" ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === "ACTIVITY" ? 500 : 400 }}><Activity size={14} />Activity Feed</span></button>
           </div>
         </aside>
 
         <main className="flex-1 p-4 md:p-8 overflow-auto">
+          {activeCeremony === "ACTIVITY" ? (
+            <div>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 28, flexWrap: "wrap", borderBottom: "1px solid var(--sand)", paddingBottom: 16 }}>
+                <div>
+                  <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)", display: "flex", alignItems: "center", gap: 12 }}>
+                    <Activity size={24} color="var(--gold)" />
+                    Activity Feed
+                  </h2>
+                  <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 4 }}>
+                    See when guests interact with the shared gallery.
+                  </p>
+                </div>
+              </div>
+              <ActivityFeed logs={album.activityLogs || []} />
+            </div>
+          ) : activeCeremonyData && (
+            <>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -485,6 +522,7 @@ export default function AlbumPage() {
           {uploads.length > 0 ? <UploadQueue uploads={uploads} isUploading={isUploading} onUploadAll={uploadAll} onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))} /> : null}
 
           {activeCeremonyData.photos.length > 0 ? <div className="photo-grid">{activeCeremonyData.photos.map((photo, index) => <PhotoCard key={photo.id} photo={photo} onDelete={deletePhoto} onSelect={togglePhotoSelection} onOpen={() => setLightbox({ photos: activeCeremonyData.photos, index })} isSelected={selectedPhotos.includes(photo.id)} showCheckbox={selectedPhotos.length > 0} />)}</div> : <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--taupe)" }}><ImageIcon size={40} style={{ marginBottom: 12, opacity: 0.4 }} /><p style={{ fontSize: 14 }}>No photos yet. Drop some above to get started.</p></div>}
+          </>)}
         </main>
       </div>
 
@@ -565,6 +603,73 @@ async function mapWithConcurrency<T, R>(
 
 function formatMb(size: number) {
   return (size / 1024 / 1024).toFixed(1);
+}
+
+function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
+  if (!logs.length) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--taupe)" }}>
+        <History size={40} style={{ marginBottom: 12, opacity: 0.4 }} />
+        <p style={{ fontSize: 14 }}>No guest activity yet.</p>
+        <p style={{ fontSize: 13, marginTop: 6, opacity: 0.8 }}>When someone views the gallery or downloads photos, it will appear here.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12, paddingBottom: 64 }}>
+      {logs.map((log) => {
+        let title = "Unknown activity";
+        let description: React.ReactNode = "";
+        let Icon = Activity;
+        let color = "var(--taupe)";
+        let bgColor = "var(--sand)";
+
+        const name = log.guest?.name ? <strong>{log.guest.name}</strong> : "A guest";
+        const payloadData = log.payload ? JSON.parse(log.payload) : null;
+
+        if (log.eventType === "guest_login") {
+          title = "OTP Verified";
+          description = <>{name} accessed the private gallery link using OTP.</>;
+          Icon = User;
+          color = "var(--sage)";
+          bgColor = "rgba(164, 184, 151, 0.15)";
+        } else if (log.eventType === "face_scan") {
+          title = "Face Scan Completed";
+          description = <>{name} successfully scanned their face to discover matching photos.</>;
+          Icon = Camera;
+          color = "var(--blue, #3b82f6)";
+          bgColor = "rgba(59, 130, 246, 0.1)";
+        } else if (log.eventType === "photo_download") {
+          title = "Photos Downloaded";
+          const count = payloadData?.count || 1;
+          description = <>{name} downloaded {count} photo{count === 1 ? "" : "s"}.</>;
+          Icon = Download;
+          color = "var(--gold)";
+          bgColor = "rgba(201, 150, 58, 0.15)";
+        }
+
+        const date = new Date(log.createdAt);
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+        return (
+          <div key={log.id} style={{ display: "flex", gap: 16, background: "var(--warm-white)", padding: "16px", borderRadius: 12, border: "1px solid var(--sand)" }}>
+            <div style={{ width: 44, height: 44, borderRadius: "50%", background: bgColor, color: color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Icon size={20} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso)" }}>{title}</p>
+                <span style={{ fontSize: 11, color: "var(--taupe)", whiteSpace: "nowrap" }}>{dateStr} at {timeStr}</span>
+              </div>
+              <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2, lineHeight: 1.4 }}>{description}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const settingsLabel = { fontSize: 12, color: "var(--taupe)", textTransform: "uppercase" as const, letterSpacing: "0.08em" };
