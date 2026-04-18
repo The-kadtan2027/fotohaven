@@ -219,16 +219,21 @@ export default function GuestFaceDiscoveryPage() {
     const resolvedSource = matchData.source || source;
     setMatchSource(resolvedSource);
     setGuestName(matchData.guest?.name || options?.fallbackName || "");
-    if (resolvedSource === "selfie") {
-      setConfirmedPhotoIds([]);
-    }
-
+    
     const scored = matchData.photos || [];
+
     if (!scored.length) {
       setMatchedPhotos([]);
       setStep("results");
+      setConfirmedPhotoIds([]);
       setStatus("");
       return;
+    }
+
+    if (resolvedSource === "selfie") {
+      setConfirmedPhotoIds([]);
+      setReviewIndex(0);
+      setReviewSelections([]);
     }
 
     const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
@@ -247,8 +252,35 @@ export default function GuestFaceDiscoveryPage() {
       .filter((p): p is MatchedPhoto => p !== null);
 
     setMatchedPhotos(matched);
-    setStep("results");
+    setStep(resolvedSource === "selfie" ? "review" : "results");
     setStatus("");
+  }
+
+  async function handleReviewChoice(isMe: boolean) {
+    const currentPhotoId = matchedPhotos[reviewIndex].id;
+    const newSelections = isMe ? [...reviewSelections, currentPhotoId] : reviewSelections;
+    
+    if (isMe) setReviewSelections(newSelections);
+    
+    const maxReviewPhotos = Math.min(5, matchedPhotos.length);
+    if (newSelections.length >= 3 || reviewIndex + 1 >= maxReviewPhotos) {
+      if (newSelections.length > 0) {
+        setBusy(true);
+        setStatus("Finding more photos based on your review...");
+        try {
+          await loadMatchedPhotos({ source: "refined", photoIds: newSelections });
+        } catch (err: any) {
+          setError(err.message || "Failed to refine matches");
+          setStep("results");
+        } finally {
+          setBusy(false);
+        }
+      } else {
+        setStep("results");
+      }
+    } else {
+      setReviewIndex(i => i + 1);
+    }
   }
 
   async function scanAndMatch() {
@@ -598,6 +630,69 @@ export default function GuestFaceDiscoveryPage() {
             <p style={{ marginTop: 12, fontSize: 12, color: "var(--taupe)" }}>
               Choose a clear photo with only one visible face for the best results.
             </p>
+          </div>
+        )}
+
+        {step === "review" && (
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: 26, color: "var(--espresso)", textAlign: "center" }}>
+              Quick Review
+            </h2>
+            <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)", textAlign: "center", maxWidth: 460 }}>
+              Help FotoHaven learn exactly what you look like today. Are you in this photo? ({reviewIndex + 1} of {Math.min(5, matchedPhotos.length)})
+            </p>
+            
+            {matchedPhotos[reviewIndex] && (
+              <div style={{ marginTop: 24, width: "100%", maxWidth: 360, borderRadius: 12, overflow: "hidden", background: "#000", position: "relative" }}>
+                <img 
+                  src={matchedPhotos[reviewIndex].url} 
+                  alt="Review candidate" 
+                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }} 
+                />
+              </div>
+            )}
+            
+            <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 360 }}>
+              <button 
+                className="btn-ghost" 
+                style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
+                onClick={() => handleReviewChoice(false)}
+                disabled={busy}
+              >
+                No, not me
+              </button>
+              <button 
+                className="btn-gold" 
+                style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
+                onClick={() => handleReviewChoice(true)}
+                disabled={busy}
+              >
+                Yes, that's me
+              </button>
+            </div>
+            
+            <button 
+              className="btn-ghost" 
+              style={{ marginTop: 24, fontSize: 13, border: "none" }}
+              onClick={async () => {
+                 if (reviewSelections.length > 0) {
+                   setBusy(true);
+                   setStatus("Finding more photos based on your review...");
+                   try {
+                     await loadMatchedPhotos({ source: "refined", photoIds: reviewSelections });
+                   } catch {
+                     setStep("results");
+                   } finally {
+                     setBusy(false);
+                   }
+                 } else {
+                   setStep("results");
+                 }
+              }}
+              disabled={busy}
+            >
+              Skip the rest
+            </button>
           </div>
         )}
 
