@@ -227,7 +227,7 @@ pm2 start ecosystem.config.js
   - Shared calibration lives in `src/lib/face-config.ts`; prefer `FACE_*` env vars for server/runtime tuning and keep `NEXT_PUBLIC_FACE_*` as browser fallbacks for client-side enrollment/detection settings.
   - `FACE_SCAN_SOURCE` ("thumbnail" or "original", default "original") controls whether the background processor downloads the fast 800px thumbnail or the high-res original for extraction.
   - After changing these values, use the album-page `Reprocess Faces` button so stored `PhotoFace` rows are regenerated under the new quality gates.
-  - Planned next-step accuracy upgrade: keep selfie scan as the first pass, then let the guest confirm 1–3 correct photos from the shortlist and re-run discovery using those in-album `PhotoFace.descriptor` values as anchors. This stays offline and is expected to improve results for kids, makeup-heavy subjects, and crowded albums.
+  - **Refined Discovery (Active)**: After the selfie scan, guests are presented with a "Quick Review" carousel of their top 5 highest-confidence single-face matches. Confirming any of these photos re-runs the discovery algorithm using the verified `PhotoFace.descriptor` values as anchors. This offline approach drastically improves results for kids, makeup-heavy subjects, and crowded albums.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
   - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
