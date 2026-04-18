@@ -88,10 +88,20 @@ export const guestOtps = sqliteTable('GuestOtp', {
   createdAt:  integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const activityLogs = sqliteTable('ActivityLog', {
+  id:        text('id').primaryKey(),
+  albumId:   text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  guestId:   text('guestId').references(() => guests.id, { onDelete: 'cascade' }),
+  eventType: text('eventType').notNull(),
+  payload:   text('payload'),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+
 export const albumsRelations = relations(albums, ({ many }) => ({
   ceremonies: many(ceremonies),
   guests: many(guests),
   guestOtps: many(guestOtps),
+  activityLogs: many(activityLogs),
 }));
 
 export const ceremoniesRelations = relations(ceremonies, ({ one, many }) => ({
@@ -118,11 +128,12 @@ export const commentsRelations = relations(comments, ({ one }) => ({
   }),
 }));
 
-export const guestsRelations = relations(guests, ({ one }) => ({
+export const guestsRelations = relations(guests, ({ one, many }) => ({
   album: one(albums, {
     fields: [guests.albumId],
     references: [albums.id],
   }),
+  activityLogs: many(activityLogs),
 }));
 
 export const photoFacesRelations = relations(photoFaces, ({ one }) => ({
@@ -136,5 +147,16 @@ export const guestOtpsRelations = relations(guestOtps, ({ one }) => ({
   album: one(albums, {
     fields: [guestOtps.albumId],
     references: [albums.id],
+  }),
+}));
+
+export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
+  album: one(albums, {
+    fields: [activityLogs.albumId],
+    references: [albums.id],
+  }),
+  guest: one(guests, {
+    fields: [activityLogs.guestId],
+    references: [guests.id],
   }),
 }));
