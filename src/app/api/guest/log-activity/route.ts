@@ -8,9 +8,11 @@ import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 
 export const dynamic = "force-dynamic";
 
+const VALID_EVENT_TYPES = new Set(["face_scan", "photo_download"]);
+
 type LogBody = {
   eventType?: string;
-  payload?: any;
+  payload?: unknown;
 };
 
 async function getAuthenticatedGuest() {
@@ -42,8 +44,8 @@ export async function POST(request: Request) {
     const body = (await request.json()) as LogBody;
     const { eventType, payload } = body;
 
-    if (!eventType || typeof eventType !== "string") {
-      return NextResponse.json({ error: "eventType is required" }, { status: 400 });
+    if (!eventType || typeof eventType !== "string" || !VALID_EVENT_TYPES.has(eventType)) {
+      return NextResponse.json({ error: "Invalid or missing eventType" }, { status: 400 });
     }
 
     db.insert(activityLogs).values({
