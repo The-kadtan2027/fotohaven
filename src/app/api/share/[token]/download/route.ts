@@ -3,22 +3,9 @@ import { db } from "@/lib/db";
 import { albums } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import archiver from "archiver";
+import { Readable } from "stream";
 import { getFileStream } from "@/lib/storage";
 import { getOptionalGuestFromRequest, logActivity } from "@/lib/activity-log";
-
-// Helper stream converter to push Node readable stream chunks into Web stream
-// This prevents Next.js edge stream errors during pipeline backpressure
-function streamArchiverToWeb(archive: archiver.Archiver) {
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  
-  // Event listeners on archiver
-  archive.on("data", (chunk) => writer.write(chunk));
-  archive.on("end", () => writer.close());
-  archive.on("error", (err) => writer.abort(err));
-
-  return readable;
-}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const token = (await params).token;
@@ -76,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     zlib: { level: 0 }, 
   });
 
-  const readableStream = streamArchiverToWeb(archive);
+  const readableStream = Readable.toWeb(archive) as ReadableStream<Uint8Array>;
 
   // Background appending (we return the streaming Response instantly)
   (async () => {

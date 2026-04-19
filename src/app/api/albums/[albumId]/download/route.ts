@@ -3,18 +3,8 @@ import { db } from "@/lib/db";
 import { albums } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import archiver from "archiver";
+import { Readable } from "stream";
 import { getFileStream } from "@/lib/storage";
-
-function streamArchiverToWeb(archive: archiver.Archiver) {
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  
-  archive.on("data", (chunk) => writer.write(chunk));
-  archive.on("end", () => writer.close());
-  archive.on("error", (err) => writer.abort(err));
-
-  return readable;
-}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
   const albumId = (await params).albumId;
@@ -54,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ alb
     zlib: { level: 0 }, 
   });
 
-  const readableStream = streamArchiverToWeb(archive);
+  const readableStream = Readable.toWeb(archive) as ReadableStream<Uint8Array>;
 
   // Background appending
   (async () => {

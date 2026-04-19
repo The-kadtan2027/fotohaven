@@ -651,6 +651,8 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
         let color = "var(--taupe)";
         let bgColor = "var(--sand)";
 
+        const guestName = log.guest?.name?.trim() || "Unknown guest";
+        const guestEmail = log.guest?.email?.trim() || null;
         const name = log.guest?.name ? <strong>{log.guest.name}</strong> : "A guest";
         const payloadData = parseActivityPayload(log.payload);
 
@@ -704,7 +706,12 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso)" }}>{title}</p>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso)" }}>{title}</p>
+                  <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 2 }}>
+                    {guestName}{guestEmail ? ` · ${guestEmail}` : ""}
+                  </p>
+                </div>
                 <span style={{ fontSize: 11, color: "var(--taupe)", whiteSpace: "nowrap" }}>{formatRelativeTime(log.createdAt)}</span>
               </div>
               <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2, lineHeight: 1.4 }}>{description}</p>
