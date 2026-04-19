@@ -397,7 +397,7 @@ export default function GuestFaceDiscoveryPage() {
       fetch("/api/guest/log-activity", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventType: "face_scan" }),
+        body: JSON.stringify({ eventType: "face_scan_completed" }),
       }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Scan failed");
@@ -454,7 +454,7 @@ export default function GuestFaceDiscoveryPage() {
       fetch("/api/guest/log-activity", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventType: "face_scan" }),
+        body: JSON.stringify({ eventType: "face_scan_completed" }),
       }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Photo upload failed");
@@ -557,7 +557,7 @@ export default function GuestFaceDiscoveryPage() {
     fetch("/api/guest/log-activity", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventType: "photo_download", payload: { count: matchedPhotos.length } }),
+      body: JSON.stringify({ eventType: "download_started", payload: { count: matchedPhotos.length, source: "matched_zip" } }),
     }).catch(console.error);
   }
 
@@ -572,7 +572,7 @@ export default function GuestFaceDiscoveryPage() {
     fetch("/api/guest/log-activity", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventType: "photo_download", payload: { count: 1 } }),
+      body: JSON.stringify({ eventType: "download_started", payload: { count: 1, source: "single_photo" } }),
     }).catch(console.error);
   }
 

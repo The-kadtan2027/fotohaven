@@ -605,6 +605,32 @@ function formatMb(size: number) {
   return (size / 1024 / 1024).toFixed(1);
 }
 
+function parseActivityPayload(payload: string | null) {
+  if (!payload) return null;
+  try {
+    return JSON.parse(payload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function formatRelativeTime(value: string) {
+  const diffMs = new Date(value).getTime() - Date.now();
+  const absMs = Math.abs(diffMs);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+  if (absMs < 60_000) {
+    return rtf.format(Math.round(diffMs / 1000), "second");
+  }
+  if (absMs < 3_600_000) {
+    return rtf.format(Math.round(diffMs / 60_000), "minute");
+  }
+  if (absMs < 86_400_000) {
+    return rtf.format(Math.round(diffMs / 3_600_000), "hour");
+  }
+  return rtf.format(Math.round(diffMs / 86_400_000), "day");
+}
+
 function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
   if (!logs.length) {
     return (
@@ -626,7 +652,7 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
         let bgColor = "var(--sand)";
 
         const name = log.guest?.name ? <strong>{log.guest.name}</strong> : "A guest";
-        const payloadData = log.payload ? JSON.parse(log.payload) : null;
+        const payloadData = parseActivityPayload(log.payload);
 
         if (log.eventType === "guest_login") {
           title = "OTP Verified";
@@ -634,15 +660,33 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
           Icon = User;
           color = "var(--sage)";
           bgColor = "rgba(164, 184, 151, 0.15)";
-        } else if (log.eventType === "face_scan") {
+        } else if (log.eventType === "gallery_viewed") {
+          title = "Gallery Opened";
+          description = <>{name} opened the shared gallery.</>;
+          Icon = Activity;
+          color = "#3b82f6";
+          bgColor = "rgba(59, 130, 246, 0.1)";
+        } else if (log.eventType === "photo_selected") {
+          title = "Photo Selected";
+          description = <>{name} selected a photo.</>;
+          Icon = Check;
+          color = "var(--gold)";
+          bgColor = "rgba(201, 150, 58, 0.15)";
+        } else if (log.eventType === "photo_deselected") {
+          title = "Photo Deselected";
+          description = <>{name} removed a photo from their selection.</>;
+          Icon = X;
+          color = "var(--taupe)";
+          bgColor = "rgba(176, 164, 147, 0.15)";
+        } else if (log.eventType === "face_scan_completed" || log.eventType === "face_scan") {
           title = "Face Scan Completed";
           description = <>{name} successfully scanned their face to discover matching photos.</>;
           Icon = Camera;
           color = "var(--blue, #3b82f6)";
           bgColor = "rgba(59, 130, 246, 0.1)";
-        } else if (log.eventType === "photo_download") {
-          title = "Photos Downloaded";
-          const count = payloadData?.count || 1;
+        } else if (log.eventType === "download_started" || log.eventType === "photo_download") {
+          title = "Download Started";
+          const count = typeof payloadData?.count === "number" ? payloadData.count : 1;
           description = <>{name} downloaded {count} photo{count === 1 ? "" : "s"}.</>;
           Icon = Download;
           color = "var(--gold)";
@@ -661,9 +705,10 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
                 <p style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso)" }}>{title}</p>
-                <span style={{ fontSize: 11, color: "var(--taupe)", whiteSpace: "nowrap" }}>{dateStr} at {timeStr}</span>
+                <span style={{ fontSize: 11, color: "var(--taupe)", whiteSpace: "nowrap" }}>{formatRelativeTime(log.createdAt)}</span>
               </div>
               <p style={{ fontSize: 13, color: "var(--brown)", marginTop: 2, lineHeight: 1.4 }}>{description}</p>
+              <p style={{ fontSize: 11, color: "var(--taupe)", marginTop: 6 }}>{dateStr} at {timeStr}</p>
             </div>
           </div>
         );

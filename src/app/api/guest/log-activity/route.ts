@@ -1,19 +1,34 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { db } from "@/lib/db";
-import { activityLogs, guests } from "@/lib/schema";
+import { guests } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
+import { logActivity, type ActivityEventType } from "@/lib/activity-log";
 
 export const dynamic = "force-dynamic";
 
-const VALID_EVENT_TYPES = new Set(["face_scan", "photo_download"]);
+const VALID_EVENT_TYPES = new Set([
+  "gallery_viewed",
+  "photo_selected",
+  "photo_deselected",
+  "download_started",
+  "face_scan_completed",
+  "guest_login",
+  "face_scan",
+  "photo_download",
+]);
 
 type LogBody = {
   eventType?: string;
   payload?: unknown;
 };
+
+function normalizeEventType(eventType: string): ActivityEventType {
+  if (eventType === "face_scan") return "face_scan_completed";
+  if (eventType === "photo_download") return "download_started";
+  return eventType as ActivityEventType;
+}
 
 async function getAuthenticatedGuest() {
   const cookieStore = await cookies();
@@ -48,14 +63,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid or missing eventType" }, { status: 400 });
     }
 
-    db.insert(activityLogs).values({
-      id: uuidv4(),
+    logActivity({
       albumId: guest.albumId,
       guestId: guest.id,
-      eventType,
-      payload: payload ? JSON.stringify(payload) : null,
-      createdAt: new Date(),
-    }).run();
+      eventType: normalizeEventType(eventType),
+      payload,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

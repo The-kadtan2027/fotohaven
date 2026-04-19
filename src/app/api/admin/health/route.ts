@@ -93,6 +93,98 @@ function getRecentErrorLogs(): string[] {
   }
 }
 
+type TunnelInfo = {
+  provider: "cloudflare" | "tailscale" | "unknown";
+  status: "online" | "offline" | "unknown";
+  publicUrl: string | null;
+  detail: string;
+};
+
+function inferTunnelProvider(publicUrl: string | null): TunnelInfo["provider"] {
+  if (!publicUrl) return "unknown";
+  if (publicUrl.includes("trycloudflare.com")) return "cloudflare";
+  if (publicUrl.includes(".ts.net")) return "tailscale";
+  return "unknown";
+}
+
+function getTunnelInfo(): TunnelInfo | null {
+  const publicUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || null;
+  const pm2Raw = safeExec("pm2 jlist");
+
+  if (pm2Raw) {
+    try {
+      const list = JSON.parse(pm2Raw) as Array<{
+        name: string;
+        pm2_env?: { status?: string };
+      }>;
+
+      const cloudflaredProc = list.find((proc) => proc.name.toLowerCase().includes("cloudflared"));
+      if (cloudflaredProc) {
+        const status = cloudflaredProc.pm2_env?.status === "online" ? "online" : "offline";
+        return {
+          provider: "cloudflare",
+          status,
+          publicUrl,
+          detail: status === "online"
+            ? "cloudflared is running under PM2"
+            : "cloudflared process exists but is not online",
+        };
+      }
+
+      const tailscaleProc = list.find((proc) => proc.name.toLowerCase().includes("tailscale"));
+      if (tailscaleProc) {
+        const status = tailscaleProc.pm2_env?.status === "online" ? "online" : "offline";
+        return {
+          provider: "tailscale",
+          status,
+          publicUrl,
+          detail: status === "online"
+            ? "Tailscale process is running under PM2"
+            : "Tailscale process exists but is not online",
+        };
+      }
+    } catch {
+      // Fall through to command-based detection.
+    }
+  }
+
+  const cloudflaredProcess = safeExec("pgrep -af cloudflared");
+  if (cloudflaredProcess) {
+    return {
+      provider: "cloudflare",
+      status: "online",
+      publicUrl,
+      detail: "cloudflared process detected",
+    };
+  }
+
+  const tailscaleProcess = safeExec("pgrep -af tailscale");
+  if (tailscaleProcess) {
+    return {
+      provider: "tailscale",
+      status: "online",
+      publicUrl,
+      detail: "Tailscale process detected",
+    };
+  }
+
+  if (publicUrl) {
+    return {
+      provider: inferTunnelProvider(publicUrl),
+      status: "unknown",
+      publicUrl,
+      detail: "Public URL is configured, but tunnel process could not be detected on this platform",
+    };
+  }
+
+  return {
+    provider: "unknown",
+    status: "unknown",
+    publicUrl: null,
+    detail: "No public tunnel URL configured",
+  };
+}
+
 export async function GET() {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
@@ -119,6 +211,7 @@ export async function GET() {
     disk: getDiskUsage(),
     dbSize: getDbSize(),
     pm2: getPm2Info(),
+    tunnel: getTunnelInfo(),
     errorLogs: getRecentErrorLogs(),
   });
 }

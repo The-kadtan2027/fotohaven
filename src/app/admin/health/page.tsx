@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Activity, Database, HardDrive, Cpu, RefreshCw,
   AlertCircle, CheckCircle, Clock, Server, ChevronLeft,
-  Terminal,
+  Terminal, Globe,
 } from "lucide-react";
 
 interface MemoryInfo {
@@ -40,6 +40,13 @@ interface Pm2Info {
   restarts: number;
 }
 
+interface TunnelInfo {
+  provider: "cloudflare" | "tailscale" | "unknown";
+  status: "online" | "offline" | "unknown";
+  publicUrl: string | null;
+  detail: string;
+}
+
 interface HealthData {
   timestamp: string;
   memory: MemoryInfo;
@@ -48,6 +55,7 @@ interface HealthData {
   disk: DiskInfo | null;
   dbSize: number | null;
   pm2: Pm2Info | null;
+  tunnel: TunnelInfo | null;
   errorLogs: string[];
 }
 
@@ -288,6 +296,22 @@ export default function HealthPage() {
             accent={data?.pm2?.status === "online" ? "var(--sage)" : data?.pm2 ? "#d97706" : "var(--taupe)"}
           />
 
+          <StatCard
+            icon={Globe}
+            label="Public Tunnel"
+            value={data?.tunnel ? data.tunnel.status.toUpperCase() : na}
+            sub={data?.tunnel
+              ? `${data.tunnel.provider === "unknown" ? "Tunnel" : data.tunnel.provider} · ${data.tunnel.publicUrl ?? "No URL configured"}`
+              : "Not available on this platform"}
+            accent={
+              data?.tunnel?.status === "online"
+                ? "var(--sage)"
+                : data?.tunnel?.status === "offline"
+                  ? "#dc2626"
+                  : "var(--taupe)"
+            }
+          />
+
           {/* Platform */}
           <StatCard
             icon={Activity}
@@ -324,6 +348,19 @@ export default function HealthPage() {
               <CheckCircle size={16} color="var(--sage)" />
               <span style={{ fontSize: 13, color: "var(--brown)" }}>
                 DB: {data.dbSize != null ? formatBytes(data.dbSize) : "N/A"}
+              </span>
+            </div>
+            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {data.tunnel?.status === "online"
+                ? <CheckCircle size={16} color="var(--sage)" />
+                : data.tunnel?.status === "offline"
+                  ? <AlertCircle size={16} color="#dc2626" />
+                  : <AlertCircle size={16} color="#d97706" />}
+              <span style={{ fontSize: 13, color: "var(--brown)" }}>
+                {data.tunnel
+                  ? `Tunnel: ${data.tunnel.status}${data.tunnel.publicUrl ? ` · ${data.tunnel.publicUrl}` : ""}`
+                  : "Tunnel: N/A"}
               </span>
             </div>
           </div>

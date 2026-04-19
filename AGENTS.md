@@ -204,10 +204,10 @@ Returns JSON with system metrics. Uses Node.js `os` module and `fs.stat` for dis
 **Gate this behind `APP_SECRET`** — require `Authorization: Bearer {APP_SECRET}` header.
 
 ### Acceptance criteria
-- [ ] Page shows real-time stats (auto-refreshes every 30s)
-- [ ] Unauthenticated requests to `/api/admin/health` return 401
-- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
-- [ ] Works on ARM (no native modules)
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to `/api/admin/health` return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
 
 ---
 
@@ -1540,7 +1540,7 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ## Task: Album Activity Timeline
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Give the photographer visibility into client engagement: when the gallery was opened, when selections were made, and download events.
 
 ### Schema change
@@ -1558,16 +1558,16 @@ Add ActivityLog table:
 - `src/app/albums/[albumId]/page.tsx` -- render timeline panel
 
 ### Acceptance criteria
-- [ ] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
-- [ ] Album detail page shows a timeline of activity (newest first)
-- [ ] Timeline shows relative times ("2 hours ago")
+- [x] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
+- [x] Album detail page shows a timeline of activity (newest first)
+- [x] Timeline shows relative times ("2 hours ago")
 - [x] npx tsc --noEmit passes with zero errors
 
 ---
 
 ## Task: Health Dashboard UI (Complete Existing Stub)
 
-**Status:** Planned (previously mislabeled as Completed -- 0/4 acceptance criteria met)
+**Status:** Completed
 **Scope:** Build the /admin/health page and /api/admin/health route.
 
 ### New page: `src/app/admin/health/page.tsx`
@@ -1578,10 +1578,10 @@ Returns JSON with system metrics using Node.js os module and fs.stat.
 Guarded by session cookie via existing middleware (add /api/admin/* to protected paths).
 
 ### Acceptance criteria
-- [ ] Page shows real-time stats (auto-refreshes every 30s)
-- [ ] Unauthenticated requests to /api/admin/health return 401
-- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
-- [ ] Works on ARM (no native modules)
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to /api/admin/health return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
 
 
 

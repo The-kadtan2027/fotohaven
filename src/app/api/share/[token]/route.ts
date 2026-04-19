@@ -5,6 +5,7 @@ import { albums } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { sendViewNotification } from "@/lib/email";
+import { getOptionalGuestFromRequest, logActivity } from "@/lib/activity-log";
 
 export async function GET(
   request: NextRequest,
@@ -51,6 +52,17 @@ export async function GET(
     // Check expiry
     if (album.expiresAt && new Date(album.expiresAt) < new Date()) {
       return NextResponse.json({ error: "This link has expired" }, { status: 410 });
+    }
+
+    try {
+      const guest = await getOptionalGuestFromRequest(request, album.id);
+      logActivity({
+        albumId: album.id,
+        guestId: guest?.id ?? null,
+        eventType: "gallery_viewed",
+      });
+    } catch (err) {
+      console.warn("[GALLERY_VIEW_LOG]", err);
     }
 
     // Trigger First View Notification
