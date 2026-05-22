@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { photos } from "@/lib/schema";
+import { ceremonies, photos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { deleteFile } from "@/lib/storage";
+import { getOptionalGuestFromRequest, logActivity } from "@/lib/activity-log";
 
 export async function DELETE(
   req: NextRequest,
@@ -48,8 +49,13 @@ export async function PATCH(
 
     // Validate photo exists
     const photo = db
-      .select({ id: photos.id })
+      .select({
+        id: photos.id,
+        isSelected: photos.isSelected,
+        albumId: ceremonies.albumId,
+      })
       .from(photos)
+      .innerJoin(ceremonies, eq(photos.ceremonyId, ceremonies.id))
       .where(eq(photos.id, photoId))
       .get();
 
@@ -91,6 +97,23 @@ export async function PATCH(
       .set(updates)
       .where(eq(photos.id, photoId))
       .run();
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, "isSelected") &&
+      photo.isSelected !== updates.isSelected
+    ) {
+      try {
+        const guest = await getOptionalGuestFromRequest(req, photo.albumId);
+        logActivity({
+          albumId: photo.albumId,
+          guestId: guest?.id ?? null,
+          eventType: updates.isSelected ? "photo_selected" : "photo_deselected",
+          payload: { photoId },
+        });
+      } catch (error) {
+        console.warn("[PHOTO_SELECTION_LOG]", error);
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

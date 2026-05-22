@@ -1,10 +1,11 @@
 "use client";
 // src/app/page.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Image as ImageIcon, Share2, Clock, FolderOpen, Trash2, LogOut, User, Eye, Star, Settings } from "lucide-react";
+import { Plus, Image as ImageIcon, Share2, Clock, FolderOpen, Trash2, LogOut, User, Eye, Star, Settings, QrCode, X, Download } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
+import QRCode from "qrcode";
 
 interface Photo {
   isReturn: boolean;
@@ -35,6 +36,8 @@ export default function Home() {
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
+  const [qrToken, setQrToken] = useState<string | null>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     // Check auth first
@@ -93,6 +96,31 @@ export default function Home() {
       textArea.remove();
     }
     toast("Share link copied to clipboard!", "success");
+  };
+
+  const showQr = (token: string) => {
+    setQrToken(token);
+    // Draw QR after the canvas mounts on next tick
+    setTimeout(() => {
+      const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement | null;
+      if (canvas) {
+        QRCode.toCanvas(canvas, shareUrl(token), {
+          width: 280,
+          margin: 2,
+          color: { dark: "#1a1208", light: "#faf7f2" },
+        }).catch(console.error);
+      }
+    }, 50);
+  };
+
+  const downloadQr = () => {
+    const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement | null;
+    if (!canvas || !qrToken) return;
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fotohaven-qr-${qrToken.slice(0, 8)}.png`;
+    a.click();
   };
 
   const deleteAlbum = async (albumId: string) => {
@@ -293,6 +321,14 @@ export default function Home() {
                       Copy Link
                     </button>
                     <button
+                      onClick={() => showQr(album.shareToken)}
+                      className="btn-ghost"
+                      style={{ padding: "0 12px" }}
+                      title="Show QR Code"
+                    >
+                      <QrCode size={14} />
+                    </button>
+                    <button
                       onClick={() => deleteAlbum(album.id)}
                       className="btn-ghost"
                       style={{ padding: "0 12px", color: "var(--blush)" }}
@@ -307,6 +343,56 @@ export default function Home() {
           </div>
         )}
       </main>
+      {qrToken && (
+        <div
+          onClick={() => setQrToken(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(26,18,8,0.7)",
+            zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="card"
+            style={{ padding: 32, textAlign: "center", maxWidth: 360, width: "100%", position: "relative" }}
+          >
+            <button
+              onClick={() => setQrToken(null)}
+              style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}
+            >
+              <X size={18} />
+            </button>
+            <h3 style={{ fontFamily: "var(--font-display)", fontSize: 22, color: "var(--espresso)", marginBottom: 4 }}>Share QR Code</h3>
+            <p style={{ fontSize: 12, color: "var(--taupe)", marginBottom: 24 }}>Scan to open the gallery</p>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+              <canvas
+                id="qr-canvas"
+                style={{ borderRadius: 12, border: "1px solid var(--sand)" }}
+              />
+            </div>
+            <p style={{ fontSize: 11, color: "var(--taupe)", wordBreak: "break-all", marginBottom: 24, padding: "0 8px" }}>
+              {shareUrl(qrToken)}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn-ghost"
+                onClick={() => copyLink(qrToken)}
+                style={{ flex: 1, fontSize: 13, justifyContent: "center" }}
+              >
+                <Share2 size={13} /> Copy Link
+              </button>
+              <button
+                className="btn-gold"
+                onClick={downloadQr}
+                style={{ flex: 1, fontSize: 13, justifyContent: "center" }}
+              >
+                <Download size={13} /> Download PNG
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

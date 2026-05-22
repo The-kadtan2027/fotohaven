@@ -25,6 +25,12 @@ export async function GET(
             },
           },
         },
+        activityLogs: {
+          orderBy: (l, { desc }) => [desc(l.createdAt)],
+          with: {
+            guest: true,
+          },
+        },
       },
     });
 

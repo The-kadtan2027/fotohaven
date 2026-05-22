@@ -17,6 +17,7 @@ const GUARDED_API_PREFIXES = [
   '/api/upload',
   '/api/photos',
   '/api/ceremonies',
+  '/api/admin',
 ];
 
 async function verifySession(request: NextRequest): Promise<boolean> {
@@ -71,9 +72,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Guard browser admin routes: /, /albums, /albums/*
+  // Guard browser admin routes: /, /albums, /albums/*, /admin, /admin/*
   // The matcher already limits which routes reach this middleware
-  if (pathname === '/' || pathname.startsWith('/albums')) {
+  if (pathname === '/' || pathname.startsWith('/albums') || pathname.startsWith('/admin')) {
     const isValid = await verifySession(request);
     if (!isValid) {
       const loginUrl = new URL('/login', request.url);
@@ -88,8 +89,9 @@ export const config = {
   matcher: [
     // API routes
     '/api/:path*',
-    // Admin browser routes (exact root + albums)
+    // Admin browser routes (exact root + albums + admin)
     '/',
     '/albums/:path*',
+    '/admin/:path*',
   ],
 };

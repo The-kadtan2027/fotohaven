@@ -3,21 +3,9 @@ import { db } from "@/lib/db";
 import { albums } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import archiver from "archiver";
+import { Readable } from "stream";
 import { getFileStream } from "@/lib/storage";
-
-// Helper stream converter to push Node readable stream chunks into Web stream
-// This prevents Next.js edge stream errors during pipeline backpressure
-function streamArchiverToWeb(archive: archiver.Archiver) {
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  
-  // Event listeners on archiver
-  archive.on("data", (chunk) => writer.write(chunk));
-  archive.on("end", () => writer.close());
-  archive.on("error", (err) => writer.abort(err));
-
-  return readable;
-}
+import { getOptionalGuestFromRequest, logActivity } from "@/lib/activity-log";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const token = (await params).token;
@@ -55,12 +43,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "No valid photos found" }, { status: 404 });
   }
 
+  try {
+    const guest = await getOptionalGuestFromRequest(req, album.id);
+    logActivity({
+      albumId: album.id,
+      guestId: guest?.id ?? null,
+      eventType: "download_started",
+      payload: {
+        count: requestedPhotos.length,
+        bundleName,
+      },
+    });
+  } catch (err) {
+    console.warn("[DOWNLOAD_LOG]", err);
+  }
+
   // 0 zlib compression because JPEGs don't compress — saves massive CPU time
   const archive = archiver("zip", {
     zlib: { level: 0 }, 
   });
 
-  const readableStream = streamArchiverToWeb(archive);
+  const readableStream = Readable.toWeb(archive) as ReadableStream<Uint8Array>;
 
   // Background appending (we return the streaming Response instantly)
   (async () => {

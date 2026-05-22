@@ -72,8 +72,11 @@ function scoreMatches(
   threshold: number
 ) {
   const bestDistanceByPhoto = new Map<string, number>();
+  const faceCountByPhoto = new Map<string, number>();
 
   for (const face of faces) {
+    faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
+    
     try {
       const distance = euclideanDistance(
         referenceDescriptor,
@@ -96,6 +99,7 @@ function scoreMatches(
     .map(([photoId, score]) => ({
       photoId,
       score: Math.round(score * 1000) / 1000,
+      faceCount: faceCountByPhoto.get(photoId) || 1,
     }));
 }
 

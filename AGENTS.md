@@ -204,10 +204,10 @@ Returns JSON with system metrics. Uses Node.js `os` module and `fs.stat` for dis
 **Gate this behind `APP_SECRET`** â€” require `Authorization: Bearer {APP_SECRET}` header.
 
 ### Acceptance criteria
-- [ ] Page shows real-time stats (auto-refreshes every 30s)
-- [ ] Unauthenticated requests to `/api/admin/health` return 401
-- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
-- [ ] Works on ARM (no native modules)
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to `/api/admin/health` return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
 
 ---
 
@@ -1415,12 +1415,12 @@ None required for the first implementation pass. Reuse existing `PhotoFace.descr
 - `src/app/share/[token]/guest/page.tsx`
   - Keep the current selfie scan flow as the first step
   - After initial results, add a confirmation step:
-    - Guest can mark 1–3 photos as “Yes, this is me”
-    - Button: “Find more like these”
+    - Guest can mark 1ï¿½3 photos as ï¿½Yes, this is meï¿½
+    - Button: ï¿½Find more like theseï¿½
   - Re-run discovery using the confirmed album photos as anchors
   - Keep `Rescan Face` available
   - Add a manual fallback path from the discovery results:
-    - “Find more photos like this person”
+    - ï¿½Find more photos like this personï¿½
 
 ### Matching behavior
 - First pass:
@@ -1540,7 +1540,7 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ## Task: Album Activity Timeline
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Give the photographer visibility into client engagement: when the gallery was opened, when selections were made, and download events.
 
 ### Schema change
@@ -1558,16 +1558,16 @@ Add ActivityLog table:
 - `src/app/albums/[albumId]/page.tsx` -- render timeline panel
 
 ### Acceptance criteria
-- [ ] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
-- [ ] Album detail page shows a timeline of activity (newest first)
-- [ ] Timeline shows relative times ("2 hours ago")
+- [x] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
+- [x] Album detail page shows a timeline of activity (newest first)
+- [x] Timeline shows relative times ("2 hours ago")
 - [x] npx tsc --noEmit passes with zero errors
 
 ---
 
 ## Task: Health Dashboard UI (Complete Existing Stub)
 
-**Status:** Planned (previously mislabeled as Completed -- 0/4 acceptance criteria met)
+**Status:** Completed
 **Scope:** Build the /admin/health page and /api/admin/health route.
 
 ### New page: `src/app/admin/health/page.tsx`
@@ -1578,10 +1578,10 @@ Returns JSON with system metrics using Node.js os module and fs.stat.
 Guarded by session cookie via existing middleware (add /api/admin/* to protected paths).
 
 ### Acceptance criteria
-- [ ] Page shows real-time stats (auto-refreshes every 30s)
-- [ ] Unauthenticated requests to /api/admin/health return 401
-- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
-- [ ] Works on ARM (no native modules)
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to /api/admin/health return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
 
 
 
@@ -1597,3 +1597,22 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] Read scanSource in face-config.ts
 - [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
 - [x] Updated configs to default to original and added logging
+
+
+## Task: Guest Face Discovery UX Refinement
+
+**Status:** Completed
+**Scope:** Improve the intuitiveness of the "Find more photos like this person" feature, moving away from an inline banner approach to a guided, mobile-native gallery flow.
+
+### Implementation Summary
+- **Approach 1 (Full Gallery Selection):** Added a sticky bottom action bar that tracks selections, paired with a full-card tap-to-select visual interaction (scale-down + border).
+- **Approach 2 (Guided Review Wizard):** Injected an intermediate step between the initial selfie scan and the full gallery, prompting the user with a focused 1-by-1 quick review of the top 5 matches to lock in a refined descriptor quickly.
+- **Solo Photo Prioritization:** Client-side sorting pushes single-face photos to the front of the review wizard so that confirmed anchors are unpolluted by adjacent group members.
+
+### Acceptance criteria
+- [x] Full photo grid cards can be tapped to select, triggering visual feedback.
+- [x] Sticky bottom bar fades in when 1+ photos are selected with appropriate action buttons.
+- [x] A Quick Review wizard displays immediately following an initial selfie match.
+- [x] Review wizard strictly displays up to 5 photos, prioritizing single-face shots.
+- [x] Confirming photos immediately runs the refined multi-anchor search automatically.
+- [x] User can skip the wizard to fallback to the full photo grid easily.

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X, Maximize } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
@@ -16,7 +16,7 @@ type Photo = {
 
 type MatchSource = "selfie" | "refined";
 
-type MatchedPhoto = Photo & { score: number };
+type MatchedPhoto = Photo & { score: number; faceCount?: number };
 
 type Ceremony = {
   id: string;
@@ -30,10 +30,10 @@ type Album = {
   ceremonies: Ceremony[];
 };
 
-type Step = "otp" | "consent" | "scan" | "results";
+type Step = "otp" | "consent" | "scan" | "review" | "results";
 
 type MatchResponse = {
-  photos?: { photoId: string; score: number }[];
+  photos?: { photoId: string; score: number; faceCount?: number }[];
   guest?: { name?: string };
   source?: MatchSource;
   error?: string;
@@ -58,6 +58,8 @@ export default function GuestFaceDiscoveryPage() {
   const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewSelections, setReviewSelections] = useState<string[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -76,10 +78,52 @@ export default function GuestFaceDiscoveryPage() {
   }
 
   useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      try {
+        const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
+        if (!mounted || !matchResp.ok) return;
+        
+        const data = await matchResp.json() as MatchResponse;
+        if (data.guest?.name) {
+          setGuestName(data.guest.name);
+          
+          if (data.photos && data.photos.length > 0) {
+            const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
+            if (albumResp.ok) {
+              const album = await albumResp.json() as Album;
+              const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
+              const photoMap = new Map(all.map((p) => [p.id, p]));
+              
+              const matched: MatchedPhoto[] = data.photos.map((m) => {
+                const photo = photoMap.get(m.photoId);
+                if (!photo) return null;
+                const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
+                return mp;
+              }).filter((p): p is MatchedPhoto => p !== null);
+              
+              setMatchedPhotos(matched);
+              setIsReturningGuest(true);
+              setStep("results");
+              return;
+            }
+          }
+          
+          setStep("consent");
+        }
+      } catch (err) {
+        // Ignore error and stay on OTP step
+      }
+    }
+
+    checkSession();
+
     return () => {
+      mounted = false;
       stopCamera();
     };
-  }, []);
+  }, [token]);
 
   async function requestOtp(e: FormEvent) {
     e.preventDefault();
@@ -217,16 +261,21 @@ export default function GuestFaceDiscoveryPage() {
     const resolvedSource = matchData.source || source;
     setMatchSource(resolvedSource);
     setGuestName(matchData.guest?.name || options?.fallbackName || "");
-    if (resolvedSource === "selfie") {
-      setConfirmedPhotoIds([]);
-    }
-
+    
     const scored = matchData.photos || [];
+
     if (!scored.length) {
       setMatchedPhotos([]);
       setStep("results");
+      setConfirmedPhotoIds([]);
       setStatus("");
       return;
+    }
+
+    if (resolvedSource === "selfie") {
+      setConfirmedPhotoIds([]);
+      setReviewIndex(0);
+      setReviewSelections([]);
     }
 
     const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
@@ -240,13 +289,53 @@ export default function GuestFaceDiscoveryPage() {
     const matched: MatchedPhoto[] = scored
       .map((m) => {
         const photo = photoMap.get(m.photoId);
-        return photo ? { ...photo, score: m.score } : null;
+        if (!photo) return null;
+        const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
+        return mp;
       })
       .filter((p): p is MatchedPhoto => p !== null);
 
+    if (resolvedSource === "selfie") {
+      matched.sort((a, b) => {
+        const aSingle = a.faceCount === 1 ? 1 : 0;
+        const bSingle = b.faceCount === 1 ? 1 : 0;
+        if (aSingle !== bSingle) return bSingle - aSingle;
+        return a.score - b.score;
+      });
+    } else {
+      matched.sort((a, b) => a.score - b.score);
+    }
+
     setMatchedPhotos(matched);
-    setStep("results");
+    setStep(resolvedSource === "selfie" ? "review" : "results");
     setStatus("");
+  }
+
+  async function handleReviewChoice(isMe: boolean) {
+    const currentPhotoId = matchedPhotos[reviewIndex].id;
+    const newSelections = isMe ? [...reviewSelections, currentPhotoId] : reviewSelections;
+    
+    if (isMe) setReviewSelections(newSelections);
+    
+    const maxReviewPhotos = Math.min(5, matchedPhotos.length);
+    if (newSelections.length >= 3 || reviewIndex + 1 >= maxReviewPhotos) {
+      if (newSelections.length > 0) {
+        setBusy(true);
+        setStatus("Finding more photos based on your review...");
+        try {
+          await loadMatchedPhotos({ source: "refined", photoIds: newSelections });
+        } catch (err: any) {
+          setError(err.message || "Failed to refine matches");
+          setStep("results");
+        } finally {
+          setBusy(false);
+        }
+      } else {
+        setStep("results");
+      }
+    } else {
+      setReviewIndex(i => i + 1);
+    }
   }
 
   async function scanAndMatch() {
@@ -305,6 +394,11 @@ export default function GuestFaceDiscoveryPage() {
       await enrollDescriptor(descriptor);
 
       await loadMatchedPhotos({ source: "selfie" });
+      fetch("/api/guest/log-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType: "face_scan_completed" }),
+      }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Scan failed");
       setStatus("");
@@ -357,6 +451,11 @@ export default function GuestFaceDiscoveryPage() {
       }
 
       await loadMatchedPhotos({ source: "selfie" });
+      fetch("/api/guest/log-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType: "face_scan_completed" }),
+      }).catch(console.error);
     } catch (err: any) {
       setError(err.message || "Photo upload failed");
       setStatus("");
@@ -454,6 +553,12 @@ export default function GuestFaceDiscoveryPage() {
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
+
+    fetch("/api/guest/log-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventType: "download_started", payload: { count: matchedPhotos.length, source: "matched_zip" } }),
+    }).catch(console.error);
   }
 
   function downloadPhoto(photo: MatchedPhoto) {
@@ -463,6 +568,12 @@ export default function GuestFaceDiscoveryPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    fetch("/api/guest/log-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventType: "download_started", payload: { count: 1, source: "single_photo" } }),
+    }).catch(console.error);
   }
 
   const matchLabel = matchSource === "refined" ? "Refined matches" : "Initial selfie matches";
@@ -599,6 +710,69 @@ export default function GuestFaceDiscoveryPage() {
           </div>
         )}
 
+        {step === "review" && (
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: 26, color: "var(--espresso)", textAlign: "center" }}>
+              Quick Review
+            </h2>
+            <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)", textAlign: "center", maxWidth: 460 }}>
+              Help FotoHaven learn exactly what you look like today. Are you in this photo? ({reviewIndex + 1} of {Math.min(5, matchedPhotos.length)})
+            </p>
+            
+            {matchedPhotos[reviewIndex] && (
+              <div style={{ marginTop: 24, width: "100%", maxWidth: 360, borderRadius: 12, overflow: "hidden", background: "#000", position: "relative" }}>
+                <img 
+                  src={matchedPhotos[reviewIndex].url} 
+                  alt="Review candidate" 
+                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }} 
+                />
+              </div>
+            )}
+            
+            <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 360 }}>
+              <button 
+                className="btn-ghost" 
+                style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
+                onClick={() => handleReviewChoice(false)}
+                disabled={busy}
+              >
+                No, not me
+              </button>
+              <button 
+                className="btn-gold" 
+                style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
+                onClick={() => handleReviewChoice(true)}
+                disabled={busy}
+              >
+                Yes, that's me
+              </button>
+            </div>
+            
+            <button 
+              className="btn-ghost" 
+              style={{ marginTop: 24, fontSize: 13, border: "none" }}
+              onClick={async () => {
+                 if (reviewSelections.length > 0) {
+                   setBusy(true);
+                   setStatus("Finding more photos based on your review...");
+                   try {
+                     await loadMatchedPhotos({ source: "refined", photoIds: reviewSelections });
+                   } catch {
+                     setStep("results");
+                   } finally {
+                     setBusy(false);
+                   }
+                 } else {
+                   setStep("results");
+                 }
+              }}
+              disabled={busy}
+            >
+              Skip the rest
+            </button>
+          </div>
+        )}
+
         {step === "results" && (
           <div style={{ marginTop: 24 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -611,6 +785,9 @@ export default function GuestFaceDiscoveryPage() {
                     {isReturningGuest ? `Welcome back, ${guestName}.` : `Welcome, ${guestName}.`} {matchLabel}.
                   </p>
                 ) : null}
+                <p style={{ marginTop: 8, fontSize: 14, color: "var(--brown)" }}>
+                  Missing some photos? Tap up to 3 photos of yourself to improve the search.
+                </p>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn-ghost" onClick={rescanFace}>
@@ -624,44 +801,6 @@ export default function GuestFaceDiscoveryPage() {
               </div>
             </div>
 
-            {matchedPhotos.length > 0 && (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 14,
-                  borderRadius: 12,
-                  background: "rgba(196, 168, 108, 0.12)",
-                  border: "1px solid rgba(139, 110, 60, 0.18)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 240 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--espresso)", fontWeight: 700, fontSize: 13 }}>
-                    <Sparkles size={14} />
-                    Find more photos like this person
-                  </div>
-                  <p style={{ marginTop: 6, fontSize: 13, color: "var(--brown)", lineHeight: 1.5 }}>
-                    Select 1-3 photos that are definitely you. FotoHaven will use the in-album face descriptors from those photos to run a refined offline search.
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--taupe)" }}>
-                    Selected {confirmedPhotoIds.length}/3
-                  </span>
-                  <button
-                    className="btn-gold"
-                    onClick={refineMatches}
-                    disabled={busy || confirmedPhotoIds.length === 0}
-                  >
-                    {busy && matchSource === "refined" ? "Refining..." : "Find more like these"}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {matchedPhotos.length === 0 ? (
               <p style={{ marginTop: 14, color: "var(--brown)", fontSize: 14 }}>
@@ -681,17 +820,26 @@ export default function GuestFaceDiscoveryPage() {
                         background: "var(--sand)",
                         width: "100%",
                         boxShadow: selected ? "0 0 0 3px rgba(196, 168, 108, 0.85)" : undefined,
+                        border: selected ? "3px solid #C4A86C" : "3px solid transparent",
+                        transition: "all 0.2s ease",
                       }}
                     >
                       <button
                         type="button"
-                        onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                        onClick={() => toggleConfirmedPhoto(photo.id)}
                         style={{ position: "relative", background: "transparent", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
                       >
                         <img
                           src={photo.url}
                           alt={photo.originalName}
-                          style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1 / 1" }}
+                          style={{ 
+                            width: "100%", 
+                            height: "100%", 
+                            objectFit: "cover", 
+                            aspectRatio: "1 / 1",
+                            transform: selected ? "scale(0.92)" : "scale(1)",
+                            transition: "transform 0.2s ease" 
+                          }}
                         />
                         <span
                           style={{
@@ -715,7 +863,7 @@ export default function GuestFaceDiscoveryPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => toggleConfirmedPhoto(photo.id)}
+                        onClick={(e) => { e.stopPropagation(); setLightbox({ photos: matchedPhotos, index }); }}
                         style={{
                           position: "absolute",
                           top: 8,
@@ -732,9 +880,9 @@ export default function GuestFaceDiscoveryPage() {
                           cursor: "pointer",
                           backdropFilter: "blur(6px)",
                         }}
-                        aria-label={selected ? "Remove confirmed photo" : "Confirm this photo is me"}
+                        aria-label="View large photo"
                       >
-                        <Check size={16} />
+                        {selected ? <Check size={16} /> : <Maximize size={14} />}
                       </button>
                     </div>
                   );
@@ -751,6 +899,47 @@ export default function GuestFaceDiscoveryPage() {
           <p style={{ marginTop: 14, color: "var(--blush)", fontSize: 13 }}>{error}</p>
         )}
       </div>
+
+      {confirmedPhotoIds.length > 0 && (
+        <div style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          padding: "16px",
+          background: "rgba(255,255,255,0.95)",
+          backdropFilter: "blur(12px)",
+          borderTop: "1px solid rgba(0,0,0,0.08)",
+          boxShadow: "0 -4px 12px rgba(0,0,0,0.05)",
+          display: "flex",
+          justifyContent: "center",
+          zIndex: 50
+        }}>
+          <div style={{ width: "100%", maxWidth: 980, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--espresso)" }}>
+              {confirmedPhotoIds.length} photo{confirmedPhotoIds.length !== 1 ? 's' : ''} selected
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <button 
+                type="button"
+                className="btn-ghost" 
+                onClick={() => setConfirmedPhotoIds([])}
+                style={{ fontSize: 13 }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="btn-gold"
+                onClick={refineMatches}
+                disabled={busy}
+              >
+                {busy && matchSource === "refined" ? "Refining..." : "Find Better Matches"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightbox && (
         <div

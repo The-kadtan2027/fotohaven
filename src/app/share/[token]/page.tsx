@@ -69,6 +69,14 @@ export default function SharePage() {
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  const persistSelection = useCallback((photoId: string, isSelected: boolean) => {
+    fetch(`/api/photos/${photoId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isSelected }),
+    }).catch((err) => console.error("[selection] PATCH failed:", err));
+  }, []);
+
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
     setAuthError("");
@@ -121,11 +129,7 @@ export default function SharePage() {
       if (nowSelected) next.add(photoId);
       else next.delete(photoId);
       // Persist to DB (fire-and-forget, optimistic)
-      fetch(`/api/photos/${photoId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isSelected: nowSelected }),
-      }).catch((err) => console.error('[toggleSelect] PATCH failed:', err));
+      persistSelection(photoId, nowSelected);
       return next;
     });
   };
@@ -135,8 +139,17 @@ export default function SharePage() {
     const allSelected = allIds.every((id) => selectedPhotos.has(id));
     setSelectedPhotos((prev) => {
       const next = new Set(prev);
-      if (allSelected) allIds.forEach((id) => next.delete(id));
-      else allIds.forEach((id) => next.add(id));
+      if (allSelected) {
+        allIds.forEach((id) => {
+          next.delete(id);
+          persistSelection(id, false);
+        });
+      } else {
+        allIds.forEach((id) => {
+          next.add(id);
+          persistSelection(id, true);
+        });
+      }
       return next;
     });
   };
