@@ -1616,3 +1616,54 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] Review wizard strictly displays up to 5 photos, prioritizing single-face shots.
 - [x] Confirming photos immediately runs the refined multi-anchor search automatically.
 - [x] User can skip the wizard to fallback to the full photo grid easily.
+
+---
+
+## Task: Device / ROM Migration Guide
+
+**Status:** Planned  
+**Scope:** Provide a step-by-step guide for migrating the FotoHaven installation, database, and all uploaded photos to a new Android ROM or a new device without any data loss.
+
+### Backup Phase (Before ROM change)
+1. **Backup Database:** 
+   Copy the sqlite database file. This is usually `local.db` (or `dev.db`) in the root `fotohaven` directory.
+   ```bash
+   mkdir -p /sdcard/fotohaven_backup
+   cp ~/fotohaven/local.db /sdcard/fotohaven_backup/
+   ```
+2. **Backup Uploaded Photos:** 
+   By default on Android, local storage uses `~/storage/shared/fotohaven` (which maps to `/data/data/com.termux/files/home/storage/shared/fotohaven`).
+   ```bash
+   cp -r ~/storage/shared/fotohaven-uploads /sdcard/fotohaven_backup/uploads/
+   ```
+   *(Note: if using a custom `LOCAL_UPLOAD_PATH` in `.env.local`, backup that directory instead).*
+3. **Backup Environment Variables:** 
+   The `.env.local` and `.env` files contain your `JWT_SECRET`, `APP_SECRET`, and network configurations.
+   ```bash
+   cp ~/fotohaven/.env* /sdcard/fotohaven_backup/
+   ```
+4. **Export Backup:**
+   **CRUCIAL:** Move the `/sdcard/fotohaven_backup` folder to a PC, USB drive, or cloud storage before wiping the phone or flashing the ROM.
+
+### Restore Phase (After ROM change)
+1. **Initial Setup:** 
+   Install Termux, run `termux-setup-storage`, install Node/Git, and clone the `fotohaven` repository as per the standard deployment instructions.
+2. **Restore Database and Env:**
+   Copy the backed-up `local.db` and `.env*` files back into the `fotohaven` root directory.
+   ```bash
+   cp /sdcard/fotohaven_backup/local.db ~/fotohaven/
+   cp /sdcard/fotohaven_backup/.env* ~/fotohaven/
+   ```
+3. **Restore Photos:**
+   Copy the backed-up photos back into the expected storage directory:
+   ```bash
+   mkdir -p ~/storage/shared/fotohaven
+   cp -r /sdcard/fotohaven_backup/uploads/* ~/storage/shared/
+   ```
+4. **Finalize Setup:** 
+   Run `npm install`, then start PM2 or the web server (`npm run dev`). Because `local.db` retains all `Photo` references and the physical files are restored, the app will continue operating seamlessly.
+
+### Acceptance criteria
+- [ ] Guide is comprehensive, addressing DB, Env, and Storage backups.
+- [ ] Backup paths align with defaults outlined in `storage.ts` and `db.ts`.
+- [ ] Smooth transition verified (no missing photos or lost login credentials).

@@ -1,8 +1,15 @@
-Bug report: picture click from phone camera taking more time, when clicked on find and scan my face instead of taking pictures it is waiting until the model loads and then taking pictures.
-- Where: fotohaven website https://equality-hygiene-running-anna.trycloudflare.com/share/1e56ed95545f46c1/guest
-- What happens: when clicked on find and scan my face button in shared album page , it is waiting until the model loads and then taking pictures. it should capture the picture immediately and then show a progress bar or something to indicate the model loading progress.
-- What should happen: Website should show a progress bar or something to indicate the model loading progress.
-- Error message: no errors as such but face capture is not working as expected and taking too much time to load the model.
+Bug report:
+- Where: fotohaven website 
+- What happens: when clicked on download button in shared album page , not able to identfy until the file is downloaded, and the download button loading icon shows, this feels like we are stuck . it should show a progress bar or something to indicate the download progress.
+- What should happen: Website should show a progress bar or something to indicate the download progress.
+- Error message: not actuall but the logs 
+1|fotohave | 2026-03-21 12:54:47: [API] GET /api/share/695e1b2c2d1a40b8
+1|fotohave | 2026-03-21 12:54:47: [DB] Query: select "id", "title", "clientName", "shareToken", "password", "notifyEmail", "expiresAt", "firstViewedAt", "createdAt", "updatedAt", (select coalesce(json_group_array(json_array("id", "name", "albumId", "order", "createdAt", (select coalesce(json_group_array(json_array("id", "filename", "originalName", "size", "mimeType", "storageKey", "width", "height", "ceremonyId", "isReturn", "returnOf", "thumbnailKey", "createdAt", (select coalesce(json_group_array(json_array("id", "body", "author", "photoId", "createdAt")), json_array()) as "data" from "Comment" "albums_ceremonies_photos_comments" where "albums_ceremonies_photos_comments"."photoId" = "albums_ceremonies_photos"."id"))), json_array()) as "data" from (select * from "Photo" "albums_ceremonies_photos" where "albums_ceremonies_photos"."ceremonyId" = "albums_ceremonies"."id" order by "albums_ceremonies_photos"."createdAt" desc) "albums_ceremonies_photos"))), json_array()) as "data" from (select * from "Ceremony" "albums_ceremonies" where "albums_ceremonies"."albumId" = "albums"."id" order by "albums_ceremonies"."order" asc) "albums_ceremonies") as "ceremonies" from "Album" "albums" where "albums"."shareToken" = ? limit ? -- params: ["695e1b2c2d1a40b8", 1]
+1|fotohave | 2026-03-21 12:54:51: [API] GET /api/comments
+1|fotohave | 2026-03-21 12:54:51: [DB] Query: select "id", "body", "author", "photoId", "createdAt" from "Comment" "comments" where "comments"."photoId" = ? order by "comments"."createdAt" desc -- params: ["565b7958-86b5-4485-b945-a40866ffa43e"]
+1|fotohave | 2026-03-21 12:54:51: [API] GET /api/files/albums%2Fd7ccdab4-a5dc-4fa1-a2be-564fa1025d61%2Fceremonies%2F194ee224-45fc-4492-9f17-d235a6e0c499%2F565b7958-86b5-4485-b945-a40866ffa43e%2F565b7958-86b5-4485-b945-a40866ffa43e.jpg
+
+
 
 Before fixing:
 1. Read the relevant file(s) in full — do not guess at their contents.
@@ -21,7 +28,7 @@ Show me the exact before/after diff of what you changed.
 
 
 
-I want to implement: duplicate detection and removal of duplicate images from the album also blur images and give the options to the user to select the images to be blurred and remove the duplicates and compress images and give the option to control the compression level. these options should be available in the album page.
+I want to implement: give an option when face scan screen page to upload the face photo instead of scanning the face, this feature is needed as the person may seen different in photo and in real selfie. 
 
 Before writing any code:
 1. Read CLAUDE.md — confirm the current data models and which files you will touch.
@@ -43,8 +50,6 @@ When done:
 
 
 
-also i have some feature in mind : as we can group the photos based on the scan of the face, can we now add small round faces in shared link page 
-
 
 Resuming work on FotoHaven. You have no memory of our previous session.
 
@@ -62,7 +67,7 @@ Wait for my confirmation before resuming work.
 
 
 
-
+/data/data/com.termux/files/home/storage/shared/fotohaven-uploads/albums/e49416ec-de32-4114-b359-ee38e1609247/ceremonies/658d4fe4-b36c-4648-acbb-5f73b242f624/15aee210-bce2-4049-88fd-302b1dc3a52e/15aee210-bce2-4049-88fd-302b1dc3a52e.png
 
 
 
