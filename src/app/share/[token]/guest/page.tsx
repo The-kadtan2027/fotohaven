@@ -33,7 +33,7 @@ type Album = {
 type Step = "otp" | "consent" | "scan" | "review" | "results";
 
 type MatchResponse = {
-  photos?: { photoId: string; score: number; faceCount?: number }[];
+  photos?: (Photo & { score: number; faceCount?: number })[];
   guest?: { name?: string };
   source?: MatchSource;
   error?: string;
@@ -90,24 +90,13 @@ export default function GuestFaceDiscoveryPage() {
           setGuestName(data.guest.name);
           
           if (data.photos && data.photos.length > 0) {
-            const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
-            if (albumResp.ok) {
-              const album = await albumResp.json() as Album;
-              const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
-              const photoMap = new Map(all.map((p) => [p.id, p]));
-              
-              const matched: MatchedPhoto[] = data.photos.map((m) => {
-                const photo = photoMap.get(m.photoId);
-                if (!photo) return null;
-                const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
-                return mp;
-              }).filter((p): p is MatchedPhoto => p !== null);
-              
-              setMatchedPhotos(matched);
-              setIsReturningGuest(true);
-              setStep("results");
-              return;
-            }
+            // Use the photos directly from the my-photos API (which we just enriched)
+            // instead of fetching the shallow album API.
+            const matched: MatchedPhoto[] = data.photos as MatchedPhoto[];
+            setMatchedPhotos(matched);
+            setIsReturningGuest(true);
+            setStep("results");
+            return;
           }
           
           setStep("consent");
@@ -278,22 +267,9 @@ export default function GuestFaceDiscoveryPage() {
       setReviewSelections([]);
     }
 
-    const albumResp = await fetch(`/api/share/${token}`, { cache: "no-store" });
-    if (!albumResp.ok) {
-      throw new Error("Face matched photos found, but gallery is unavailable right now.");
-    }
-    const album = (await albumResp.json()) as Album;
-    const all = album.ceremonies.flatMap((ceremony) => ceremony.photos);
-    const photoMap = new Map(all.map((p) => [p.id, p]));
-
-    const matched: MatchedPhoto[] = scored
-      .map((m) => {
-        const photo = photoMap.get(m.photoId);
-        if (!photo) return null;
-        const mp: MatchedPhoto = { ...photo, score: m.score, faceCount: m.faceCount };
-        return mp;
-      })
-      .filter((p): p is MatchedPhoto => p !== null);
+    // The my-photos API now returns the full photo metadata (url, originalName, etc.)
+    // so we can use the scored results directly and skip the heavy album fetch.
+    const matched: MatchedPhoto[] = scored as MatchedPhoto[];
 
     if (resolvedSource === "selfie") {
       matched.sort((a, b) => {

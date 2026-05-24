@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
+import { getPresignedUrl } from "@/lib/storage";
 import { FACE_CONFIG } from "@/lib/face-config";
 import {
   averageDescriptors,
@@ -58,6 +59,9 @@ function getAlbumFaces(albumId: string) {
       id: photoFaces.id,
       photoId: photoFaces.photoId,
       descriptor: photoFaces.descriptor,
+      storageKey: photos.storageKey,
+      thumbnailKey: photos.thumbnailKey,
+      originalName: photos.originalName,
     })
     .from(photoFaces)
     .innerJoin(photos, eq(photoFaces.photoId, photos.id))
@@ -68,13 +72,21 @@ function getAlbumFaces(albumId: string) {
 
 function scoreMatches(
   referenceDescriptor: Float32Array,
-  faces: AlbumFace[],
+  faces: any[],
   threshold: number
 ) {
+  const photoDetails = new Map<string, { storageKey: string; thumbnailKey: string | null; originalName: string }>();
   const bestDistanceByPhoto = new Map<string, number>();
   const faceCountByPhoto = new Map<string, number>();
 
   for (const face of faces) {
+    if (!photoDetails.has(face.photoId)) {
+      photoDetails.set(face.photoId, {
+        storageKey: face.storageKey,
+        thumbnailKey: face.thumbnailKey,
+        originalName: face.originalName,
+      });
+    }
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
     
     try {
@@ -96,11 +108,18 @@ function scoreMatches(
   return Array.from(bestDistanceByPhoto.entries())
     .sort((a, b) => a[1] - b[1])
     .slice(0, FACE_CONFIG.maxResults)
-    .map(([photoId, score]) => ({
-      photoId,
-      score: Math.round(score * 1000) / 1000,
-      faceCount: faceCountByPhoto.get(photoId) || 1,
-    }));
+    .map(([photoId, score]) => {
+      const details = photoDetails.get(photoId)!;
+      return {
+        photoId,
+        score: Math.round(score * 1000) / 1000,
+        faceCount: faceCountByPhoto.get(photoId) || 1,
+        id: photoId,
+        originalName: details.originalName,
+        url: getPresignedUrl(details.thumbnailKey || details.storageKey),
+        originalUrl: getPresignedUrl(details.storageKey),
+      };
+    });
 }
 
 function buildRefinedDescriptor(
