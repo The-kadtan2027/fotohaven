@@ -39,13 +39,18 @@ Upload selected photos by ceremony, generate a share link, hand off to your phot
 - **Drag-and-drop upload** — browser uploads directly to storage (R2 or local phone disk)
 - **Shareable links** — token-based URLs with optional expiry date
 - **Password-protected links** — bcrypt-hashed album passwords with a client-side challenge screen
+- **Admin Dashboard** — JWT-protected dashboard showing global stats (total albums, photos, client selections) and detailed album cards with expiry badges and `firstViewedAt` statuses
 - **Photographer gallery** — browse by ceremony, lightbox preview, select individual photos
+- **Client photo selection** — clients star/select photos on the share page; selections persist across sessions and are visible to the photographer in the album manager
 - **Batch photo management** — select multiple photos to delete or download as a ZIP
+- **Advanced album management** — per-album upload compression defaults, duplicate review, admin-only blur tools, and progressive lightbox viewing
 - **Server-side ZIP streaming** — large albums download efficiently without crashing mobile browsers
 - **Fast thumbnail generation** — uploads are automatically downscaled for quick gallery viewing; original high-res photos are kept for ZIP downloads
 - **Per-photo comments** — photographer and client can annotate individual photos with notes
 - **Email notifications** — photographer receives an email on first gallery view (via Resend)
 - **Upload-back flow** — photographer can upload edited finals back into the album via share link; client downloads them in a separate "Delivered Finals" tab
+- **Guest face discovery** — guests can verify via OTP, scan once, and see likely photo matches ranked by confidence
+- **Face reprocessing reset** — photographer can clear stale face descriptors for an album and rebuild them with the latest browser-side pipeline
 
 ---
 
@@ -628,6 +633,29 @@ npm install --cpu=wasm32 sharp
 npm install @img/sharp-wasm32
 ```
 
+**Build warning: `face-api.js ... Can't resolve 'encoding'`**
+This comes from an optional `node-fetch` path inside `face-api.js` and is not needed for browser inference.
+The project now suppresses it via webpack alias/fallback in `next.config.mjs` (`encoding: false`, `fs: false` on client).
+
+**Build warning: `jose ... CompressionStream/DecompressionStream not supported in Edge Runtime`**
+This is a known Next.js static-analysis warning path with `jose` webapi modules.
+Current auth flow remains functional; treat as warning unless runtime auth endpoints fail.
+
+**Guest OTP not arriving during testing**
+If your Resend domain is not verified yet, enable temporary bypass in `.env.local`:
+```env
+GUEST_OTP_BYPASS="true"
+```
+Then restart:
+```bash
+pm2 restart fotohaven --update-env
+```
+In bypass mode:
+- OTP email sending is skipped
+- OTP validation is skipped in verify route
+- A guest session cookie is still created normally
+- Disable this (`false`) before production use
+
 **Port 3000 already in use**
 ```bash
 lsof -i :3000
@@ -644,6 +672,143 @@ pm2 start ecosystem.config.js
 ```bash
 npm run db:push   # applies any new columns / tables to local.db
 ```
+
+**Guest face discovery on Termux (sharp / models / processor)**
+
+Use this when setting up or after `git pull` on Android/Termux.
+
+```bash
+cd ~/fotohaven
+cp local.db "local.db.bak.$(date +%Y%m%d-%H%M%S)"
+
+pkg install -y x11-repo
+pkg install -y \
+  nodejs-lts python make clang pkg-config ndk-sysroot \
+  libc++ glib vips \
+  libcairo pango libpixman libjpeg-turbo libpng giflib librsvg freetype fontconfig \
+  libx11 libxrender xorgproto
+
+export android_ndk_path="$PREFIX"
+export GYP_DEFINES="android_ndk_path=$PREFIX"
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig"
+export CFLAGS="-I$PREFIX/include"
+export CXXFLAGS="-I$PREFIX/include"
+export LDFLAGS="-L$PREFIX/lib"
+
+npm install
+
+# On Termux, build sharp against global libvips.
+unset SHARP_IGNORE_GLOBAL_LIBVIPS
+unset npm_config_build_from_source
+npm config delete build-from-source 2>/dev/null || true
+rm -rf node_modules/sharp
+SHARP_FORCE_GLOBAL_LIBVIPS=1 npm install sharp --build-from-source
+
+node -e "const sharp=require('sharp'); console.log('sharp ok', sharp.versions)"
+npm run db:push
+npx tsc --noEmit
+pm2 restart fotohaven --update-env
+```
+
+Download all required face-api model files:
+
+```bash
+cd ~/fotohaven
+mkdir -p public/models
+
+curl -L -o public/models/ssd_mobilenetv1_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-weights_manifest.json
+curl -L -o public/models/ssd_mobilenetv1_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard1
+curl -L -o public/models/ssd_mobilenetv1_model-shard2 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard2
+
+curl -L -o public/models/face_landmark_68_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-weights_manifest.json
+curl -L -o public/models/face_landmark_68_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-shard1
+
+curl -L -o public/models/face_recognition_model-weights_manifest.json https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-weights_manifest.json
+curl -L -o public/models/face_recognition_model-shard1 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard1
+curl -L -o public/models/face_recognition_model-shard2 https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard2
+
+ls -lh public/models
+```
+
+If `npm run faces:process` logs `ENOENT` for old photos, those files are missing on disk. Reset processing only for files that exist and skip missing files:
+
+```bash
+cd ~/fotohaven
+node - <<'JS'
+const fs=require('fs');
+const path=require('path');
+const Database=require('better-sqlite3');
+const db=new Database('local.db');
+const base=process.env.LOCAL_UPLOAD_PATH || '/data/data/com.termux/files/home/storage/shared/fotohaven';
+const rows=db.prepare("SELECT id, storageKey FROM Photo WHERE isReturn=0").all();
+const set0=db.prepare("UPDATE Photo SET faceProcessed=0 WHERE id=?");
+const set1=db.prepare("UPDATE Photo SET faceProcessed=1 WHERE id=?");
+let existing=0, missing=0;
+for (const r of rows) {
+  const ok = fs.existsSync(path.join(base, r.storageKey));
+  (ok ? set0 : set1).run(r.id);
+  ok ? existing++ : missing++;
+}
+console.log({ existing, missing, base });
+JS
+
+npm run faces:process
+```
+
+To run background processing on a schedule without overlap, use `scripts/process-faces-safe.sh` with PM2 cron:
+
+```bash
+chmod +x ~/fotohaven/scripts/process-faces-safe.sh
+pm2 start ~/fotohaven/scripts/process-faces-safe.sh --name fotohaven-faces --cron "*/30 * * * *" --no-autorestart
+pm2 save
+```
+
+Face processor tuning switches (env vars):
+- `PROCESS_FACES_SOURCE=auto|thumbnail|original`
+  - `auto` (default): thumbnail first, fallback to original
+  - `thumbnail`: only thumbnail key
+  - `original`: only original key
+- `PROCESS_FACES_LIMIT=25` (default) — max photos per run
+
+Example:
+```bash
+PROCESS_FACES_SOURCE=thumbnail PROCESS_FACES_LIMIT=40 npm run faces:process
+```
+
+**Browser-side face descriptor extraction (new default path)**
+
+Use this validation flow after pull/redeploy to verify end-to-end browser processing:
+
+1. Start app and open any album manager page (`/albums/[albumId]`) on laptop/desktop browser.
+2. Open browser DevTools Console and confirm:
+   - `[FaceProcessor] Loading models from /models...`
+   - `[FaceProcessor] Models loaded.`
+3. Confirm floating indicator appears at bottom-right:
+   - `Processing faces (N/Total)`
+4. Keep tab open until at least 10 photos are processed. You should see per-photo logs:
+   - `[FaceProcessor] Processed <photoId>: <count> face(s)`
+5. Verify DB counters on server:
+```bash
+node - <<'JS'
+const Database=require('better-sqlite3');
+const db=new Database('local.db');
+const total=db.prepare("select count(*) as c from Photo where isReturn=0").get().c;
+const pending=db.prepare("select count(*) as c from Photo where isReturn=0 and faceProcessed=0").get().c;
+const faces=db.prepare("select count(*) as c from PhotoFace").get().c;
+console.log({ total, pending, faces });
+JS
+```
+6. Verify guest matching still works (`/share/[token]/guest`) with processed photos.
+
+Important implementation detail: face-api.js browser detection must receive `HTMLImageElement`/`HTMLCanvasElement`.
+`ImageBitmap` is not a valid net input. In `FaceProcessor`, always draw bitmap to a canvas and run detection on that canvas.
+It supports configuring `FACE_SCAN_SOURCE="original"` or `"thumbnail"` in `.env.local` to decide which photo quality to download for scanning. The default is `"original"` for maximum accuracy.
+
+If you see this error in console:
+- `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`
+
+Then hard refresh first. If it persists, confirm `src/app/albums/[albumId]/FaceProcessor.tsx` still does:
+- `createImageBitmap(blob)` -> draw to `document.createElement('canvas')` -> `detectAllFaces(canvas, ...)`
 
 ---
 
@@ -663,10 +828,20 @@ npm run dev
 **Useful dev commands:**
 ```bash
 npm run db:generate   # generate a new migration from schema changes
-npm run db:push       # apply schema to local.db directly (dev workflow)
+npm run db:push       # apply schema to local.db directly (back up production DB first on phone)
 npm run db:studio     # open Drizzle Studio GUI for DB browsing
 npm run lint
 ```
+
+Before running schema changes on your phone:
+```bash
+cd ~/fotohaven
+cp local.db "local.db.bak.$(date +%Y%m%d-%H%M%S)"
+npm run db:push
+```
+The Advanced Album Management migration is additive only. It adds:
+`Album.compressionQuality`, `Album.compressionFormat`, `Album.dedupThreshold`,
+`Photo.isBlurred`, and `Photo.imageHash`.
 
 > **Note on Vercel:** SQLite doesn't work on serverless. For Vercel deployment, switch to a Postgres provider (Neon, Supabase) and update `src/lib/db.ts` to use `drizzle-orm/postgres-js`.
 
@@ -678,8 +853,10 @@ npm run lint
 1. Dashboard → all your albums
 2. New Album → 3-step form: name + photographer → ceremonies → settings (expiry, password, notify email)
 3. Open album → drag photos into ceremony folder → upload
-4. Share Link → copy and send to photographer
-5. Receive email when photographer first opens the gallery
+4. Optionally save upload compression defaults and tune duplicate threshold in the album manager
+5. Review duplicates, use admin-only blur tools, and preview via progressive lightbox
+6. Share Link → copy and send to photographer
+7. Receive email when photographer first opens the gallery
 
 **Photographer (share link recipient)**
 1. Opens share link — no account needed
@@ -689,6 +866,7 @@ npm run lint
 5. Downloads ZIP — per ceremony, selected, or everything
 6. Uploads edited finals via **Upload Returns** dropzone at the bottom of the page
 7. Client sees finals appear in the **Delivered Finals** tab and can download them as a separate ZIP
+8. If guest face matching quality changes after an update, use **Reprocess Faces** in the album manager to rebuild descriptors for that album
 
 ---
 
@@ -709,6 +887,11 @@ npm run lint
 **`GET /api/albums`** — list all albums with counts
 
 **`GET /api/albums/:albumId`** — full album with photos and presigned URLs
+
+**`PATCH /api/albums/:albumId`** — save album defaults
+```json
+{ "compressionFormat": "webp", "compressionQuality": 80, "dedupThreshold": 10 }
+```
 
 **`DELETE /api/albums/:albumId`** — delete album and cascade all data
 
@@ -734,6 +917,18 @@ Creates a photo record with `isReturn: true`. Returns same presigned URL flow as
 **`POST /api/comments`** — add a comment
 ```json
 { "photoId": "uuid", "body": "Please crop tighter on the left", "author": "photographer" }
+```
+
+**`POST /api/albums/:albumId/reprocess-faces`** — clear saved face descriptors for an album and mark its original photos for reprocessing on the next album-manager visit
+
+Guest face discovery notes:
+- matching now uses Euclidean distance on `face-api.js` descriptors
+- current threshold is `0.5`
+- UI labels use `< 0.42` = `Strong match`, `0.42–0.5` = `Possible match`
+
+**`POST /api/photos/blur-batch`** — bulk toggle admin blur
+```json
+{ "photoIds": ["uuid-1", "uuid-2"], "isBlurred": true }
 ```
 
 ---

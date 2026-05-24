@@ -17,6 +17,12 @@ export interface Photo {
   ceremonyId: string;
   isReturn?: boolean;
   returnOf?: string | null;
+  isSelected?: boolean;
+  isBlurred?: boolean;
+  imageHash?: string | null;
+  faceProcessed?: boolean;
+  originalUrl?: string;
+  createdAt?: string;
 }
 
 export interface ReturnUploadPayload {
@@ -33,6 +39,9 @@ export interface Album {
   clientName: string;
   shareToken: string;
   expiresAt: string | null;
+  compressionQuality?: number;
+  compressionFormat?: "jpeg" | "webp" | "original";
+  dedupThreshold?: number;
   ceremonies: Ceremony[];
 }
 
@@ -68,3 +77,20 @@ export interface Comment {
   createdAt: string;
 }
 
+export interface Guest {
+  id: string;
+  albumId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  faceDescriptor?: string | null;
+  sessionToken?: string | null;
+  createdAt: string;
+}
+
+export interface PhotoFace {
+  id: string;
+  photoId: string;
+  descriptor: string;
+  boundingBox: string;
+}

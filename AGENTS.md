@@ -187,7 +187,7 @@ returnOf      String?                    // photoId of the original (optional li
 
 ## Task: Health dashboard UI
 
-**Status:** Not started  
+**Status:** Completed  
 **Scope:** A `/admin/health` page showing server status (only when running on Android).
 
 ### New page: `src/app/admin/health/page.tsx`
@@ -204,10 +204,10 @@ Returns JSON with system metrics. Uses Node.js `os` module and `fs.stat` for dis
 **Gate this behind `APP_SECRET`** — require `Authorization: Bearer {APP_SECRET}` header.
 
 ### Acceptance criteria
-- [ ] Page shows real-time stats (auto-refreshes every 30s)
-- [ ] Unauthenticated requests to `/api/admin/health` return 401
-- [ ] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
-- [ ] Works on ARM (no native modules)
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to `/api/admin/health` return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
 
 ---
 
@@ -446,6 +446,12 @@ None.
 - [x] `CLAUDE.md` reflects modern features: Tailscale, thumbnail generation with `sharp`, 30MB stream uploads.
 - [x] `npx tsc --noEmit` passes with zero errors.
 
+Implementation note:
+- The remaining unchecked bullets in this section were completed in code on this branch:
+- Duplicate grouping honors the configurable threshold.
+- Admin blur styling stays album-only.
+- Album and share lightboxes both use progressive thumbnail-to-full-resolution loading.
+
 ---
 
 ## Task: Server-Side ZIP Streaming
@@ -526,3 +532,1087 @@ None. Database cascade is correctly configured.
 - [x] Maximum photo upload size succeeds at safely capturing 100MB files sequentially.
 - [x] "Add Ceremony" drops a new functional folder into the album view.
 - [x] "Delete Ceremony" deletes all interior folder data off the disk, deletes the DB row, and reverts the UI safely.
+
+---
+
+## Task: Photographer login / logout
+
+**Status:** Completed  
+**Scope:** Add real authentication so only a registered photographer can access the admin dashboard (`/`, `/albums/*`). Public share links remain unauthenticated.
+
+### New dependency
+`jose` — Edge-compatible JWT library (works in Next.js middleware which runs on the Edge runtime).
+
+### New env vars (add to `.env.local`)
+```env
+JWT_SECRET=            # 32+ char random string (openssl rand -hex 32)
+ADMIN_USERNAME=        # e.g. "admin"
+ADMIN_PASSWORD=        # plain-text, only used by seed script to hash + insert
+```
+
+### Schema change (`src/lib/schema.ts`)
+New table — append after existing tables:
+```typescript
+export const photographers = sqliteTable('Photographer', {
+  id:           text('id').primaryKey(),
+  username:     text('username').notNull().unique(),
+  passwordHash: text('passwordHash').notNull(),
+  createdAt:    integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+After schema edit run: `npm run db:generate && npm run db:push`
+
+### New API routes
+
+#### `POST /api/auth/login` — `src/app/api/auth/login/route.ts`
+- Body: `{ username, password }`
+- Looks up `photographers` table by `username` (via Drizzle + `db.ts`)
+- Verifies password with `bcryptjs.compare()`
+- On success: creates a JWT (signed with `JWT_SECRET`, 7-day expiry, payload: `{ sub: photographer.id, username }`) using `jose`, sets it as an `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` cookie named `session`
+- Returns `200 { ok: true }`
+- On failure: returns `401 { error: "Invalid credentials" }`
+
+#### `POST /api/auth/logout` — `src/app/api/auth/logout/route.ts`
+- Clears the `session` cookie (set `maxAge=0`)
+- Returns `200 { ok: true }`
+
+#### `GET /api/auth/me` — `src/app/api/auth/me/route.ts`
+- Reads `session` cookie, verifies JWT with `jose`
+- Returns `200 { id, username }` if valid
+- Returns `401 { error: "Not authenticated" }` if missing/invalid
+
+### Middleware changes (`src/middleware.ts`)
+Extend the existing Edge middleware to:
+- Keep the existing `[API]` logging for `/api/*` routes
+- Guard browser routes: `/`, `/albums`, `/albums/*` — if no valid `session` cookie, redirect to `/login`
+- Guard API routes: `/api/albums`, `/api/albums/*`, `/api/upload`, `/api/upload/*`, `/api/photos`, `/api/photos/*`, `/api/ceremonies`, `/api/ceremonies/*` — if no valid `session` cookie, return `401 { error: "Unauthorized" }`
+- **Do NOT guard**: `/api/auth/*`, `/api/share/*`, `/api/comments/*`, `/api/files/*`, `/login`, `/share/*`
+- JWT verification uses `jose` (Edge-compatible) — **no** `better-sqlite3` or Node-only imports
+- Update `config.matcher` to cover both `/api/:path*` and the admin pages
+
+### New page: `src/app/login/page.tsx`
+- Simple username + password form styled in the existing FotoHaven aesthetic (Cormorant Garamond heading, DM Sans body, dark palette)
+- On submit: `POST /api/auth/login` with JSON body
+- On success (200): `router.push('/')`
+- On failure (401): show inline error message, allow retry
+- Show a subtle "FotoHaven" branding / logo
+
+### Seed script: `scripts/seed.ts`
+- Reads `ADMIN_USERNAME` and `ADMIN_PASSWORD` from `process.env` (loaded from `.env.local`)
+- Hashes the password with `bcryptjs`
+- Upserts one `Photographer` record into the database (insert if not exists, update hash if exists)
+- Wire up in `package.json` as: `"seed": "npx tsx scripts/seed.ts"`
+
+### Modified files summary
+| File | Change |
+|------|--------|
+| `src/lib/schema.ts` | Add `photographers` table |
+| `src/middleware.ts` | Add JWT verification + route guarding |
+| `package.json` | Add `jose` dep, add `"seed"` script |
+| `.env.example` (if it exists) | Add `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` |
+
+### New files summary
+| File | Purpose |
+|------|---------|
+| `src/app/api/auth/login/route.ts` | Login endpoint |
+| `src/app/api/auth/logout/route.ts` | Logout endpoint |
+| `src/app/api/auth/me/route.ts` | Session check endpoint |
+| `src/app/login/page.tsx` | Login UI page |
+| `scripts/seed.ts` | One-shot admin user seeder |
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes needed (already exports the Drizzle client)
+- `src/app/share/*` — share links remain public
+- `src/app/api/share/*` — share API remains public
+- `src/app/api/comments/*` — comments remain public (honour-system author field)
+
+### Acceptance criteria
+- [x] `jose` package is installed and used for JWT in middleware (Edge-compatible)
+- [x] `photographers` table exists in schema with `id`, `username`, `passwordHash`, `createdAt`
+- [x] `POST /api/auth/login` returns 200 + sets HttpOnly `session` cookie on valid credentials
+- [x] `POST /api/auth/login` returns 401 on invalid credentials
+- [x] `POST /api/auth/logout` clears the session cookie
+- [x] `GET /api/auth/me` returns photographer info when authenticated
+- [x] Unauthenticated browser request to `/` redirects to `/login`
+- [x] Unauthenticated browser request to `/albums/*` redirects to `/login`
+- [x] Unauthenticated API request to `/api/albums` returns 401
+- [x] Share links (`/share/*`, `/api/share/*`) work without any login
+- [x] Login page has proper FotoHaven styling (not a plain HTML form)
+- [x] `scripts/seed.ts` creates a photographer from `ADMIN_USERNAME` + `ADMIN_PASSWORD` env vars
+- [x] `npm run seed` is wired up in `package.json`
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Photo selection by client
+
+**Status:** Completed  
+**Scope:** Client can star/select individual photos on the share page. Selections persist in the database so the photographer can see "Client has selected N of M photos" in the album manager.
+
+### Schema change (`src/lib/schema.ts`)
+Add `isSelected` to the `photos` table:
+```typescript
+isSelected: integer('isSelected', { mode: 'boolean' }).notNull().default(false),
+```
+
+After schema edit run: `npm run db:generate && npm run db:push`
+
+### New API route
+
+#### `PATCH /api/photos/[photoId]` — `src/app/api/photos/[photoId]/route.ts`
+Add a `PATCH` handler to the existing file (which already has `DELETE`):
+- Body: `{ isSelected: boolean }`
+- Look up the photo by `photoId`. If not found, return `404`.
+- Update `photos.isSelected` for that record.
+- Return `200 { ok: true }`.
+- **No auth required** — called from the unauthenticated share page.
+
+### API changes (data mapping)
+
+#### `GET /api/albums/[albumId]/route.ts`
+- In the photo spread inside `albumWithUrls`, pass through `isSelected` from the DB row (it's already included via the Drizzle query spread — no extra query needed, just confirm it's not stripped).
+
+#### `GET /api/share/[token]/route.ts`
+- Same as above — `isSelected` is included in the Drizzle result and will be spread into the photo object automatically; no code change needed unless the field is explicitly omitted.
+
+### Types (`src/types/index.ts`)
+Add `isSelected` to the `Photo` interface:
+```typescript
+isSelected?: boolean;
+```
+
+### Share page UI (`src/app/share/[token]/page.tsx`)
+
+**Current state:** The page already has a `selectedPhotos: Set<string>` state and `toggleSelect()` function wired to the `GalleryPhoto` checkbox — but this is ephemeral (lost on refresh) and used only for download selection.
+
+**Changes needed:**
+1. Add `isSelected` to the local `Photo` interface (line ~14).
+2. On album load, initialise `selectedPhotos` from `photo.isSelected === true` across all ceremonies — so the set is pre-populated from the DB on mount.
+3. Extend `toggleSelect(photoId)` to also call `PATCH /api/photos/:id` with `{ isSelected: !prev.has(photoId) }` — fire-and-forget (optimistic update, log error if it fails).
+4. Add a live counter in the hero header — e.g. alongside the existing `"{totalPhotos} photos"` line, show `· Client selected: N` when `selectedPhotos.size > 0`. Alternatively, add a subtle sticky badge. Keep it unobtrusive.
+5. No changes to download logic — `downloadSelected()` already uses `selectedPhotos` which will now reflect persisted selections.
+
+### Album manager UI (`src/app/albums/[albumId]/page.tsx`)
+
+**Current state:** The album page shows originals count and Finals badge on ceremony tabs. The PhotoCard shows checkboxes for bulk-delete selection only.
+
+**Changes needed:**
+1. Add `isSelected` to the local `Photo` interface (line ~12).
+2. Add a "Client selected" summary line in the ceremony header area — e.g.: `"Client has selected {N} of {M} original photos."` — derived from `activeCeremonyData.photos.filter(p => !p.isReturn && p.isSelected).length`. Show only when N > 0.
+3. Add a small gold star `★` overlay (bottom-right corner of each photo card) when `photo.isSelected === true` in `PhotoCard`. This is read-only on the admin side — no click handler needed. Position it opposite the existing comment dot indicator (top-right) to avoid overlap.
+4. In the ceremony sidebar tab, optionally add a "S:N" micro-badge (like the FINALS badge) when any photo in that ceremony is selected.
+
+### Download route — no changes needed
+`POST /api/share/[token]/download` already accepts any `photoIds` array from the client. The client's persistent selection is just a pre-populated starting point for the existing download-selected flow. ✅ Confirmed: no change to the download route.
+
+### Modified files summary
+| File | Change |
+|------|--------|
+| `src/lib/schema.ts` | Add `isSelected` boolean field to `photos` table |
+| `src/app/api/photos/[photoId]/route.ts` | Add `PATCH` handler |
+| `src/app/api/albums/[albumId]/route.ts` | Confirm `isSelected` passes through (no-op if spread includes it) |
+| `src/app/api/share/[token]/route.ts` | Same confirmation |
+| `src/types/index.ts` | Add `isSelected?: boolean` to `Photo` |
+| `src/app/share/[token]/page.tsx` | Pre-populate selection from DB, call PATCH on toggle, show counter |
+| `src/app/albums/[albumId]/page.tsx` | "Client selected N of M" summary + star overlay on PhotoCard |
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/app/api/share/[token]/download/route.ts` — no changes
+- `src/app/api/photos/delete-batch/route.ts` — no changes
+
+### Acceptance criteria
+- [x] `isSelected` column exists in the `Photo` DB table (boolean, default false)
+- [x] `PATCH /api/photos/[photoId]` with `{ isSelected: true/false }` persists the value
+- [x] `PATCH /api/photos/[photoId]` returns 404 if the photo does not exist
+- [x] Share page checkboxes pre-populate from `photo.isSelected` on load (survives refresh)
+- [x] Clicking a checkbox on the share page calls PATCH optimistically (no spinner, instant UI update)
+- [x] Share page shows a live "Selected: N" counter when any photos are selected
+- [x] Album manager shows "Client has selected N of M original photos" when N > 0
+- [x] Album manager `PhotoCard` shows a gold star overlay on client-selected photos
+- [x] Download-selected on the share page correctly uses the persisted selection as its default
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Admin dashboard
+
+**Status:** Completed  
+**Scope:** A UI-only upgrade to the existing album list (`src/app/page.tsx`). No new API routes. Incorporates auth state and client selection summaries.
+
+### Architectural approach (`src/app/page.tsx`)
+- Since the spec mandates "All DB access indirectly via existing API routes, not direct DB calls from page components", and fetching intra-app API routes from Server Components requires passing session cookies and resolving absolute URLs (which is brittle), `page.tsx` will remain a `"use client"` component.
+- This allows natural interaction with the `GET /api/albums` and `GET /api/auth/me` protected routes, and instant UI updates after deletions.
+
+### Dependencies
+- **Auth (Feature 1)**: The page will fetch `GET /api/auth/me` on mount. If it returns 401, redirect to `/login`.
+- **Selections (Feature 4)**: The page will calculate total selections by summing `isSelected === true` across all photos in all ceremonies in the `GET /api/albums` response.
+
+### UI changes (`src/app/page.tsx`)
+
+#### Header
+- Show photographer's username retrieved from `/api/auth/me`.
+- Add a **Logout** button that calls `POST /api/auth/logout` and redirects to `/login`.
+- Maintain existing "FotoHaven" branding and "New Album" CTA.
+
+#### Stats Row (New)
+- Top-level summary cards below the hero text:
+  - **Total Albums**: `albums.length`
+  - **Total Photos**: Sum of all photo counts
+  - **Client Selections**: Sum of all `isSelected` photos across all albums.
+
+#### Album Cards Update
+Enhance the existing card map (`albums.map`) to include:
+- **Title and Client Name** (existing)
+- **Ceremony Count and Photo Count** (existing)
+- **First Viewed Status**:
+  - If `firstViewedAt` exists, show "Viewed on [date]"
+  - Else show "Not yet viewed".
+- **Expiry Badge**:
+  - Green if >7 days remaining until `expiresAt`.
+  - Amber if ≤7 days remaining.
+  - Red if expired (or expiring today).
+- **Selection Summary**: "Client selected N of M photos" (derive N from `isSelected` photos, M from non-`isReturn` photos).
+- **Action Buttons**:
+  - **Copy Link**: Existing clipboard functionality.
+  - **Manage**: Links to `/albums/[albumId]`.
+  - **Delete**: Existing prompt and DELETE call.
+
+#### Empty State
+- Show a friendly "No albums yet" prompt (keep existing `EmptyState` component or polish it).
+
+### Acceptance criteria
+- [x] Dashboard is restricted to authenticated photographers (redirects to `/login` if `/api/auth/me` fails).
+- [x] Header shows the photographer's username and a working Logout button.
+- [x] Stats row correctly aggregates total albums, total photos, and total `isSelected` client selections.
+- [x] Album cards display `firstViewedAt` status cleanly.
+- [x] Album cards display color-coded expiry badges based on days remaining.
+- [x] Album cards show "Client selected N of M photos" accurately deriving from the API payload.
+- [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Guest face-based photo discovery
+
+**Status:** Completed  
+**Scope:** Guest verifies via OTP, consents to face scan, and discovers matched photos from a share album.
+
+### Schema changes (`src/lib/schema.ts`)
+Add to `Photo`:
+```typescript
+faceProcessed: integer('faceProcessed', { mode: 'boolean' }).notNull().default(false),
+```
+
+New table:
+```typescript
+export const guests = sqliteTable('Guest', {
+  id: text('id').primaryKey(),
+  albumId: text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  faceDescriptor: text('faceDescriptor'),
+  sessionToken: text('sessionToken'),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+New table:
+```typescript
+export const photoFaces = sqliteTable('PhotoFace', {
+  id: text('id').primaryKey(),
+  photoId: text('photoId').notNull().references(() => photos.id, { onDelete: 'cascade' }),
+  descriptor: text('descriptor').notNull(),
+  boundingBox: text('boundingBox').notNull(),
+});
+```
+
+OTP storage table:
+```typescript
+export const guestOtps = sqliteTable('GuestOtp', {
+  id: text('id').primaryKey(),
+  albumId: text('albumId').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  codeHash: text('codeHash').notNull(),
+  expiresAt: integer('expiresAt', { mode: 'timestamp_ms' }).notNull(),
+  consumedAt: integer('consumedAt', { mode: 'timestamp_ms' }),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
+```
+
+After schema edits run:
+`npm run db:generate && npm run db:push`
+
+### API routes
+- `POST /api/guest/request-otp` — send 6-digit OTP via Resend and persist hashed OTP.
+- `POST /api/guest/verify-otp` — validate OTP, create guest session, set signed guest cookie for 24h.
+- `POST /api/guest/enroll-face` — accept 128-float descriptor from browser and store on guest.
+- `GET /api/guest/my-photos` — Euclidean-distance match against `photoFaces` in same album, threshold `< 0.5`.
+
+### Background extraction
+New script: `scripts/process-faces.ts`
+- Reads `Photo.faceProcessed = false`.
+- Uses `face-api.js + canvas` in Node.
+- Writes `PhotoFace` rows and sets `faceProcessed = true`.
+- Runs manually (`npm run faces:process`) or via PM2 cron.
+- Never runs in upload request lifecycle.
+
+### Guest page
+New page: `src/app/share/[token]/guest/page.tsx`
+- OTP request/verify UI.
+- Consent screen before camera scan.
+- Skippable fallback: "Browse all photos instead".
+- Browser face scan via `face-api.js`.
+- Display matched photos grid.
+- ZIP download via existing `/api/share/[token]/download` route.
+
+### Model files
+- Keep models in `public/models/`:
+  - `ssd_mobilenetv1`
+  - `face_landmark_68`
+  - `face_recognition`
+- Do not bundle model files via webpack.
+
+### Data handling
+- Store descriptor as:
+  `JSON.stringify(Array.from(descriptor))`
+- Read descriptor as:
+  `Float32Array.from(JSON.parse(descriptorJson))`
+- All DB access through `src/lib/db.ts`.
+
+### Acceptance criteria
+- [x] `guests`, `photoFaces`, and `guestOtps` tables exist; `photos.faceProcessed` exists with default `false`
+- [x] `POST /api/guest/request-otp` sends OTP and stores only hashed OTP
+- [x] `POST /api/guest/verify-otp` validates OTP and sets signed `guest_session` cookie (24h TTL)
+- [x] `POST /api/guest/enroll-face` stores 128-float descriptor JSON on guest record
+- [x] `scripts/process-faces.ts` extracts faces and writes descriptors + bounding boxes
+- [x] Background face extraction is non-blocking and not part of upload requests
+- [x] `GET /api/guest/my-photos` returns photo IDs by Euclidean distance threshold `0.5`
+- [x] Guest page supports OTP → consent → scan → matched grid flow
+- [x] Consent screen explicitly allows skip with "Browse all photos instead"
+- [x] Guest can download matched photos as ZIP through existing download route
+- [x] Models are loaded from `public/models/` and not bundled
+- [x] `npm run db:generate && npm run db:push` succeeds
+- [x] `npx tsc --noEmit` passes with zero errors
+
+
+## Task: Browser-side face descriptor extraction (Phase 1 of face architecture refactor)
+
+**Status:** Completed
+**Scope:** Move face detection inference from the phone server to the photographer's
+laptop browser. The phone stores and matches descriptors only — no neural network
+inference ever runs on the Android device.
+
+### Architecture
+- face-api.js runs in the album manager browser page (photographer's laptop)
+- A background React worker processes unprocessed photos silently after page load
+- Descriptors (128 floats per face) are POSTed to a new API endpoint on the phone
+- The phone stores them in the existing PhotoFace table and marks faceProcessed=true
+- Guest matching (Euclidean distance) remains server-side — pure arithmetic, no TF
+
+### New files
+- `src/app/albums/[albumId]/FaceProcessor.tsx` — Client Component, background worker
+  - Loads face-api.js models from /public/models/ once
+  - Processes unprocessed photos one at a time using fetch + canvas in browser
+  - Shows dismissible progress indicator: "Processing faces (47/200)"
+  - POSTs descriptors to /api/photos/[photoId]/faces on completion of each photo
+  - Skips photos that already have faceProcessed=true
+
+### New API route
+- `POST /api/photos/[photoId]/faces`
+  - Auth: requires valid photographer session (JWT cookie)
+  - Body: `{ faces: Array<{ descriptor: number[], boundingBox: { x, y, width, height } }> }`
+  - Deletes existing PhotoFace rows for this photoId (idempotent)
+  - Inserts new PhotoFace rows
+  - Sets photo.faceProcessed = true
+  - Returns: `{ saved: number }`
+
+### Modified files
+- `src/app/albums/[albumId]/page.tsx`
+  - Import and render <FaceProcessor> passing photos with faceProcessed=false
+  - Pass API-resolved photo URLs so FaceProcessor can fetch browser-accessible image data
+
+### Existing files — DO NOT touch yet (cleanup phase comes after validation)
+- `scripts/process-faces.ts` — keep, disable via PM2 only
+- `scripts/process-faces-safe.sh` — keep
+- `@napi-rs/canvas` — keep in package.json for now
+
+### Validation criteria before cleanup
+- [x] FaceProcessor loads models successfully in browser (check console, no 404s)
+- [x] At least 10 photos process successfully end-to-end in browser
+- [x] PhotoFace rows appear in DB after browser processing
+- [x] faceProcessed = true set correctly on processed photos
+- [x] Guest match route returns correct photos using browser-generated descriptors
+- [x] Processing does not block album page UI (runs in background)
+- [x] Progress indicator shows and is dismissible
+
+### Critical implementation note (do not regress)
+- Browser `face-api.js` does **not** accept `ImageBitmap` directly as net input.
+- Required flow in `FaceProcessor`:
+  - fetch photo URL -> blob -> `createImageBitmap(blob)`
+  - draw bitmap onto `HTMLCanvasElement`
+  - call `detectAllFaces(canvas, ...)`
+- If this is violated, runtime error appears:
+  - `toNetInput - expected media to be of type HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | tf.Tensor3D`
+
+### Cleanup phase (completed)
+- [x] Archived `scripts/process-faces.ts` → `scripts/archive/process-faces.ts`
+- [x] Archived `scripts/process-faces-safe.sh` → `scripts/archive/process-faces-safe.sh`
+- [x] Removed PM2 cron job `fotohaven-faces` (not present in final ecosystem.config.js)
+- [x] Uninstalled `@napi-rs/canvas`, `@tensorflow/tfjs`, `@tensorflow/tfjs-backend-wasm`, `canvas`
+- [x] `face-api.js` retained — still required for browser-side `FaceProcessor.tsx`
+- [x] Updated CLAUDE.md and README.md
+- [x] Archive README added at `scripts/archive/README.md`
+
+### Acceptance criteria
+- [x] Photographer opens album page on any laptop/desktop browser
+- [x] All unprocessed photos get descriptors extracted automatically in background
+- [x] Phone CPU never runs neural network inference
+- [x] Guest face matching works correctly using browser-generated descriptors
+- [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Improve face matching accuracy & performance
+
+**Status:** Completed  
+**Scope:** Four targeted improvements to the guest face matching pipeline. No schema changes, no new packages.
+
+### Problem analysis
+- Guest enrollment captured a single selfie frame — fragile against angle/lighting variation
+- Match threshold `0.5` was too permissive for large crowds (Indian weddings)
+- API returned bare `photoIds` with no confidence indication
+- Match query used 3 sequential DB queries instead of a join
+
+### Changes
+
+#### Change 1 — Multi-sample guest enrollment
+- `src/app/share/[token]/guest/page.tsx` — `scanAndMatch()` now captures **3 frames** at 500ms intervals, extracts a descriptor from each, and averages them before enrolling
+- `src/lib/face-math.ts` — Added `averageDescriptors(Float32Array[])` helper
+- Requires at least 2 of 3 successful detections; shows per-sample status text
+- Status text shows "Capturing sample 1 of 3 — hold still..."
+
+#### Change 2 — Finalize distance metric and threshold
+- `src/app/api/guest/my-photos/route.ts` now uses Euclidean distance with `DISTANCE_THRESHOLD = 0.5`
+- `face-api.js` descriptors are conventionally compared with Euclidean distance, not cosine distance
+- The previous cosine matcher was too permissive and produced huge false-positive result sets
+
+#### Change 3 — Return scored results
+- `GET /api/guest/my-photos` now returns `{ photos: [{ photoId, score }] }` sorted best-first (lowest distance = strongest match)
+- Guest page shows confidence badges: green "Strong match" (score < 0.42) or amber "Possible match" (score 0.42–0.5)
+- Results are sorted best-first so most confident matches appear at top of grid
+
+#### Change 4 — Single-join DB query
+- Replaced 3 sequential queries (ceremonies → photos → photoFaces) with a single `innerJoin` query: `photoFaces → photos → ceremonies WHERE albumId = X AND isReturn = false`
+- Eliminates `inArray(ceremonyIds)` and `inArray(photoIds)` intermediate arrays
+
+### Modified files
+| File | Change |
+|------|--------|
+| `src/lib/face-math.ts` | Added `averageDescriptors()` helper |
+| `src/app/api/guest/my-photos/route.ts` | Euclidean distance matcher, threshold `0.5`, single join query, scored response |
+| `src/app/share/[token]/guest/page.tsx` | Multi-frame capture, MatchedPhoto type, confidence badges |
+
+### Files NOT touched
+- `src/lib/schema.ts` — no schema changes
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/app/api/guest/enroll-face/route.ts` — receives same `number[]` descriptor format
+- `src/app/albums/[albumId]/FaceProcessor.tsx` — photo indexing unchanged
+
+### Acceptance criteria
+- [x] Guest enrollment captures 3 frames and averages descriptors (requires ≥2 successful detections)
+- [x] Guest matching uses Euclidean distance with threshold `0.5`
+- [x] `GET /api/guest/my-photos` returns `{ photos: [{ photoId, score }] }` sorted best-first
+- [x] Match results show green "Strong match" (< 0.42) or amber "Possible match" (0.42–0.5) badges
+- [x] DB query uses a single join instead of 3 sequential queries
+- [x] `averageDescriptors()` correctly averages N Float32Array descriptors
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Returning guest skip-scan flow
+
+**Status:** Completed  
+**Scope:** When a guest logs back in with the same email for the same album and already has a saved face descriptor, skip the consent/scan step and take them straight to the matched-photo discovery view. Also show the guest's name on the discovery page and add a button there to rescan their face if they want to refresh their matches.
+
+### Schema change
+None. Reuse existing `Guest.name`, `Guest.email`, `Guest.faceDescriptor`, and `Guest.sessionToken`.
+
+### API changes
+- `POST /api/guest/verify-otp` — `src/app/api/guest/verify-otp/route.ts`
+  - Continue validating OTP and issuing the guest session cookie as today.
+  - Include `hasFaceDescriptor: boolean` in the success JSON so the client knows whether this guest already completed a face scan for this album/email.
+  - Include the resolved guest `name` in the success JSON so the UI can render a greeting immediately.
+
+- `GET /api/guest/my-photos` — `src/app/api/guest/my-photos/route.ts`
+  - Continue returning matched photos as today.
+  - Also return minimal guest metadata needed by the client for the discovery view, specifically the guest `name`.
+
+### UI changes
+- `src/app/share/[token]/guest/page.tsx`
+  - After successful OTP verification:
+    - if `hasFaceDescriptor === true`, skip the consent and scan steps and go directly to the matched-photo discovery results flow by calling the existing matched-photos loader.
+    - if `hasFaceDescriptor === false`, keep the current consent -> scan flow unchanged.
+  - Show the guest name in the discovery/results view, e.g. `Welcome back, {name}` or equivalent.
+  - Add a `Rescan Face` button inside the discovery/results view:
+    - returns the guest to the scan flow
+    - allows them to capture a new face profile
+    - after rescan, refreshes matched photos using the new descriptor
+  - Do not require the guest to re-enter OTP just to rescan once already authenticated in the same session.
+
+### Modified files
+- `AGENTS.md` — this task spec
+- `src/app/api/guest/verify-otp/route.ts`
+- `src/app/api/guest/my-photos/route.ts`
+- `src/app/share/[token]/guest/page.tsx`
+
+### Acceptance criteria
+- [x] Guest logs in again with the same email for the same album and, if `Guest.faceDescriptor` already exists, does not see the consent/scan step
+- [x] Returning guest lands directly on the matched-photo discovery view after OTP verification
+- [x] Discovery view shows the guest name
+- [x] Discovery view includes a working `Rescan Face` action
+- [x] Rescanning updates the stored guest face descriptor and refreshes matched photos
+- [x] First-time guests without a saved face descriptor still follow the current OTP -> consent -> scan -> results flow
+- [x] No schema changes are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Guest face-photo upload enrollment
+
+**Status:** Completed
+**Scope:** Let a guest upload a face photo from their device as an alternative to the live selfie scan on the guest discovery flow. This keeps the existing offline face-matching pipeline, but allows the enrollment descriptor to come from a selected image when that better reflects the person in the album.
+
+### Schema change
+None.
+
+### Reuse existing data model
+- Continue storing the final 128-float descriptor in `guests.faceDescriptor`.
+- Do not add file uploads or blob storage for the uploaded face image.
+- Do not touch `src/lib/storage.ts`.
+
+### API changes
+
+#### `POST /api/guest/enroll-face` - `src/app/api/guest/enroll-face/route.ts`
+- Keep the route authenticated by `guest_session` exactly as today.
+- Continue accepting `{ descriptor }`.
+- No new persistence fields are required.
+- Validation should stay strict: descriptor must be an array of 128 numbers.
+
+### UI changes
+
+#### `src/app/share/[token]/guest/page.tsx`
+- Keep the existing OTP -> consent -> scan/results flow intact.
+- On the scan step, add a second path: `Upload a face photo instead`.
+- Add a file input that accepts images only.
+- When a guest selects a photo:
+  - load it in the browser
+  - draw it to a canvas if needed
+  - run the same `face-api.js` detection pipeline used for live enrollment (`detectSingleFace(...).withFaceLandmarks().withFaceDescriptor()`)
+  - if exactly one usable face is found, enroll that descriptor through the existing `/api/guest/enroll-face` route
+  - then load matched photos using the existing selfie-source discovery flow
+- Keep the live camera scan available as the primary option.
+- Add a short explanation that uploaded-photo enrollment can work better when the person looks different in current selfie vs wedding/event photos.
+- If no face is detected in the uploaded image, show a clear inline error and let the guest retry.
+- If multiple faces are detected in the uploaded image, reject it with a clear inline error asking for a photo with only one visible face.
+- `Rescan Face` in the results view should return the guest to a screen where they can again choose either:
+  - live camera scan
+  - uploaded face photo
+
+### Constraints
+- No new npm packages.
+- All face detection/extraction remains browser-side.
+- No server-side image processing.
+- No schema changes.
+- Do not change the refined-match flow; it should continue to work on top of the new enrollment method.
+
+### Acceptance criteria
+- [x] Guest discovery page offers an `upload face photo` option alongside live camera scan
+- [x] Guest can choose an image from their device and generate an enrollment descriptor fully in the browser
+- [x] Successful uploaded-photo enrollment persists via the existing `Guest.faceDescriptor` field
+- [x] Uploaded-photo enrollment loads matched photos through the current discovery flow without regression
+- [x] Uploaded images with no detectable face show a clear retryable error
+- [x] Uploaded images with multiple faces are rejected with a clear retryable error
+- [x] Returning to `Rescan Face` still allows either camera scan or uploaded-photo enrollment
+- [x] No schema changes or new packages are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Advanced Album Management (Duplicates, Blur, Compression, Lightbox)
+
+**Status:** Completed
+**Scope:** Provide album managers tools in the album view to: visually detect duplicates via perceptual hashing (dHash), blur selected photos (admin-only), control upload compression format and quality, and view photos in a full lightbox with progressive loading.
+
+### Design decisions (confirmed by user)
+1. **dHash threshold** — configurable per-album setting (default: 10, range 1–20)
+2. **Compression format** — user selects between JPEG and WebP. WebP is preferred for future scalability (smaller at same quality, native browser support); JPEG kept for compatibility. Both use the Canvas API.
+3. **Blur on share page** — NOT applied. Blur is an admin-only visual tool. Share page shows all photos normally.
+
+### Schema changes (`src/lib/schema.ts`)
+Add to `albums` table:
+```typescript
+compressionQuality:  integer('compressionQuality').notNull().default(80),   // 1–100
+compressionFormat:   text('compressionFormat').notNull().default('webp'),   // 'jpeg' | 'webp'
+dedupThreshold:      integer('dedupThreshold').notNull().default(10),       // dHash Hamming distance 1–20
+```
+Add to `photos` table:
+```typescript
+isBlurred:   integer('isBlurred', { mode: 'boolean' }).notNull().default(false),
+imageHash:   text('imageHash'),   // 64-bit dHash as 16-char hex, computed client-side
+```
+*(After schema edit, must run: `npm run db:generate && npm run db:push`)*
+
+### New API routes
+
+#### `PATCH /api/albums/[albumId]` — `src/app/api/albums/[albumId]/route.ts`
+- Add a `PATCH` handler to the existing file (has `GET` and `DELETE`).
+- Accepts `{ compressionQuality?, compressionFormat?, dedupThreshold? }` in body.
+- Updates only the provided fields on the album row.
+- Returns `200 { ok: true }`.
+- Auth: guarded by middleware.
+
+#### `POST /api/photos/blur-batch` — `src/app/api/photos/blur-batch/route.ts`
+- Body: `{ photoIds: string[], isBlurred: boolean }`.
+- Bulk-updates `photos.isBlurred` for all matching IDs in a single query.
+- Returns `200 { ok: true, updatedCount: N }`.
+
+#### Extend `PATCH /api/photos/[photoId]` — `src/app/api/photos/[photoId]/route.ts`
+- Existing handler accepts `{ isSelected }`. Extend to also accept `{ imageHash }`.
+- When `imageHash` is provided in the body, update `photos.imageHash` for that photo.
+- This lets the browser persist computed perceptual hashes after scanning.
+
+### UI changes (`src/app/albums/[albumId]/page.tsx`)
+
+#### A. Upload Settings Panel (Compression)
+- Below the drag-and-drop zone, add a collapsible "⚙ Upload Settings" section.
+- Contains:
+  - **Format selector**: radio/toggle between `JPEG` and `WebP` (default WebP).
+  - **Quality slider**: 10–100 (default 80), labelled "Quality: N%".
+  - "Save as album default" button → calls `PATCH /api/albums/[albumId]`.
+- In `onDrop`: before queueing each file, run client-side compression:
+  ```
+  canvas.drawImage(img) → canvas.toBlob(blob, 'image/webp', quality/100)
+  ```
+  The compressed blob replaces the original file in the upload queue; filename is preserved with the correct extension.
+
+#### B. Perceptual Duplicate Detection
+- Add a "🔍 Find Duplicates" button in the ceremony header area.
+- On click, for each photo in the active ceremony:
+  1. Load `photo.url` (thumbnail) into an `<img>` element.
+  2. Draw to an offscreen 9×8 Canvas in grayscale.
+  3. Compute dHash: compare each adjacent pixel pair across rows → 64-bit integer → 16-char hex.
+  4. If `photo.imageHash` is already stored (from DB), use it; skip re-computation.
+  5. If newly computed, persist via `PATCH /api/photos/:id` with `{ imageHash }`.
+- Group photos whose hashes are within Hamming distance ≤ `album.dedupThreshold`.
+- Show a results modal listing each duplicate group with thumbnails.
+- "Select All Duplicates" button: for each group, keeps the oldest photo (by `createdAt`) and adds the rest to `selectedPhotos`.
+- `dedupThreshold` is shown as a configurable slider (1–20) in the same panel; changes auto-filter results.
+
+#### C. Blur Toggle
+- In the floating selection action bar (shown when ≥1 photo selected), add:
+  - "🔒 Blur Selected" button → calls `POST /api/photos/blur-batch` with `{ photoIds, isBlurred: true }`.
+  - "🔓 Unblur Selected" button → same with `isBlurred: false`.
+- After API call, update local album state to reflect new `isBlurred` value.
+- `PhotoCard` applies `filter: blur(12px) saturate(0)` on the `<img>` when `isBlurred` is true.
+- A small 🔒 badge appears top-left on blurred PhotoCards (alongside or replacing the checkbox when not in selection mode).
+- Add `isBlurred` to the local `Photo` interface.
+
+#### D. Lightbox Viewer (NEW — currently missing on album page)
+- Clicking the photo image area (not the checkbox, not delete) opens a full-screen lightbox.
+- Lightbox shows:
+  - Full-resolution image with progressive loading: render `photo.url` (thumbnail) blurred as placeholder, overlay the `originalUrl` (full-res) which fades in when loaded.
+  - Left / right navigation arrows.
+  - Keyboard: ArrowLeft, ArrowRight, Escape.
+  - Close button (top-right ×).
+  - Photo name and index counter (e.g. "3 / 47").
+  - "Select" toggle button in the lightbox so photographer can select/deselect without closing.
+
+### UI changes (`src/app/share/[token]/page.tsx`)
+- **Blur: NO changes.** Share page renders photos normally regardless of `isBlurred`. Blur is admin-only.
+- **Progressive lightbox loading**: Apply the same progressive-load technique to the existing share page lightbox:
+  - Show `photo.url` (thumbnail) as a blurred background placeholder immediately.
+  - Overlay a second `<img>` loading `photo.originalUrl`; fade it in on `onLoad`.
+  - This eliminates the blank/slow wait when opening large originals.
+
+### Files NOT touched
+- `src/lib/storage.ts` — no file I/O
+- `src/lib/db.ts` — no changes
+- `src/middleware.ts` — no changes (new routes fall under already-guarded `/api/photos/*` and `/api/albums/*`)
+
+### Acceptance criteria
+- [x] Schema updated: `albums` gets `compressionQuality`, `compressionFormat`, `dedupThreshold`; `photos` gets `isBlurred`, `imageHash`.
+- [x] `PATCH /api/albums/[albumId]` persists compression + dedup settings.
+- [x] `POST /api/photos/blur-batch` bulk-toggles `isBlurred` in DB.
+- [x] `PATCH /api/photos/[photoId]` accepts and persists `imageHash`.
+- [x] dHash algorithm computes a stable 16-char hex fingerprint for any image.
+- [x] "Find Duplicates" groups photos by Hamming distance ≤ configurable threshold (default 10).
+- [x] Duplicate threshold slider (1–20) filters results live; default saved to album.
+- [x] Compression Format selector (JPEG / WebP) and Quality slider work before upload.
+- [x] "Save as album default" persists compression settings to DB.
+- [x] Blurred photos show `blur(12px) saturate(0)` + 🔒 badge in album manager.
+- [x] Share page is NOT affected by `isBlurred` — photos render normally.
+- [x] Album manager has a working lightbox with progressive thumbnail→full-res loading.
+- [x] Share page lightbox uses progressive loading (thumbnail placeholder → full-res fade).
+- [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Parallel Browser Compression Controls
+
+**Status:** Completed
+**Scope:** Speed up upload preparation on the photographer's browser by allowing bounded parallel image compression, expose a configurable concurrency control in the album upload settings, and add console timing logs for each prepared file.
+
+### Schema change
+None.
+
+### Modified files
+
+#### `src/app/albums/[albumId]/page.tsx`
+- Add a local `compressionConcurrency` setting for browser-side preparation.
+- Update `onDrop` to prepare files with bounded parallelism while preserving queue order.
+- Add console logs for compression start/end, original size, output size, and elapsed milliseconds.
+- Add a small UI control in Upload Settings to choose concurrency (recommended default: `2`).
+- Make it explicit in the UI that concurrency is a browser-only setting and is not saved as an album default.
+
+#### `src/lib/image-utils.ts`
+- No algorithm rewrite required.
+- Continue using `compressImageFile()` as the single-file primitive while allowing the album page to orchestrate parallel execution.
+
+### Implementation plan
+1. Keep compression browser-side; do not move work onto the Android server.
+2. Introduce bounded parallel processing with a small configurable cap.
+3. Preserve upload queue ordering so prepared files still appear in the same order as selected files.
+4. Add concise console logs to help diagnose slow or failed preparation runs from the browser.
+5. Verify with `npx tsc --noEmit`.
+
+### Acceptance criteria
+- [x] Upload preparation can run with configurable parallel compression in the browser.
+- [x] Default concurrency is a safe low number (`2`).
+- [x] Prepared files preserve the same order as the selected input files.
+- [x] Browser console logs show per-file compression timing and size information.
+- [x] The setting works with `original`, `jpeg`, and `webp` modes.
+- [x] No schema changes are introduced.
+- [x] `npx tsc --noEmit` passes with zero errors.
+
+---
+
+## Task: Face Reprocessing Reset
+
+**Status:** Completed
+**Scope:** Give the photographer a one-click way to clear stale face descriptors for an album and trigger browser-side reprocessing using the latest matching pipeline.
+
+### Schema change
+None.
+
+### New API route
+- `POST /api/albums/[albumId]/reprocess-faces` — `src/app/api/albums/[albumId]/reprocess-faces/route.ts`
+  - Auth: guarded by middleware under `/api/albums/*`
+  - Finds all original photos in the album
+  - Deletes their `PhotoFace` rows
+  - Sets `Photo.faceProcessed = false`
+  - Returns `{ resetCount }`
+
+### UI changes
+- `src/app/albums/[albumId]/page.tsx`
+  - Add a `Reprocess Faces` button in the ceremony action row
+  - Confirm before clearing descriptors
+  - Refresh album data after reset so `FaceProcessor` automatically resumes
+
+### Documentation changes
+- `CLAUDE.md`
+  - Document the new reset route and the tighter face-match threshold
+  - Clarify that album reprocessing is required after major descriptor-pipeline improvements
+- `README.md`
+  - Document the reprocess flow for operators using guest face discovery
+
+### Acceptance criteria
+- [x] Photographer can reset face processing for an album from the album manager
+- [x] Reset deletes old `PhotoFace` rows and marks album photos `faceProcessed = false`
+- [x] Browser-side `FaceProcessor` resumes automatically after refresh
+- [x] No schema changes are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+
+
+## Task: Configurable Face Matching Calibration
+
+**Status:** Completed  
+**Scope:** Reduce false-positive guest face matches, especially in child-heavy albums, by centralizing face-discovery thresholds and quality gates into one shared config with safe defaults and env overrides.
+
+### Schema change
+None.
+
+### New file
+- `src/lib/face-config.ts`
+  - Exports shared defaults + `NEXT_PUBLIC_FACE_*` env overrides for matching, enrollment, and indexing.
+
+### Modified files
+- `src/app/api/guest/my-photos/route.ts`
+  - Uses shared match threshold and max-results cap instead of hardcoded values.
+- `src/app/albums/[albumId]/FaceProcessor.tsx`
+  - Uses shared detection confidence and minimum face box size before persisting descriptors.
+- `src/app/share/[token]/guest/page.tsx`
+  - Uses shared enrollment sample/min-success settings and shared strong-match threshold for result badges.
+- `.env.example`
+  - Documents the configurable face-discovery env vars.
+- `CLAUDE.md`
+  - Documents the centralized face-config defaults and reprocessing guidance.
+- `AGENTS.md`
+  - This task spec.
+
+### Configurable values
+- `NEXT_PUBLIC_FACE_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_POSSIBLE_MATCH_THRESHOLD`
+- `NEXT_PUBLIC_FACE_ENROLLMENT_SAMPLES`
+- `NEXT_PUBLIC_FACE_ENROLLMENT_MIN_SUCCESS`
+- `NEXT_PUBLIC_FACE_DETECTION_MIN_CONFIDENCE`
+- `NEXT_PUBLIC_FACE_MIN_BOX_SIZE`
+- `NEXT_PUBLIC_FACE_MAX_RESULTS`
+
+### Acceptance criteria
+- [x] Face-discovery thresholds and quality gates are centralized in one shared config module
+- [x] Guest matching no longer hardcodes the distance threshold in the API route
+- [x] Guest matching caps returned results via configurable max-results control
+- [x] Face indexing filters out weak/tiny detections using configurable quality gates
+- [x] Guest enrollment uses configurable sample count and minimum-success requirements
+- [x] `.env.example` documents the new tuning knobs
+- [x] No schema changes are introduced
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Hybrid Offline Face Discovery Refinement
+
+**Status:** Completed  
+**Scope:** Improve guest face discovery accuracy without external services by keeping the current selfie scan as a first pass, then letting the guest confirm a few correct photos so FotoHaven can re-run matching using in-album face descriptors.
+
+### Schema change
+None required for the first implementation pass. Reuse existing `PhotoFace.descriptor` data and only add metadata if later testing shows it is necessary.
+
+### Design goals
+1. Stay fully offline/on-device
+2. Improve results for children, makeup-heavy faces, and crowded wedding albums
+3. Avoid relying on one global selfie threshold as the final authority
+4. Preserve the current guest flow as the first-pass entrypoint
+
+### New API behavior
+- Add a refined-discovery route or extend the guest discovery flow with a second pass:
+  - Accepts confirmed `photoIds` chosen by the guest from the initial shortlist
+  - Reads stored `PhotoFace.descriptor` values for those confirmed photos
+  - Builds a refined centroid from the confirmed in-album faces
+  - Re-runs matching against the album using that refined reference
+- Return whether a result set came from:
+  - `selfie`
+  - `refined`
+
+### UI changes
+- `src/app/share/[token]/guest/page.tsx`
+  - Keep the current selfie scan flow as the first step
+  - After initial results, add a confirmation step:
+    - Guest can mark 1�3 photos as �Yes, this is me�
+    - Button: �Find more like these�
+  - Re-run discovery using the confirmed album photos as anchors
+  - Keep `Rescan Face` available
+  - Add a manual fallback path from the discovery results:
+    - �Find more photos like this person�
+
+### Matching behavior
+- First pass:
+  - Continue using selfie-to-album matching
+- Second pass:
+  - Prefer album-face-to-album-face matching using the confirmed photos
+  - Rank by best qualifying face distance
+  - Suppress weak borderline results by default
+- Keep the centralized `FACE_*` / `NEXT_PUBLIC_FACE_*` config system
+- Add separate configurable thresholds later if needed for:
+  - selfie matching
+  - refined matching
+  - result suppression / confidence bands
+
+### Acceptance criteria
+- [x] Guest can run the current selfie scan and receive an initial shortlist
+- [x] Guest can confirm 1-3 correct photos from that shortlist
+- [x] FotoHaven can re-run discovery using confirmed in-album faces as the new reference
+- [x] Refined discovery improves results for child-heavy and makeup-heavy albums compared with selfie-only matching
+- [x] Guest can still rescan their face without redoing OTP
+- [x] No external face-recognition service is introduced
+- [x] `cmd /c npx tsc --noEmit` passes with zero errors
+
+---
+
+
+
+
+---
+
+## Task: Lazy Gallery Loading (IntersectionObserver)
+
+**Status:** Completed
+**Scope:** Eliminate the 3-5 second hang when opening large ceremonies (700+ photos) on the share page by deferring thumbnail loading until cards are near the viewport.
+
+### Modified files
+- `src/app/share/[token]/page.tsx` -- GalleryPhoto gains useRef + IntersectionObserver
+
+### Implementation notes
+- Each card starts visible = false -- only shimmer rendered, no img, no network request
+- IntersectionObserver with rootMargin "200px 0px" watches the card container div
+- On intersection: visible = true, observer disconnects (one-shot)
+- {visible && <img src={photo.url} />} -- image only fetched when in/near viewport
+- Ceremony switch: React key changes unmount/remount cards, each starts fresh with visible=false
+- Fallback: if IntersectionObserver undefined, visible initialises to true (eager load)
+
+### Acceptance criteria
+- [x] Switching to a 700-photo ceremony renders in < 200ms (no images downloading yet)
+- [x] Images load progressively as the user scrolls
+- [x] No pop-in at normal scroll speed (200px preload buffer)
+- [x] Existing selection, hover, zoom, comment-dot behaviour unchanged
+- [x] npx tsc --noEmit passes with zero errors
+- [x] Browsers without IntersectionObserver fall back to eager loading
+
+---
+
+## Task: Toast Notifications (Replace alert/confirm)
+
+**Status:** Completed
+**Scope:** Replace all browser alert() and confirm() calls with an in-app toast/modal system for a premium UX.
+
+### Problem
+alert() is used for copy-link confirmation and errors. confirm() is used for delete confirmations. These block the UI thread and look unprofessional on mobile.
+
+### Affected files
+- `src/app/page.tsx` -- copyLink, deleteAlbum
+- `src/app/albums/[albumId]/page.tsx` -- multiple confirm/alert calls
+- `src/app/share/[token]/page.tsx` -- any alert calls
+
+### Implementation plan
+- Create a shared ToastProvider component (pure React state, zero new packages)
+- Auto-dismissing toasts in top-right corner (3s timeout, slide-in animation)
+- Replace all confirm() with an in-app modal with Cancel/Confirm buttons
+
+### Acceptance criteria
+- [x] All alert() calls replaced with auto-dismissing toast notifications
+- [x] All confirm() calls replaced with an in-app modal with Cancel/Confirm buttons
+- [x] Toast system requires zero new npm packages (pure CSS + React state)
+- [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Share Link QR Code
+
+**Status:** Planned
+**Scope:** Add a QR code popup on the dashboard album cards so photographers can share links via printed cards or WhatsApp image.
+
+### Affected files
+- `src/app/page.tsx` -- dashboard album card actions
+
+### Acceptance criteria
+- [ ] Dashboard gains a "QR Code" button next to "Copy Link"
+- [ ] Clicking shows a modal with a rendered QR code for the share URL
+- [ ] QR code is downloadable as PNG
+- [ ] Generated client-side (use qrcode npm package or canvas-based generation)
+- [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: WhatsApp / Social OG Meta Tags on Share Page
+
+**Status:** Planned
+**Scope:** Add Open Graph and WhatsApp preview meta tags to the share page so the link looks rich when pasted in WhatsApp, iMessage, or any chat app.
+
+### Affected files
+- `src/app/share/[token]/` -- add server component wrapper for generateMetadata()
+
+### Acceptance criteria
+- [ ] Share page has og:title, og:description, og:image meta tags
+- [ ] og:title shows album title and client name
+- [ ] og:description shows photo count and ceremony count
+- [ ] og:image points to the first photo thumbnail
+- [ ] Uses Next.js 15 App Router generateMetadata()
+- [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Album Activity Timeline
+
+**Status:** Completed
+**Scope:** Give the photographer visibility into client engagement: when the gallery was opened, when selections were made, and download events.
+
+### Schema change
+Add ActivityLog table:
+- id: UUID text PK
+- albumId: FK to Album (cascade delete)
+- eventType: text ("gallery_viewed" | "photo_selected" | "photo_deselected" | "download_started" | "face_scan_completed")
+- payload: text (optional JSON metadata)
+- createdAt: integer timestamp_ms
+
+### Affected files
+- `src/lib/schema.ts` -- add activityLogs table
+- `src/app/api/share/[token]/route.ts` -- log gallery_viewed
+- `src/app/api/photos/[photoId]/route.ts` -- log photo_selected/deselected
+- `src/app/albums/[albumId]/page.tsx` -- render timeline panel
+
+### Acceptance criteria
+- [x] Activity events recorded for gallery_viewed, photo_selected, photo_deselected, download_started
+- [x] Album detail page shows a timeline of activity (newest first)
+- [x] Timeline shows relative times ("2 hours ago")
+- [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Health Dashboard UI (Complete Existing Stub)
+
+**Status:** Completed
+**Scope:** Build the /admin/health page and /api/admin/health route.
+
+### New page: `src/app/admin/health/page.tsx`
+Display: PM2 uptime, disk usage, memory usage, DB file size, Cloudflare Tunnel status (auto-refresh every 30s).
+
+### New API route: `src/app/api/admin/health/route.ts`
+Returns JSON with system metrics using Node.js os module and fs.stat.
+Guarded by session cookie via existing middleware (add /api/admin/* to protected paths).
+
+### Acceptance criteria
+- [x] Page shows real-time stats (auto-refreshes every 30s)
+- [x] Unauthenticated requests to /api/admin/health return 401
+- [x] Page shows "N/A" gracefully for metrics not available (e.g. on Vercel)
+- [x] Works on ARM (no native modules)
+
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging
+
+
+## Task: Configurable Face Scan Source
+- [x] Add FACE_SCAN_SOURCE environment variable support
+- [x] Read scanSource in face-config.ts
+- [x] Map originalUrl or thumbnailUrl correctly in albums/[albumId]/page.tsx to FaceProcessor
+- [x] Updated configs to default to original and added logging
+
+
+## Task: Guest Face Discovery UX Refinement
+
+**Status:** Completed
+**Scope:** Improve the intuitiveness of the "Find more photos like this person" feature, moving away from an inline banner approach to a guided, mobile-native gallery flow.
+
+### Implementation Summary
+- **Approach 1 (Full Gallery Selection):** Added a sticky bottom action bar that tracks selections, paired with a full-card tap-to-select visual interaction (scale-down + border).
+- **Approach 2 (Guided Review Wizard):** Injected an intermediate step between the initial selfie scan and the full gallery, prompting the user with a focused 1-by-1 quick review of the top 5 matches to lock in a refined descriptor quickly.
+- **Solo Photo Prioritization:** Client-side sorting pushes single-face photos to the front of the review wizard so that confirmed anchors are unpolluted by adjacent group members.
+
+### Acceptance criteria
+- [x] Full photo grid cards can be tapped to select, triggering visual feedback.
+- [x] Sticky bottom bar fades in when 1+ photos are selected with appropriate action buttons.
+- [x] A Quick Review wizard displays immediately following an initial selfie match.
+- [x] Review wizard strictly displays up to 5 photos, prioritizing single-face shots.
+- [x] Confirming photos immediately runs the refined multi-anchor search automatically.
+- [x] User can skip the wizard to fallback to the full photo grid easily.

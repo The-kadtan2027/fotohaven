@@ -1,326 +1,422 @@
 "use client";
-
-import { useEffect, useState } from "react";
+// src/app/admin/health/page.tsx
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { 
-  ArrowLeft, Activity, Cpu, HardDrive, Database, 
-  Terminal, ShieldCheck, RefreshCw, Clock, Smartphone,
-  AlertTriangle, CheckCircle2
+import {
+  Activity, Database, HardDrive, Cpu, RefreshCw,
+  AlertCircle, CheckCircle2, Clock, Server, ChevronLeft,
+  Terminal, Globe, Smartphone,
 } from "lucide-react";
-import { authFetch } from "@/lib/auth";
+
+interface SystemInfo {
+  platform: string;
+  arch: string;
+  uptime: number;
+  nodeVersion: string;
+  isAndroid: boolean;
+}
+
+interface MemoryInfo {
+  total: number;
+  used: number;
+  free: number;
+  usedPct: number;
+}
+
+interface UptimeInfo {
+  system: number;
+  process: number;
+}
+
+interface PlatformInfo {
+  arch: string;
+  platform: string;
+  cpus: number;
+  loadAvg: number[];
+}
+
+interface DiskInfo {
+  total: number;
+  used: number;
+  free: number;
+}
+
+interface Pm2Info {
+  name: string;
+  status: string;
+  uptime: number | null;
+  restarts: number;
+}
+
+interface TunnelInfo {
+  provider: "cloudflare" | "tailscale" | "unknown";
+  status: "online" | "offline" | "unknown";
+  publicUrl: string | null;
+  detail: string;
+}
 
 interface HealthData {
   status: string;
   timestamp: string;
-  system: {
-    platform: string;
-    arch: string;
-    uptime: number;
-    nodeVersion: string;
-    isAndroid: boolean;
-  };
-  metrics: {
-    memory: {
-      total: number;
-      free: number;
-      used: number;
-      percentage: number;
-    };
-    cpu: {
-      cores: number;
-      model: string;
-      load: number[];
-    };
-    storage: {
-      dbSize: number;
-      disk: {
-        total: number;
-        free: number;
-      };
-    };
-  };
+  system: SystemInfo;
+  memory: MemoryInfo;
+  uptime: UptimeInfo;
+  platform: PlatformInfo;
+  disk: DiskInfo | null;
+  dbSize: number | null;
+  pm2: Pm2Info | null;
+  tunnel: TunnelInfo | null;
+  errorLogs: string[];
 }
 
-export default function HealthPage() {
-  const [data, setData] = useState<HealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+function formatBytes(bytes: number): string {
+  if (!bytes) return "0 B";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
 
-  const fetchHealth = async () => {
-    try {
-      setLoading(true);
-      const res = await authFetch("/api/admin/health");
-      if (res.status === 401) {
-        window.location.href = "/"; // Redirect home to re-auth
-        return;
-      }
-      if (!res.ok) throw new Error("Failed to fetch health metrics");
-      const json = await res.json();
-      setData(json);
-      setLastRefreshed(new Date());
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+function formatDuration(secs: number): string {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const parts = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return parts.join(" ");
+}
 
-  useEffect(() => {
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
-  }, []);
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  };
-
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / (3600 * 24));
-    const hours = Math.floor((seconds % (3600 * 24)) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    
-    const parts = [];
-    if (days > 0) parts.push(`${days}d`);
-    if (hours > 0) parts.push(`${hours}h`);
-    if (minutes > 0) parts.push(`${minutes}m`);
-    
-    return parts.length > 0 ? parts.join(" ") : "< 1m";
-  };
-
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  accent,
+  barPct,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  sub?: string;
+  accent?: string;
+  barPct?: number;
+}) {
   return (
-    <div style={{ minHeight: "100vh", background: "var(--cream)", padding: "0 24px" }}>
-      <div style={{ maxWidth: 1000, margin: "0 auto", paddingTop: 32, paddingBottom: 60 }}>
-        
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
-          <div>
-            <Link href="/" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", marginBottom: 16, fontSize: 13 }}>
-              <ArrowLeft size={14} />
-              Dashboard
-            </Link>
-            <h1 style={{ fontFamily: "var(--font-display)", fontSize: 40, color: "var(--espresso)", fontWeight: 400 }}>
-              System Health
-            </h1>
-          </div>
-          <button className="btn-ghost" onClick={fetchHealth} disabled={loading} style={{ background: "#fff", border: "1px solid var(--sand)" }}>
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} style={{ marginRight: 8 }} />
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
+    <div
+      className="card"
+      style={{
+        padding: "20px 24px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        borderLeft: accent ? `4px solid ${accent}` : undefined,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background: "var(--warm-white)",
+            border: "1px solid var(--sand)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={16} color={accent ?? "var(--taupe)"} />
         </div>
-
-        {error && (
-          <div className="card" style={{ background: "#fee2e2", border: "1px solid #fecaca", padding: 20, marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
-            <AlertTriangle color="#dc2626" />
-            <span style={{ color: "#991b1b", fontSize: 14 }}>{error}</span>
-          </div>
-        )}
-
-        {data ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
-            
-            {/* Memory Card */}
-            <div className="card animate-fade-up" style={{ padding: 24 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={iconBoxStyle}><Activity size={18} color="var(--espresso)" /></div>
-                  <span style={cardTitleStyle}>Memory</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: data.metrics.memory.percentage > 90 ? "var(--blush)" : "var(--gold)" }}>
-                  {data.metrics.memory.percentage}%
-                </span>
-              </div>
-              <div style={{ height: 8, background: "var(--warm-white)", borderRadius: 4, overflow: "hidden", marginBottom: 16 }}>
-                <div style={{ 
-                  height: "100%", 
-                  width: `${data.metrics.memory.percentage}%`, 
-                  background: data.metrics.memory.percentage > 85 ? "var(--blush)" : "var(--gold)",
-                  transition: "width 1s ease-in-out" 
-                }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--brown)" }}>
-                <span>Used: {formatBytes(data.metrics.memory.used)}</span>
-                <span>Total: {formatBytes(data.metrics.memory.total)}</span>
-              </div>
-            </div>
-
-            {/* Storage Card */}
-            <div className="card animate-fade-up" style={{ padding: 24, animationDelay: "100ms" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                <div style={iconBoxStyle}><Database size={18} color="var(--espresso)" /></div>
-                <span style={cardTitleStyle}>Storage</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={statRowStyle}>
-                  <span style={statLabelStyle}>Database File</span>
-                  <span style={statValueStyle}>{formatBytes(data.metrics.storage.dbSize)}</span>
-                </div>
-                {data.metrics.storage.disk.total > 0 && (
-                  <>
-                    <div style={statRowStyle}>
-                      <span style={statLabelStyle}>Disk (Total)</span>
-                      <span style={statValueStyle}>{formatBytes(data.metrics.storage.disk.total)}</span>
-                    </div>
-                    <div style={statRowStyle}>
-                      <span style={statLabelStyle}>Disk (Free)</span>
-                      <span style={statValueStyle}>{formatBytes(data.metrics.storage.disk.free)}</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Performance Card */}
-            <div className="card animate-fade-up" style={{ padding: 24, animationDelay: "200ms" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                <div style={iconBoxStyle}><Cpu size={18} color="var(--espresso)" /></div>
-                <span style={cardTitleStyle}>CPU Load</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-end", height: 60, gap: 8, marginBottom: 12 }}>
-                {data.metrics.cpu.load.map((load, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: "center" }}>
-                    <div style={{ 
-                      height: `${Math.min(load * 20, 100)}%`, 
-                      background: "var(--taupe)", 
-                      borderRadius: "4px 4px 0 0",
-                      minHeight: 4
-                    }} />
-                    <span style={{ fontSize: 10, color: "var(--taupe)", marginTop: 4 }}>{["1m", "5m", "15m"][i]}</span>
-                  </div>
-                ))}
-              </div>
-              <p style={{ fontSize: 12, color: "var(--brown)", textAlign: "center" }}>
-                {data.metrics.cpu.model} ({data.metrics.cpu.cores} cores)
-              </p>
-            </div>
-
-            {/* System Info Card */}
-            <div className="card animate-fade-up" style={{ padding: 24, animationDelay: "300ms", gridColumn: "1 / -1" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-                <div style={iconBoxStyle}><Smartphone size={18} color="var(--espresso)" /></div>
-                <span style={cardTitleStyle}>Environment</span>
-                {data.system.isAndroid && (
-                  <span className="tag" style={{ background: "var(--gold)", color: "#fff", border: "none" }}>Android/Termux</span>
-                )}
-              </div>
-              
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24 }}>
-                <div>
-                  <div style={infoGroupStyle}>
-                    <Clock size={14} style={{ marginTop: 2 }} />
-                    <div>
-                      <span style={infoLabelStyle}>Uptime</span>
-                      <span style={infoValueStyle}>{formatUptime(data.system.uptime)}</span>
-                    </div>
-                  </div>
-                  <div style={infoGroupStyle}>
-                    <Terminal size={14} style={{ marginTop: 2 }} />
-                    <div>
-                      <span style={infoLabelStyle}>Node.js</span>
-                      <span style={infoValueStyle}>{data.system.nodeVersion}</span>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <div style={infoGroupStyle}>
-                    <ShieldCheck size={14} style={{ marginTop: 2 }} />
-                    <div>
-                      <span style={infoLabelStyle}>Platform</span>
-                      <span style={infoValueStyle}>{data.system.platform} / {data.system.arch}</span>
-                    </div>
-                  </div>
-                  <div style={infoGroupStyle}>
-                    <RefreshCw size={14} style={{ marginTop: 2 }} />
-                    <div>
-                      <span style={infoLabelStyle}>Last Updated</span>
-                      <span style={infoValueStyle}>{lastRefreshed.toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: 16, background: "var(--warm-white)", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                  <CheckCircle2 color="var(--gold)" size={28} style={{ marginBottom: 8 }} />
-                  <span style={{ fontSize: 14, color: "var(--espresso)", fontWeight: 600 }}>System Healthy</span>
-                  <span style={{ fontSize: 11, color: "var(--taupe)" }}>All subsystems operational</span>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        ) : (
-          <div style={{ textAlign: "center", padding: "100px 0" }}>
-            <Loader2 className="animate-spin" size={40} color="var(--taupe)" />
-            <p style={{ marginTop: 16, color: "var(--brown)" }}>Loading metrics...</p>
-          </div>
-        )}
+        <p style={{ fontSize: 12, color: "var(--taupe)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {label}
+        </p>
       </div>
+      <p style={{ fontSize: 26, fontFamily: "var(--font-display)", color: "var(--espresso)", lineHeight: 1 }}>
+        {value}
+      </p>
+      {sub && <p style={{ fontSize: 12, color: "var(--brown)" }}>{sub}</p>}
+      {barPct !== undefined && (
+        <div style={{ height: 6, background: "var(--sand)", borderRadius: 99, overflow: "hidden" }}>
+          <div
+            style={{
+              height: "100%",
+              width: `${barPct}%`,
+              background: barPct > 85 ? "#dc2626" : barPct > 65 ? "#d97706" : "var(--sage)",
+              borderRadius: 99,
+              transition: "width 0.5s ease",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-const iconBoxStyle: React.CSSProperties = {
-  width: 36,
-  height: 36,
-  background: "var(--warm-white)",
-  borderRadius: 10,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "1px solid var(--sand)"
-};
+const REFRESH_MS = 30_000;
 
-const cardTitleStyle: React.CSSProperties = {
-  fontSize: 18,
-  fontFamily: "var(--font-display)",
-  color: "var(--espresso)",
-  fontWeight: 400
-};
+export default function HealthPage() {
+  const [data, setData] = useState<HealthData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
 
-const statRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  fontSize: 14
-};
+  const fetchHealth = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/admin/health", { cache: "no-store" });
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const json = await res.json() as HealthData;
+      setData(json);
+      setError(null);
+      setLastRefresh(new Date());
+      setCountdown(REFRESH_MS / 1000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load health data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-const statLabelStyle: React.CSSProperties = {
-  color: "var(--brown)"
-};
+  useEffect(() => {
+    fetchHealth();
+    const interval = setInterval(fetchHealth, REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [fetchHealth]);
 
-const statValueStyle: React.CSSProperties = {
-  color: "var(--espresso)",
-  fontWeight: 600
-};
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setCountdown((prev) => (prev <= 1 ? REFRESH_MS / 1000 : prev - 1));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, []);
 
-const infoGroupStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  marginBottom: 16,
-  color: "var(--taupe)"
-};
+  const na = "N/A";
 
-const infoLabelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  marginBottom: 2
-};
-
-const infoValueStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 15,
-  color: "var(--espresso)",
-  fontWeight: 500
-};
-
-function Loader2({ className, size, color }: { className?: string; size?: number; color?: string }) {
   return (
-    <RefreshCw className={className} size={size} color={color} />
+    <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      <header
+        className="glass px-4 md:px-10"
+        style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}
+      >
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Link href="/" style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--taupe)", textDecoration: "none", fontSize: 13 }}>
+              <ChevronLeft size={16} /> Dashboard
+            </Link>
+            <span style={{ color: "var(--sand)" }}>·</span>
+            <span style={{ fontFamily: "var(--font-display)", fontSize: 18, color: "var(--espresso)", display: "flex", alignItems: "center", gap: 8 }}>
+              <Activity size={18} color="var(--gold)" /> Health Monitor
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {lastRefresh && (
+              <span style={{ fontSize: 12, color: "var(--taupe)" }}>
+                Refreshes in {countdown}s
+              </span>
+            )}
+            <button
+              onClick={fetchHealth}
+              className="btn-ghost"
+              style={{ padding: "6px 12px", fontSize: 13, gap: 6 }}
+              disabled={loading}
+            >
+              <RefreshCw size={14} style={{ animation: loading ? "spin 1s linear infinite" : undefined }} />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="px-4 md:px-10 py-8" style={{ maxWidth: 1200, margin: "0 auto" }}>
+        <div style={{ marginBottom: 32 }}>
+          <p style={{ fontSize: 12, color: "var(--gold)", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+            System Status
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <h1 style={{ fontFamily: "var(--font-display)", fontSize: 36, fontWeight: 300, color: "var(--espresso)" }}>
+              Health Dashboard
+            </h1>
+            {data?.system?.isAndroid && (
+              <span className="tag" style={{ background: "var(--gold)", color: "#fff", border: "none", fontSize: 11 }}>
+                <Smartphone size={11} style={{ marginRight: 4 }} /> Android/Termux
+              </span>
+            )}
+          </div>
+          {lastRefresh && (
+            <p style={{ fontSize: 13, color: "var(--taupe)", marginTop: 4 }}>
+              Last updated: {lastRefresh.toLocaleTimeString()}
+            </p>
+          )}
+        </div>
+
+        {error && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 20px", background: "rgba(220,38,38,0.08)", borderRadius: 12, border: "1px solid rgba(220,38,38,0.2)", marginBottom: 24 }}>
+            <AlertCircle size={18} color="#dc2626" />
+            <p style={{ fontSize: 14, color: "#dc2626" }}>{error}</p>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 280px), 1fr))", gap: 16, marginBottom: 24 }}>
+          <StatCard
+            icon={Cpu}
+            label="Memory Used"
+            value={data ? formatBytes(data.memory.used) : na}
+            sub={data ? `${data.memory.usedPct}% of ${formatBytes(data.memory.total)}` : undefined}
+            accent="var(--sage)"
+            barPct={data?.memory.usedPct}
+          />
+
+          <StatCard
+            icon={HardDrive}
+            label="Disk Used"
+            value={data?.disk ? formatBytes(data.disk.used) : na}
+            sub={data?.disk ? `${Math.round((data.disk.used / data.disk.total) * 100)}% of ${formatBytes(data.disk.total)} · ${formatBytes(data.disk.free)} free` : "Not available on this platform"}
+            accent="var(--gold)"
+            barPct={data?.disk ? Math.round((data.disk.used / data.disk.total) * 100) : undefined}
+          />
+
+          <StatCard
+            icon={Database}
+            label="Database Size"
+            value={data?.dbSize != null ? formatBytes(data.dbSize) : na}
+            sub="local.db (SQLite)"
+            accent="var(--blush)"
+          />
+
+          <StatCard
+            icon={Clock}
+            label="System Uptime"
+            value={data ? formatDuration(data.uptime.system) : na}
+            sub={data ? `Process: ${formatDuration(data.uptime.process)}` : undefined}
+            accent="#3b82f6"
+          />
+
+          <StatCard
+            icon={Server}
+            label="PM2 Process"
+            value={data?.pm2 ? data.pm2.status.toUpperCase() : na}
+            sub={data?.pm2
+              ? `${data.pm2.name} · ${data.pm2.uptime != null ? formatDuration(data.pm2.uptime / 1000) : "?"} uptime · ${data.pm2.restarts} restart${data.pm2.restarts !== 1 ? "s" : ""}`
+              : "PM2 not available"}
+            accent={data?.pm2?.status === "online" ? "var(--sage)" : data?.pm2 ? "#d97706" : "var(--taupe)"}
+          />
+
+          <StatCard
+            icon={Globe}
+            label="Public Tunnel"
+            value={data?.tunnel ? data.tunnel.status.toUpperCase() : na}
+            sub={data?.tunnel
+              ? `${data.tunnel.provider === "unknown" ? "Tunnel" : data.tunnel.provider} · ${data.tunnel.publicUrl ?? "No URL configured"}`
+              : "Not available on this platform"}
+            accent={
+              data?.tunnel?.status === "online"
+                ? "var(--sage)"
+                : data?.tunnel?.status === "offline"
+                  ? "#dc2626"
+                  : "var(--taupe)"
+            }
+          />
+
+          <StatCard
+            icon={Activity}
+            label="Platform"
+            value={data ? `${data.platform.arch}` : na}
+            sub={data ? `${data.platform.platform} · ${data.platform.cpus} CPU · Load: ${data.platform.loadAvg.map((l) => l.toFixed(2)).join(", ")}` : undefined}
+            accent="var(--taupe)"
+          />
+        </div>
+
+        {data && (
+          <div
+            className="card"
+            style={{ padding: "16px 24px", marginBottom: 24, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {data.pm2?.status === "online"
+                ? <CheckCircle2 size={16} color="var(--sage)" />
+                : <AlertCircle size={16} color="#d97706" />}
+              <span style={{ fontSize: 13, color: "var(--brown)" }}>
+                {data.pm2 ? `PM2: ${data.pm2.status}` : "PM2: not detected"}
+              </span>
+            </div>
+            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {data.memory.usedPct < 85
+                ? <CheckCircle2 size={16} color="var(--sage)" />
+                : <AlertCircle size={16} color="#dc2626" />}
+              <span style={{ fontSize: 13, color: "var(--brown)" }}>Memory: {data.memory.usedPct}%</span>
+            </div>
+            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <CheckCircle2 size={16} color="var(--sage)" />
+              <span style={{ fontSize: 13, color: "var(--brown)" }}>
+                DB: {data.dbSize != null ? formatBytes(data.dbSize) : "N/A"}
+              </span>
+            </div>
+            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {data.tunnel?.status === "online"
+                ? <CheckCircle2 size={16} color="var(--sage)" />
+                : data.tunnel?.status === "offline"
+                  ? <AlertCircle size={16} color="#dc2626" />
+                  : <AlertCircle size={16} color="#d97706" />}
+              <span style={{ fontSize: 13, color: "var(--brown)" }}>
+                {data.tunnel
+                  ? `Tunnel: ${data.tunnel.status}${data.tunnel.publicUrl ? ` · ${data.tunnel.publicUrl}` : ""}`
+                  : "Tunnel: N/A"}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="card" style={{ padding: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <Terminal size={18} color="var(--taupe)" />
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--espresso)" }}>
+              Recent Error Logs
+            </h2>
+          </div>
+          {!data || data.errorLogs.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--taupe)" }}>
+              <CheckCircle2 size={32} color="var(--sage)" style={{ marginBottom: 8, opacity: 0.7 }} />
+              <p style={{ fontSize: 14 }}>No errors in the PM2 log.</p>
+            </div>
+          ) : (
+            <div
+              style={{
+                background: "#1a1208",
+                borderRadius: 10,
+                padding: "16px",
+                fontFamily: "monospace",
+                fontSize: 12,
+                color: "#d4c5a9",
+                maxHeight: 320,
+                overflowY: "auto",
+                lineHeight: 1.6,
+              }}
+            >
+              {data.errorLogs.map((line, i) => (
+                <div
+                  key={i}
+                  style={{
+                    color: line.toLowerCase().includes("error") ? "#fca5a5" : "#d4c5a9",
+                    borderBottom: i < data.errorLogs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : undefined,
+                    paddingBottom: 4,
+                    marginBottom: 4,
+                  }}
+                >
+                  {line}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
   );
 }

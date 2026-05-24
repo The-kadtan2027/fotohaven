@@ -1,6 +1,11 @@
 import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const defaultFrom = "FotoHaven <notifications@fotohaven.live>";
+
+function resolveFromAddress() {
+  return process.env.GUEST_OTP_FROM_EMAIL || defaultFrom;
+}
 
 export async function sendViewNotification(
   albumTitle: string,
@@ -12,9 +17,11 @@ export async function sendViewNotification(
     return;
   }
 
+  const from = resolveFromAddress();
+
   try {
     await resend.emails.send({
-      from: "FotoHaven <notifications@fotohaven.app>", // Ensure this domain is verified in Resend
+      from,
       to: recipientEmail,
       subject: `Gallery Viewed: ${albumTitle}`,
       html: `
@@ -30,8 +37,42 @@ export async function sendViewNotification(
         </div>
       `,
     });
+    console.log(`[EMAIL] From address used: ${from}`);
     console.log(`[EMAIL] Notification sent to ${recipientEmail} for album "${albumTitle}"`);
   } catch (error) {
     console.error("[EMAIL] Failed to send notification:", error);
+  }
+}
+
+export async function sendGuestOtpEmail(
+  recipientEmail: string,
+  otpCode: string,
+  albumTitle: string
+) {
+  if (!resend) {
+    console.warn("[EMAIL] RESEND_API_KEY not set. Skipping OTP email.");
+    return;
+  }
+
+  const from = resolveFromAddress();
+
+  try {
+    await resend.emails.send({
+      from,
+      to: recipientEmail,
+      subject: `Your OTP for ${albumTitle}`,
+      html: `
+        <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #1a1208;">FotoHaven OTP</h2>
+          <p>Use the code below to continue:</p>
+          <p style="font-size: 28px; letter-spacing: 4px; font-weight: 700; margin: 20px 0; color: #c9963a;">${otpCode}</p>
+          <p>This code expires in 10 minutes.</p>
+        </div>
+      `,
+    });
+    console.log(`[EMAIL] From address used: ${from}`);
+  } catch (error) {
+    console.error("[EMAIL] Failed to send guest OTP:", error);
+    throw error;
   }
 }

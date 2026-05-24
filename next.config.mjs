@@ -16,6 +16,21 @@ const nextConfig = {
       bodySizeLimit: '100mb',
     },
   },
+  webpack: (config, { isServer }) => {
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      encoding: false,
+    };
+
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...(config.resolve.fallback || {}),
+        fs: false,
+        encoding: false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
