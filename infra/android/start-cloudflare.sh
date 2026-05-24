@@ -8,7 +8,7 @@ set -e  # Exit on error
 # Configuration
 ENV_FILE="$HOME/fotohaven/.env.local"
 CLOUDFLARED_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/cloudflared"
-CLOUDFLARED_ARGS="tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s"
+CLOUDFLARED_ARGS="tunnel --url http://localhost:3000 --protocol http2 --proxy-connect-timeout 60s --proxy-read-timeout 300s --no-local-resolver"
 
 # Verify cloudflared exists
 if [ ! -x "$CLOUDFLARED_BIN" ]; then

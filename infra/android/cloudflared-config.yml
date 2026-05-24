@@ -31,3 +31,9 @@ ingress:
 
 # Optional: enable metrics endpoint for monitoring
 # metrics: localhost:2000
+
+# Android/Termux stability fixes
+no-local-resolver: true
+protocol: http2
+proxy-connect-timeout: 60s
+proxy-read-timeout: 300s
