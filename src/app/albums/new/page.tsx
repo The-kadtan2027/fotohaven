@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, X, ChevronRight, Check } from "lucide-react";
 
+import { authFetch } from "@/lib/auth";
+
 const SUGGESTED_CEREMONIES = [
   "Haldi", "Mehndi", "Sangeet", "Wedding", "Reception",
   "Engagement", "Pre-Wedding Shoot", "Post-Wedding",
@@ -42,7 +44,7 @@ export default function NewAlbumPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/albums", {
+      const res = await authFetch("/api/albums", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

@@ -34,3 +34,33 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# --- FotoHaven Specific ---
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# local storage
+/data/uploads/**
+/public/uploads/**
+
+# environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.staging.local
+
+# PM2
+ecosystem.config.js
+logs/
+*.log
+pm2/
+
+# OS misc
+.DS_Store
+Thumbs.db

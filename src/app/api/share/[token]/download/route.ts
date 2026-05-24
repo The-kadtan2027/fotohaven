@@ -25,17 +25,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const formData = await req.formData();
   const photoIdsRaw = formData.get("photoIds");
   const bundleName = formData.get("bundleName") || "Download";
-
-  if (!photoIdsRaw || typeof photoIdsRaw !== "string") {
-    return NextResponse.json({ error: "Missing or invalid photoIds" }, { status: 400 });
-  }
-
-  let photoIds: string[];
-  try {
-    photoIds = JSON.parse(photoIdsRaw);
-  } catch {
-    return NextResponse.json({ error: "Invalid photoIds JSON" }, { status: 400 });
-  }
+  const scope = formData.get("scope"); // "all" | "ceremony" | undefined
+  const ceremonyId = formData.get("ceremonyId");
 
   // Verify album exists
   const album = await db.query.albums.findFirst({
@@ -47,9 +38,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "Album not found" }, { status: 404 });
   }
 
-  // Find valid photos
-  const allPhotos = album.ceremonies.flatMap((c) => c.photos);
-  const requestedPhotos = allPhotos.filter(p => photoIds.includes(p.id));
+  let requestedPhotos;
+
+  if (scope === "all") {
+    requestedPhotos = album.ceremonies.flatMap((c) => c.photos);
+  } else if (scope === "ceremony" && ceremonyId) {
+    const ceremony = album.ceremonies.find(c => c.id === ceremonyId);
+    requestedPhotos = ceremony?.photos || [];
+  } else {
+    if (!photoIdsRaw || typeof photoIdsRaw !== "string") {
+      return NextResponse.json({ error: "Missing or invalid photoIds" }, { status: 400 });
+    }
+
+    let photoIds: string[];
+    try {
+      photoIds = JSON.parse(photoIdsRaw);
+    } catch {
+      return NextResponse.json({ error: "Invalid photoIds JSON" }, { status: 400 });
+    }
+
+    const allPhotos = album.ceremonies.flatMap((c) => c.photos);
+    requestedPhotos = allPhotos.filter(p => photoIds.includes(p.id));
+  }
 
   if (requestedPhotos.length === 0) {
     return NextResponse.json({ error: "No valid photos found" }, { status: 404 });

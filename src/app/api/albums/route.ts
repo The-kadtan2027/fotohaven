@@ -70,9 +70,28 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   try {
     const allAlbums = await db.query.albums.findMany({
+      columns: {
+        id: true,
+        title: true,
+        clientName: true,
+        shareToken: true,
+        expiresAt: true,
+        createdAt: true,
+      },
       with: {
         ceremonies: {
-          with: { photos: true },
+          columns: {
+            id: true,
+            name: true,
+          },
+          with: {
+            photos: {
+              columns: {
+                id: true,
+                isReturn: true,
+              }
+            }
+          },
           orderBy: (c, { asc }) => [asc(c.order)],
         },
       },
@@ -81,12 +100,20 @@ export async function GET() {
 
     const enriched = allAlbums.map((album) => ({
       ...album,
-      // Since Drizzle with better-sqlite doesn't have a direct _count equivalent returning numbers elegantly
-      // in nested relations without complex subqueries, we just fetch photos and count array length.
       totalPhotos: album.ceremonies.reduce(
         (sum, c) => sum + c.photos.length,
         0
       ),
+      totalFinals: album.ceremonies.reduce(
+        (sum, c) => sum + c.photos.filter(p => p.isReturn).length,
+        0
+      ),
+      ceremonies: album.ceremonies.map((c) => ({
+        id: c.id,
+        name: c.name,
+        photoCount: c.photos.length,
+        finalCount: c.photos.filter(p => p.isReturn).length,
+      })),
     }));
 
     return NextResponse.json(enriched);

@@ -2,7 +2,8 @@
 // src/app/page.tsx
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Image, Share2, Clock, FolderOpen, Trash2 } from "lucide-react";
+import { Plus, Image, Share2, Clock, FolderOpen, Trash2, ShieldCheck, Loader2, Lock } from "lucide-react";
+import { authFetch, getAppSecret, setAppSecret } from "@/lib/auth";
 
 interface AlbumSummary {
   id: string;
@@ -12,19 +13,47 @@ interface AlbumSummary {
   expiresAt: string | null;
   createdAt: string;
   totalPhotos: number;
-  ceremonies: { id: string; name: string; photos: any[] }[];
+  totalFinals: number;
+  ceremonies: { id: string; name: string; photoCount: number; finalCount: number }[];
 }
 
 export default function Home() {
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [secretInput, setSecretInput] = useState("");
+  const [authError, setAuthError] = useState("");
+
+  const fetchAlbums = async () => {
+    setLoading(true);
+    setAuthError("");
+    try {
+      const res = await authFetch("/api/albums");
+      if (res.status === 401) {
+        setShowAuthModal(true);
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      setAlbums(data);
+      setShowAuthModal(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch("/api/albums")
-      .then((r) => r.json())
-      .then((data) => { setAlbums(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    fetchAlbums();
   }, []);
+
+  const handleAuthSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!secretInput.trim()) return;
+    setAppSecret(secretInput.trim());
+    fetchAlbums();
+  };
 
   const shareUrl = (token: string) =>
     `${window.location.origin}/share/${token}`;
@@ -49,7 +78,7 @@ export default function Home() {
   const deleteAlbum = async (albumId: string) => {
     if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
     try {
-      const res = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/albums/${albumId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       // Remove from state immediately
       setAlbums(prev => prev.filter(a => a.id !== albumId));
@@ -60,6 +89,40 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      {/* Auth Modal Overlay */}
+      {showAuthModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(8px)" }}>
+          <div className="card animate-fade-up" style={{ maxWidth: 400, width: "100%", padding: 40, textAlign: "center" }}>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--warm-white)", border: "1px solid var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+              <Lock size={24} color="var(--gold)" />
+            </div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, color: "var(--espresso)", marginBottom: 12 }}>
+              Admin Access
+            </h2>
+            <p style={{ color: "var(--brown)", fontSize: 14, marginBottom: 24 }}>
+              FotoHaven is now protected. Please enter your <code>APP_SECRET</code> to manage your albums.
+            </p>
+            <form onSubmit={handleAuthSubmit}>
+              <input
+                type="password"
+                className="input"
+                placeholder="Enter App Secret..."
+                value={secretInput}
+                onChange={(e) => setSecretInput(e.target.value)}
+                autoFocus
+                style={{ marginBottom: 16, textAlign: "center" }}
+              />
+              <button className="btn-primary" type="submit" style={{ width: "100%" }} disabled={loading}>
+                {loading ? "Verifying..." : "Sign In"}
+              </button>
+            </form>
+            <p style={{ marginTop: 16, fontSize: 11, color: "var(--taupe)" }}>
+              Check your <code>.env.local</code> for the secret key.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header
         className="glass px-4 md:px-10"
@@ -79,10 +142,15 @@ export default function Home() {
               FotoHaven
             </span>
           </div>
-          <Link href="/albums/new" className="btn-primary" style={{ textDecoration: "none" }}>
-            <Plus size={16} />
-            New Album
-          </Link>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Link href="/admin/health" className="btn-ghost" title="System Health">
+              <ShieldCheck size={18} />
+            </Link>
+            <Link href="/albums/new" className="btn-primary" style={{ textDecoration: "none" }}>
+              <Plus size={16} />
+              New Album
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -136,7 +204,8 @@ export default function Home() {
                     <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--brown)", background: "var(--warm-white)", padding: "3px 10px", borderRadius: 100, border: "1px solid var(--sand)" }}>
                       <FolderOpen size={11} />
                       {c.name}
-                      <span style={{ color: "var(--taupe)" }}>·{c.photos.length}</span>
+                      <span style={{ color: "var(--taupe)" }}>·{c.photoCount}</span>
+                      {c.finalCount > 0 && <span style={{ color: "var(--gold)", fontWeight: 600 }}>({c.finalCount} finals)</span>}
                     </span>
                   ))}
                 </div>

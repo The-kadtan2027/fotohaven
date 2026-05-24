@@ -8,6 +8,7 @@ import {
   ArrowLeft, Share2, Upload, Check, X, Image as ImageIcon,
   FolderOpen, Loader2, Copy, ExternalLink, Trash2, PackageCheck,
 } from "lucide-react";
+import { authFetch } from "@/lib/auth";
 
 interface Photo {
   id: string;
@@ -15,6 +16,7 @@ interface Photo {
   size: number;
   url: string;
   originalUrl?: string;
+  thumbnailKey?: string | null;
   storageKey: string;
   comments?: any[];
   isReturn?: boolean;
@@ -62,7 +64,12 @@ export default function AlbumPage() {
   }, [albumId]);
 
   const fetchAlbum = async () => {
-    const res = await fetch(`/api/albums/${albumId}`);
+    const res = await authFetch(`/api/albums/${albumId}`);
+    if (res.status === 401) {
+      // Redirect home to re-auth
+      window.location.href = "/";
+      return;
+    }
     const data = await res.json();
     setAlbum(data);
     if (!activeCeremony && data.ceremonies?.[0]) {
@@ -158,7 +165,7 @@ export default function AlbumPage() {
 
       try {
         // Step 1: Request presigned upload URL
-        const metaRes = await fetch("/api/upload", {
+        const metaRes = await authFetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -258,7 +265,7 @@ export default function AlbumPage() {
     if (!album) return;
     if (!confirm("Are you sure you want to delete this entire album and ALL photos? This action cannot be undone.")) return;
     try {
-      const res = await fetch(`/api/albums/${album.id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/albums/${album.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       window.location.href = "/";
     } catch {
@@ -270,7 +277,7 @@ export default function AlbumPage() {
     const name = window.prompt("New Ceremony Name:");
     if (!name || !name.trim()) return;
     try {
-      const res = await fetch("/api/ceremonies", {
+      const res = await authFetch("/api/ceremonies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), albumId }),
@@ -285,7 +292,7 @@ export default function AlbumPage() {
   const deleteCeremony = async (ceremonyId: string) => {
     if (!confirm("Are you sure you want to delete this ceremony and ALL its photos permanently?")) return;
     try {
-      const res = await fetch(`/api/ceremonies/${ceremonyId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/ceremonies/${ceremonyId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       if (activeCeremony === ceremonyId) setActiveCeremony(null);
       await fetchAlbum();
@@ -297,7 +304,7 @@ export default function AlbumPage() {
   const deletePhoto = async (photoId: string) => {
     if (!confirm("Are you sure you want to delete this photo forever?")) return;
     try {
-      const res = await fetch(`/api/photos/${photoId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/photos/${photoId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       await fetchAlbum();
     } catch {
@@ -319,7 +326,7 @@ export default function AlbumPage() {
     if (!confirm(`Are you sure you want to delete ${selectedPhotos.length} photo(s)?`)) return;
     setIsDeletingBatch(true);
     try {
-      const res = await fetch("/api/photos/delete-batch", {
+      const res = await authFetch("/api/photos/delete-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoIds: selectedPhotos })

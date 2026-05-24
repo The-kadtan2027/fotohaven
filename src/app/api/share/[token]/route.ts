@@ -17,15 +17,15 @@ export async function GET(
       where: eq(albums.shareToken, token),
       with: {
         ceremonies: {
-          orderBy: (c: any, { asc }: any) => [asc(c.order)],
+          orderBy: (c, { asc }) => [asc(c.order)],
           with: {
             photos: {
-              orderBy: (p: any, { desc }: any) => [desc(p.createdAt)],
-              with: {
-                comments: true,
-              },
-            },
-          },
+              columns: {
+                id: true,
+                isReturn: true,
+              }
+            }
+          }
         },
       },
     });
@@ -77,24 +77,22 @@ export async function GET(
     // Strip password hash if any
     const { password: _password, ...safeAlbum } = album;
 
-    // Generate presigned URLs for all photos (2hr TTL per spec)
-    const albumWithUrls = {
-      ...safeAlbum,
-      ceremonies: await Promise.all(
-        safeAlbum.ceremonies.map(async (ceremony: any) => ({
-          ...ceremony,
-          photos: await Promise.all(
-            ceremony.photos.map(async (photo: any) => ({
-              ...photo,
-              url: await getPresignedUrl(photo.thumbnailKey || photo.storageKey, 7200),
-              originalUrl: await getPresignedUrl(photo.storageKey, 7200),
-            }))
-          ),
-        }))
-      ),
-    };
+    const enrichedCeremonies = safeAlbum.ceremonies.map((c: any) => ({
+      ...c,
+      photoCount: c.photos.filter((p: any) => !p.isReturn).length,
+      finalCount: c.photos.filter((p: any) => p.isReturn).length,
+      photos: undefined, // Strip photos to keep it light
+    }));
 
-    return NextResponse.json(albumWithUrls);
+    const totalPhotos = safeAlbum.ceremonies.reduce((sum: number, c: any) => sum + (c.photoCount || c.photos.filter((p: any) => !p.isReturn).length), 0);
+    const totalFinals = safeAlbum.ceremonies.reduce((sum: number, c: any) => sum + (c.finalCount || c.photos.filter((p: any) => p.isReturn).length), 0);
+
+    return NextResponse.json({
+      ...safeAlbum,
+      ceremonies: enrichedCeremonies,
+      totalPhotos,
+      totalFinals,
+    });
   } catch (error) {
     console.error("[GET_SHARE_ALBUM]", error);
     return NextResponse.json(

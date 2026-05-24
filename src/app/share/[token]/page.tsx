@@ -37,6 +37,8 @@ interface Ceremony {
   name: string;
   order: number;
   photos: Photo[];
+  photoCount: number;
+  finalCount: number;
 }
 
 interface Album {
@@ -46,6 +48,8 @@ interface Album {
   shareToken: string;
   expiresAt: string | null;
   ceremonies: Ceremony[];
+  totalPhotos: number;
+  totalFinals: number;
 }
 
 export default function SharePage() {
@@ -65,6 +69,8 @@ export default function SharePage() {
   const [authError, setAuthError] = useState("");
   const [returnUploads, setReturnUploads] = useState<ReturnUploadItem[]>([]);
   const [isReturning, setIsReturning] = useState(false);
+  const [ceremonyPhotos, setCeremonyPhotos] = useState<Record<string, Photo[]>>({});
+  const [loadingPhotos, setLoadingPhotos] = useState<Record<string, boolean>>({});
 
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
@@ -99,9 +105,36 @@ export default function SharePage() {
     }
   };
 
+  const fetchCeremonyPhotos = async (ceremonyId: string) => {
+    if (ceremonyPhotos[ceremonyId] || loadingPhotos[ceremonyId]) return;
+
+    setLoadingPhotos((prev) => ({ ...prev, [ceremonyId]: true }));
+    const headers: Record<string, string> = {};
+    if (password) {
+      headers["Authorization"] = `Bearer ${password}`;
+    }
+
+    try {
+      const resp = await fetch(`/api/share/${token}/ceremonies/${ceremonyId}/photos`, { headers });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error);
+      setCeremonyPhotos((prev) => ({ ...prev, [ceremonyId]: data }));
+    } catch (err) {
+      console.error("[FETCH_PHOTOS_ERROR]", err);
+    } finally {
+      setLoadingPhotos((prev) => ({ ...prev, [ceremonyId]: false }));
+    }
+  };
+
   useEffect(() => {
     fetchAlbum();
   }, [token]);
+
+  useEffect(() => {
+    if (activeCeremony) {
+      fetchCeremonyPhotos(activeCeremony);
+    }
+  }, [activeCeremony, password]); // retry if password changes
 
   const toggleSelect = (photoId: string) => {
     setSelectedPhotos((prev) => {
@@ -113,8 +146,9 @@ export default function SharePage() {
   };
 
   const selectAllInCeremony = (ceremony: Ceremony) => {
-    const allIds = ceremony.photos.map((p) => p.id);
-    const allSelected = allIds.every((id) => selectedPhotos.has(id));
+    const photos = ceremonyPhotos[ceremony.id] || [];
+    const allIds = photos.map((p) => p.id);
+    const allSelected = allIds.length > 0 && allIds.every((id) => selectedPhotos.has(id));
     setSelectedPhotos((prev) => {
       const next = new Set(prev);
       if (allSelected) allIds.forEach((id) => next.delete(id));
@@ -124,16 +158,34 @@ export default function SharePage() {
   };
 
   // Trigger download via native browser form submission (streaming)
-  const requestDownload = (photoIds: string[], bundleName: string) => {
+  const requestDownload = (photoIds: string[], bundleName: string, scope?: string, ceremonyId?: string) => {
     const form = document.createElement("form");
     form.method = "POST";
     form.action = `/api/share/${token}/download`;
     
-    const inputIds = document.createElement("input");
-    inputIds.type = "hidden";
-    inputIds.name = "photoIds";
-    inputIds.value = JSON.stringify(photoIds);
-    form.appendChild(inputIds);
+    if (photoIds.length > 0) {
+      const inputIds = document.createElement("input");
+      inputIds.type = "hidden";
+      inputIds.name = "photoIds";
+      inputIds.value = JSON.stringify(photoIds);
+      form.appendChild(inputIds);
+    }
+
+    if (scope) {
+      const inputScope = document.createElement("input");
+      inputScope.type = "hidden";
+      inputScope.name = "scope";
+      inputScope.value = scope;
+      form.appendChild(inputScope);
+    }
+
+    if (ceremonyId) {
+      const inputCid = document.createElement("input");
+      inputCid.type = "hidden";
+      inputCid.name = "ceremonyId";
+      inputCid.value = ceremonyId;
+      form.appendChild(inputCid);
+    }
 
     const inputName = document.createElement("input");
     inputName.type = "hidden";
@@ -147,8 +199,7 @@ export default function SharePage() {
   };
 
   const downloadCeremony = (ceremony: Ceremony) => {
-    const photoIds = ceremony.photos.map(p => p.id);
-    requestDownload(photoIds, ceremony.name);
+    requestDownload([], ceremony.name, "ceremony", ceremony.id);
   };
 
   const downloadSelected = () => {
@@ -159,8 +210,7 @@ export default function SharePage() {
 
   const downloadAll = () => {
     if (!album) return;
-    const photoIds = album.ceremonies.flatMap(c => c.photos.map(p => p.id));
-    requestDownload(photoIds, `${album.title} — All Photos`);
+    requestDownload([], `${album.title} — All Photos`, "all");
   };
 
   // --- Upload Returns ---
@@ -418,12 +468,15 @@ export default function SharePage() {
   if (!album) return null;
 
   const activeCeremonyData = album.ceremonies.find((c) => c.id === activeCeremony);
-  const totalPhotos = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => !p.isReturn).length, 0);
-  const totalFinals = album.ceremonies.reduce((s, c) => s + c.photos.filter((p) => p.isReturn).length, 0);
-  const allPhotos = album.ceremonies.flatMap((c) => c.photos);
-  const activeCeremonyOriginals = activeCeremonyData?.photos.filter((p) => !p.isReturn) ?? [];
-  const activeCeremonyFinals = activeCeremonyData?.photos.filter((p) => p.isReturn) ?? [];
+  const currentPhotos = activeCeremony ? (ceremonyPhotos[activeCeremony] || []) : [];
+  
+  const activeCeremonyOriginals = currentPhotos.filter((p) => !p.isReturn);
+  const activeCeremonyFinals = currentPhotos.filter((p) => p.isReturn);
   const activeTabPhotos = galleryTab === "originals" ? activeCeremonyOriginals : activeCeremonyFinals;
+  
+  const isPhotosLoading = activeCeremony ? loadingPhotos[activeCeremony] : false;
+  
+  const { totalPhotos, totalFinals } = album;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
@@ -503,8 +556,6 @@ export default function SharePage() {
           </p>
           <div className="inline-flex md:block items-center gap-2">
           {album.ceremonies.map((c) => {
-            const origCount = c.photos.filter((p) => !p.isReturn).length;
-            const finCount = c.photos.filter((p) => p.isReturn).length;
             return (
               <button
                 key={c.id}
@@ -521,10 +572,10 @@ export default function SharePage() {
                   {c.name}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {finCount > 0 && (
+                  {c.finalCount > 0 && (
                     <span style={{ fontSize: 9, background: "rgba(201,150,58,0.2)", color: "var(--gold)", padding: "1px 5px", borderRadius: 100, fontWeight: 600 }}>FINALS</span>
                   )}
-                  <span style={{ fontSize: 11, color: "var(--taupe)" }}>{origCount}</span>
+                  <span style={{ fontSize: 11, color: "var(--taupe)" }}>{c.photoCount}</span>
                 </div>
               </button>
             );
@@ -589,7 +640,12 @@ export default function SharePage() {
                 </div>
               )}
 
-              {activeTabPhotos.length === 0 ? (
+              {isPhotosLoading ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px", gap: 12 }}>
+                  <Loader2 size={24} color="var(--gold)" style={{ animation: "spin 1s linear infinite" }} />
+                  <p style={{ fontSize: 13, color: "var(--taupe)" }}>Loading photos…</p>
+                </div>
+              ) : activeTabPhotos.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "80px 20px", color: "var(--taupe)" }}>
                   <ImageIcon size={36} style={{ marginBottom: 12, opacity: 0.4 }} />
                   <p style={{ fontSize: 14 }}>

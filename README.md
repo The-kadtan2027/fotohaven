@@ -356,54 +356,62 @@ You need a tunnel to make your phone server accessible from outside your home ne
 | **Bandwidth** | Unlimited | Undisclosed limits (fine for photo sharing) |
 | **Setup time** | ~5 min | ~15 min (builds from source) |
 
-#### Option A — Cloudflare Tunnel
+#### Option A — Cloudflare Tunnel (Custom Domain)
 
-Cloudflare Tunnel creates an encrypted outbound connection from your phone to Cloudflare's global edge network. No port forwarding, no static IP, no router settings.
+This is the best option for a professional look. It gives you a permanent URL like `https://fotohaven.net` (or `https://gallery.fotohaven.net`) that never changes, using Cloudflare's secure tunnel so you don't have to open ports on your WiFi router.
 
-**7a — Authenticate**
+**Step 7.1 — Add your domain to Cloudflare**
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) and log in.
+2. Click **Add a Site** and enter your new domain (e.g., `fotohaven.net`). Select the **Free plan**.
+3. Cloudflare will give you two "Nameservers" (like `olga.ns.cloudflare.com`).
+4. Go to the website where you bought your domain (Namecheap, GoDaddy, etc.), find "DNS Settings" or "Nameservers", and paste the two Cloudflare nameservers there.
+5. Wait a few minutes for the domain to activate in Cloudflare.
+
+**Step 7.2 — Authenticate your phone**
+On your phone (in Termux), run:
 ```bash
 cloudflared tunnel login
-# Opens a URL — open in browser, log in, select your domain
 ```
+This will print a long URL. Copy that URL, paste it into your browser, log in to Cloudflare, and select your domain (`fotohaven.net`). This links your phone to your account.
 
-**7b — Create the tunnel**
+**Step 7.3 — Create the tunnel**
 ```bash
 cloudflared tunnel create fotohaven
-# Prints: Created tunnel fotohaven with id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-# Save this UUID
 ```
+*It will print: `Created tunnel fotohaven with id xxxxxxxx-xxxx-xxxx...`*
+*Copy that UUID (the long string of letters and numbers)!*
 
-**7c — Edit the config file**
+**Step 7.4 — Tell the tunnel where to send traffic**
+Create a configuration file:
 ```bash
 nano ~/fotohaven/infra/android/cloudflared-config.yml
 ```
-
-Replace placeholders:
+Paste this inside (replace `your-tunnel-uuid` with the UUID you copied, and `fotohaven.net` with your domain):
 ```yaml
-tunnel: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-credentials-file: /data/data/com.termux/files/home/.cloudflared/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.json
+tunnel: your-tunnel-uuid
+credentials-file: /data/data/com.termux/files/home/.cloudflared/your-tunnel-uuid.json
 
 ingress:
-  - hostname: fotohaven.yourdomain.com
+  - hostname: fotohaven.net
     service: http://localhost:3000
   - service: http_status:404
 ```
+*Save and exit (Ctrl+O, Enter, Ctrl+X).*
 
-**7d — Route DNS**
+**Step 7.5 — Route the traffic on your domain**
+Tell Cloudflare to point your domain to the tunnel:
 ```bash
-cloudflared tunnel route dns fotohaven fotohaven.yourdomain.com
-# Auto-creates a CNAME in your Cloudflare DNS
+cloudflared tunnel route dns fotohaven fotohaven.net
 ```
 
-**7e — Start the tunnel**
+**Step 7.6 — Start the tunnel**
 ```bash
 cloudflared tunnel --config ~/fotohaven/infra/android/cloudflared-config.yml run &
 ```
 
-Your app is now live at `https://fotohaven.yourdomain.com` 🎉
+> **Update your app settings:** Finally, open `nano ~/fotohaven/.env.local` and set `NEXT_PUBLIC_APP_URL="https://fotohaven.net"`. Then restart your app: `pm2 restart fotohaven`.
 
-> **Quick test with no domain (Automated):**
-> Run `bash ~/fotohaven/infra/android/start-cloudflare.sh` to automatically start a Quick Tunnel, grab the new `*.trycloudflare.com` URL, inject it into `.env.local`, and restart Next.js to apply the correct base URL.
+Your private photo platform is now permanently live at your custom domain! 🎉
 
 #### Option B — Tailscale Funnel (recommended for experiments)
 
@@ -570,6 +578,21 @@ pm2 reload fotohaven           # zero-downtime reload
 ---
 
 ### Troubleshooting
+
+**Cloudflare Error 525 (SSL Handshake Failed)**
+- **Config check:** In `cloudflared-config.yml`, ensure the `service:` is set exactly to `http://localhost:3000` (not `https`).
+- **Old DNS Records:** Go to Cloudflare Dashboard → DNS. Delete any old `A` records or "Parked Domain" IPs inherited from the domain registrar. Ensure only `CNAME` records exist pointing to your `.cfargotunnel.com` URL.
+- **SSL Mode:** Go to Cloudflare SSL/TLS → Overview. Set it to **Full** (not "Full (Strict)").
+
+**Cloudflare Error 1033 (Tunnel Error)**
+This means your DNS is correct but the tunnel daemon on your phone is offline.
+- Run `pm2 logs cloudflared --lines 30` to check for crashes.
+- If it says "Your quick Tunnel has been created!", PM2 is ignoring your `cloudflared-config.yml` file. You must completely delete the process and restart it so PM2 reads the file changes:
+  ```bash
+  pm2 delete cloudflared
+  pm2 start ecosystem.config.js
+  pm2 save
+  ```
 
 **App won't start**
 ```bash
