@@ -34,9 +34,6 @@
     "resend": "^6.9.3",
     "uuid": "9.0"
   },
-  "optionalDependencies": {
-    "sharp": "^0.34.5"
-  },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
