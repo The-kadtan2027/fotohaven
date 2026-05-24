@@ -388,7 +388,7 @@ export default function SharePage() {
 
   const downloadFinals = () => {
     if (!album) return;
-    const photoIds = album.ceremonies.flatMap(c => c.photos.filter(p => p.isReturn).map(p => p.id));
+    const photoIds = album.ceremonies.flatMap(c => (ceremonyPhotos[c.id] || []).filter(p => p.isReturn).map(p => p.id));
     if (photoIds.length === 0) return;
     requestDownload(photoIds, `${album.title} — Delivered Finals`);
   };
@@ -651,16 +651,17 @@ export default function SharePage() {
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => selectAllInCeremony(activeCeremonyData)}
-                    style={{ fontSize: 12 }}
-                  >
-                    <Check size={13} />
-                    {activeCeremonyData.photos.every((p) => selectedPhotos.has(p.id))
-                      ? "Deselect All"
-                      : "Select All"}
-                  </button>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => selectAllInCeremony(activeCeremonyData)}
+                      style={{ fontSize: 12 }}
+                    >
+                      <Check size={13} />
+                      {(ceremonyPhotos[activeCeremonyData.id] || []).length > 0 && 
+                       (ceremonyPhotos[activeCeremonyData.id] || []).every((p) => selectedPhotos.has(p.id))
+                        ? "Deselect All"
+                        : "Select All"}
+                    </button>
                   <button
                     className="btn-ghost"
                     onClick={() => downloadCeremony(activeCeremonyData)}
