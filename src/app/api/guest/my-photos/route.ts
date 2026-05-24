@@ -108,7 +108,7 @@ function scoreMatches(
   return Array.from(bestDistanceByPhoto.entries())
     .sort((a, b) => a[1] - b[1])
     .slice(0, FACE_CONFIG.maxResults)
-    .map(([photoId, score]) => {
+    .map(async ([photoId, score]) => {
       const details = photoDetails.get(photoId)!;
       return {
         photoId,
@@ -116,8 +116,8 @@ function scoreMatches(
         faceCount: faceCountByPhoto.get(photoId) || 1,
         id: photoId,
         originalName: details.originalName,
-        url: getPresignedUrl(details.thumbnailKey || details.storageKey),
-        originalUrl: getPresignedUrl(details.storageKey),
+        url: await getPresignedUrl(details.thumbnailKey || details.storageKey),
+        originalUrl: await getPresignedUrl(details.storageKey),
       };
     });
 }
@@ -190,7 +190,8 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
       ? FACE_CONFIG.possibleMatchThreshold
       : FACE_CONFIG.matchThreshold;
 
-  const matched = scoreMatches(referenceDescriptor, faces, threshold);
+  const matchedPromises = scoreMatches(referenceDescriptor, faces, threshold);
+  const matched = await Promise.all(matchedPromises);
 
   return noStoreJson({
     photos: matched,
