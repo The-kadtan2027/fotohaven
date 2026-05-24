@@ -187,6 +187,12 @@ export async function GET() {
       system: os.uptime(),
       process: process.uptime(),
     },
+    platform: {
+      arch: os.arch(),
+      platform: os.platform(),
+      cpus: os.cpus().length,
+      loadAvg: os.loadavg(),
+    },
     disk: getDiskUsage(),
     dbSize: getDbSize(),
     pm2: getPm2Info(),
