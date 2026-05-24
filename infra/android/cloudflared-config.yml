@@ -14,16 +14,16 @@
 #   cloudflared tunnel --url http://localhost:3000
 #   → gives you a random *.trycloudflare.com URL instantly
 
-tunnel: YOUR_TUNNEL_UUID_HERE
-credentials-file: /data/data/com.termux/files/home/.cloudflared/YOUR_TUNNEL_UUID_HERE.json
+tunnel: 35ca070e-6e3d-4467-8caf-f2d126285c7d
+credentials-file: /data/data/com.termux/files/home/.cloudflared/35ca070e-6e3d-4467-8caf-f2d126285c7d.json
 
 ingress:
   # Main app
-  - hostname: yourdomain.com
+  - hostname: fotohaven.live
     service: http://localhost:3000
 
   # www redirect (optional)
-  - hostname: www.yourdomain.com
+  - hostname: www.fotohaven.live
     service: http://localhost:3000
 
   # Catch-all — required by cloudflared, returns 404 for unknown hosts
