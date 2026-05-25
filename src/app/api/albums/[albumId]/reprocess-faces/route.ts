@@ -21,9 +21,9 @@ export async function POST(
       return NextResponse.json({ resetCount: 0 });
     }
 
-    await db.transaction(async (tx) => {
-      await tx.delete(photoFaces).where(inArray(photoFaces.photoId, photoIds));
-      await tx.update(photos).set({ faceProcessed: false }).where(inArray(photos.id, photoIds));
+    db.transaction((tx) => {
+      tx.delete(photoFaces).where(inArray(photoFaces.photoId, photoIds)).run();
+      tx.update(photos).set({ faceProcessed: false }).where(inArray(photos.id, photoIds)).run();
     });
 
     return NextResponse.json({ resetCount: photoIds.length });
