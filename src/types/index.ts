@@ -42,6 +42,10 @@ export interface Album {
   compressionQuality?: number;
   compressionFormat?: "jpeg" | "webp" | "original";
   dedupThreshold?: number;
+  highThreshold?: number | null;
+  lowThreshold?: number | null;
+  faceEnrollmentBackend?: "browser" | "remote_python";
+  remoteFaceServiceUrl?: string | null;
   ceremonies: Ceremony[];
 }
 

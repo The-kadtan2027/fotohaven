@@ -1,12 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { FACE_CONFIG } from "@/lib/face-config";
 
-const FACE_SERVICE = "http://127.0.0.1:5001";
+function getFaceServiceUrl() {
+  if (FACE_CONFIG.enrollmentBackend !== "remote_python" || !FACE_CONFIG.remoteServiceUrl) {
+    return null;
+  }
+  return FACE_CONFIG.remoteServiceUrl;
+}
 
 async function proxyJson(
   input: string,
   init?: RequestInit,
   fallbackError = "Face service unavailable"
 ) {
+  if (!input) {
+    return NextResponse.json(
+      { error: "Remote Python face service is not configured." },
+      { status: 501 }
+    );
+  }
   try {
     const response = await fetch(input, {
       ...init,
@@ -28,8 +40,9 @@ export async function POST(
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   const { eventId } = await params;
+  const faceService = getFaceServiceUrl();
   return proxyJson(
-    `${FACE_SERVICE}/enroll`,
+    faceService ? `${faceService}/enroll` : "",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -44,8 +57,9 @@ export async function GET(
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   const { eventId } = await params;
+  const faceService = getFaceServiceUrl();
   return proxyJson(
-    `${FACE_SERVICE}/enroll/status/${eventId}`,
+    faceService ? `${faceService}/enroll/status/${eventId}` : "",
     {
       signal: AbortSignal.timeout(3_000),
     }

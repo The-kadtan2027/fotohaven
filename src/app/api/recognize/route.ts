@@ -4,8 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { guests } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
-
-const FACE_SERVICE = "http://127.0.0.1:5001";
+import { FACE_CONFIG } from "@/lib/face-config";
 
 type RecognizeBody = {
   event_id?: string;
@@ -54,7 +53,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const response = await fetch(`${FACE_SERVICE}/search`, {
+    if (FACE_CONFIG.enrollmentBackend !== "remote_python" || !FACE_CONFIG.remoteServiceUrl) {
+      return NextResponse.json(
+        { error: "Remote Python face service is not configured." },
+        { status: 501 }
+      );
+    }
+
+    const response = await fetch(`${FACE_CONFIG.remoteServiceUrl}/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

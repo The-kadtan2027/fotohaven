@@ -76,6 +76,8 @@ interface Album {
   dedupThreshold?: number;
   highThreshold?: number | null;
   lowThreshold?: number | null;
+  faceEnrollmentBackend?: "browser" | "remote_python";
+  remoteFaceServiceUrl?: string | null;
   ceremonies: Ceremony[];
   activityLogs?: ActivityLog[];
 }
@@ -540,6 +542,7 @@ export default function AlbumPage() {
   };
 
   const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
+  const usesRemoteFaceEnrollment = album?.faceEnrollmentBackend === "remote_python";
 
   if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
   if (!album || (!activeCeremonyData && activeCeremony !== "ACTIVITY")) return <CenteredState><p>Album not found.</p></CenteredState>;
@@ -636,10 +639,12 @@ export default function AlbumPage() {
                   {duplicateScanError ? <p style={{ fontSize: 12, color: "var(--blush)", marginTop: 6 }}>{duplicateScanError}</p> : null}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn-gold" onClick={triggerEnroll} style={{ fontSize: 12 }} disabled={enrollRunning}>
-                    {enrollRunning ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={12} />}
-                    {enrollRunning ? "Processing..." : "Process Faces"}
-                  </button>
+                  {usesRemoteFaceEnrollment ? (
+                    <button className="btn-gold" onClick={triggerEnroll} style={{ fontSize: 12 }} disabled={enrollRunning}>
+                      {enrollRunning ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={12} />}
+                      {enrollRunning ? "Processing..." : "Process Faces"}
+                    </button>
+                  ) : null}
                   <button className="btn-ghost" onClick={reprocessFaces} style={{ fontSize: 12 }} disabled={isReprocessingFaces}>{isReprocessingFaces ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : null}{isReprocessingFaces ? "Resetting..." : "Reprocess Faces"}</button>
                   <button className="btn-ghost" onClick={findDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Find Duplicates"}</button>
                   <button className="btn-ghost" onClick={rescanDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Rescan Duplicates"}</button>
@@ -697,11 +702,17 @@ export default function AlbumPage() {
                     Face Recognition
                   </p>
                   <p style={{ fontSize: 12, color: "var(--brown)", marginTop: 6 }}>
-                    Tune the face-service match cutoffs used when guests search for their photos.
+                    {usesRemoteFaceEnrollment
+                      ? "Guests still match on the phone with pure JS cosine similarity. Photographer enrollment runs through the configured remote Python service."
+                      : "Photographer enrollment runs in this browser with face-api.js. Guests still match on the phone with pure JS cosine similarity."}
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 6 }}>
+                    Backend: <strong>{usesRemoteFaceEnrollment ? "remote_python" : "browser"}</strong>
+                    {usesRemoteFaceEnrollment && album.remoteFaceServiceUrl ? <> · {album.remoteFaceServiceUrl}</> : null}
                   </p>
                 </div>
                 <label style={{ display: "grid", gap: 8 }}>
-                  <span style={settingsLabel}>Definite Match Threshold: {highThreshold.toFixed(2)}</span>
+                  <span style={settingsLabel}>Strong Match Similarity: {highThreshold.toFixed(2)}</span>
                   <input
                     type="range"
                     min={0.5}
@@ -712,7 +723,7 @@ export default function AlbumPage() {
                   />
                 </label>
                 <label style={{ display: "grid", gap: 8 }}>
-                  <span style={settingsLabel}>Possible Match Threshold: {lowThreshold.toFixed(2)}</span>
+                  <span style={settingsLabel}>Possible Match Similarity: {lowThreshold.toFixed(2)}</span>
                   <input
                     type="range"
                     min={0.3}
@@ -723,7 +734,7 @@ export default function AlbumPage() {
                   />
                 </label>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  <p style={{ fontSize: 12, color: "var(--brown)" }}>Lower values show more photos. Higher values are stricter.</p>
+                  <p style={{ fontSize: 12, color: "var(--brown)" }}>Higher similarity values are stricter. Matching is computed in Node.js on the phone.</p>
                   <button className="btn-gold" onClick={saveThresholds} disabled={lowThreshold >= highThreshold} style={{ fontSize: 12 }}>
                     <Check size={12} />
                     Save thresholds
@@ -795,10 +806,12 @@ export default function AlbumPage() {
         />
       )}
 
-      <FaceProcessor photos={(album.ceremonies ?? []).flatMap((ceremony) => ceremony.photos.map((photo) => { 
-        const useOriginal = FACE_CONFIG.scanSource === "original" && Boolean(photo.originalUrl); 
-        return { id: photo.id, url: useOriginal ? photo.originalUrl! : photo.url, faceProcessed: Boolean(photo.faceProcessed), scanSource: useOriginal ? "original" : "thumbnail" }; 
-      }))} />
+      {album.faceEnrollmentBackend !== "remote_python" ? (
+        <FaceProcessor photos={(album.ceremonies ?? []).flatMap((ceremony) => ceremony.photos.map((photo) => { 
+          const useOriginal = FACE_CONFIG.scanSource === "original" && Boolean(photo.originalUrl); 
+          return { id: photo.id, url: useOriginal ? photo.originalUrl! : photo.url, faceProcessed: Boolean(photo.faceProcessed), scanSource: useOriginal ? "original" : "thumbnail" }; 
+        }))} />
+      ) : null}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

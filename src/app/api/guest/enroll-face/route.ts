@@ -10,7 +10,12 @@ type EnrollFaceBody = {
 };
 
 function isDescriptor(value: unknown): value is number[] {
-  return Array.isArray(value) && value.length === 128 && value.every((n) => typeof n === "number");
+  return (
+    Array.isArray(value) &&
+    value.length >= 64 &&
+    value.length <= 2048 &&
+    value.every((n) => typeof n === "number" && Number.isFinite(n))
+  );
 }
 
 export async function POST(request: Request) {
@@ -35,7 +40,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as EnrollFaceBody;
     if (!isDescriptor(body.descriptor)) {
       return NextResponse.json(
-        { error: "descriptor must be an array of 128 numbers" },
+        { error: "descriptor must be an array of 64-2048 finite numbers" },
         { status: 400 }
       );
     }

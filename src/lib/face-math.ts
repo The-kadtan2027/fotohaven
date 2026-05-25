@@ -29,6 +29,10 @@ export function cosineDistance(a: Float32Array, b: Float32Array): number {
   return 1 - similarity;
 }
 
+export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  return 1 - cosineDistance(a, b);
+}
+
 export function euclideanDistance(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) {
     throw new Error("Descriptor length mismatch");

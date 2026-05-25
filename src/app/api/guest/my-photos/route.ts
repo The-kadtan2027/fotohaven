@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
+import { albums, ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 import { getPresignedUrl } from "@/lib/storage";
 import { FACE_CONFIG } from "@/lib/face-config";
 import {
   averageDescriptors,
-  euclideanDistance,
+  cosineSimilarity,
   parseDescriptor,
 } from "@/lib/face-math";
 
@@ -24,6 +24,14 @@ type AlbumFace = {
   id: string;
   photoId: string;
   descriptor: string;
+  storageKey: string;
+  thumbnailKey: string | null;
+  originalName: string;
+};
+
+type MatchThresholds = {
+  strong: number;
+  possible: number;
 };
 
 function noStoreJson(body: unknown, init?: ResponseInit) {
@@ -70,13 +78,29 @@ function getAlbumFaces(albumId: string) {
     .all();
 }
 
+function getAlbumThresholds(albumId: string): MatchThresholds {
+  const album = db
+    .select({
+      highThreshold: albums.highThreshold,
+      lowThreshold: albums.lowThreshold,
+    })
+    .from(albums)
+    .where(eq(albums.id, albumId))
+    .get();
+
+  return {
+    strong: album?.highThreshold ?? FACE_CONFIG.strongMatchThreshold,
+    possible: album?.lowThreshold ?? FACE_CONFIG.possibleMatchThreshold,
+  };
+}
+
 function scoreMatches(
   referenceDescriptor: Float32Array,
-  faces: any[],
-  threshold: number
+  faces: AlbumFace[],
+  thresholds: MatchThresholds
 ) {
   const photoDetails = new Map<string, { storageKey: string; thumbnailKey: string | null; originalName: string }>();
-  const bestDistanceByPhoto = new Map<string, number>();
+  const bestSimilarityByPhoto = new Map<string, number>();
   const faceCountByPhoto = new Map<string, number>();
 
   for (const face of faces) {
@@ -90,14 +114,14 @@ function scoreMatches(
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
     
     try {
-      const distance = euclideanDistance(
+      const similarity = cosineSimilarity(
         referenceDescriptor,
         parseDescriptor(face.descriptor)
       );
-      if (distance <= threshold) {
-        const current = bestDistanceByPhoto.get(face.photoId);
-        if (current === undefined || distance < current) {
-          bestDistanceByPhoto.set(face.photoId, distance);
+      if (similarity >= thresholds.possible) {
+        const current = bestSimilarityByPhoto.get(face.photoId);
+        if (current === undefined || similarity > current) {
+          bestSimilarityByPhoto.set(face.photoId, similarity);
         }
       }
     } catch {
@@ -105,8 +129,8 @@ function scoreMatches(
     }
   }
 
-  return Array.from(bestDistanceByPhoto.entries())
-    .sort((a, b) => a[1] - b[1])
+  return Array.from(bestSimilarityByPhoto.entries())
+    .sort((a, b) => b[1] - a[1])
     .slice(0, FACE_CONFIG.maxResults)
     .map(async ([photoId, score]) => {
       const details = photoDetails.get(photoId)!;
@@ -136,14 +160,14 @@ function buildRefinedDescriptor(
   for (const photoId of uniquePhotoIds) {
     const candidateFaces = faces.filter((face) => face.photoId === photoId);
     let bestDescriptor: Float32Array | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestSimilarity = Number.NEGATIVE_INFINITY;
 
     for (const face of candidateFaces) {
       try {
         const parsed = parseDescriptor(face.descriptor);
-        const distance = euclideanDistance(guestDescriptor, parsed);
-        if (distance < bestDistance) {
-          bestDistance = distance;
+        const similarity = cosineSimilarity(guestDescriptor, parsed);
+        if (similarity > bestSimilarity) {
+          bestSimilarity = similarity;
           bestDescriptor = parsed;
         }
       } catch {
@@ -180,23 +204,21 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
   }
 
+  const thresholds = getAlbumThresholds(guest.albumId);
   const referenceDescriptor =
     source === "refined" && confirmedPhotoIds?.length
       ? buildRefinedDescriptor(guestDescriptor, confirmedPhotoIds, faces)
       : guestDescriptor;
 
-  const threshold =
-    source === "refined"
-      ? FACE_CONFIG.possibleMatchThreshold
-      : FACE_CONFIG.matchThreshold;
-
-  const matchedPromises = scoreMatches(referenceDescriptor, faces, threshold);
+  const matchedPromises = scoreMatches(referenceDescriptor, faces, thresholds);
   const matched = await Promise.all(matchedPromises);
 
   return noStoreJson({
     photos: matched,
     guest: { name: guest.name },
     source,
+    thresholds,
+    metric: "cosine_similarity",
   });
 }
 

@@ -26,6 +26,11 @@ function readString(serverName: string, publicName: string, fallback: string, al
   return fallback;
 }
 
+function readOptionalString(serverName: string, publicName: string) {
+  const val = readEnvValue(serverName, publicName)?.trim();
+  return val ? val.replace(/\/+$/, "") : null;
+}
+
 const strongMatchThreshold = readNumber(
   "FACE_STRONG_MATCH_THRESHOLD",
   "NEXT_PUBLIC_FACE_STRONG_MATCH_THRESHOLD",
@@ -46,6 +51,16 @@ const possibleMatchThreshold = Math.max(
 );
 
 export const FACE_CONFIG = {
+  enrollmentBackend: readString(
+    "FACE_ENROLLMENT_BACKEND",
+    "NEXT_PUBLIC_FACE_ENROLLMENT_BACKEND",
+    "browser",
+    ["browser", "remote_python"]
+  ),
+  remoteServiceUrl: readOptionalString(
+    "FACE_REMOTE_SERVICE_URL",
+    "NEXT_PUBLIC_FACE_REMOTE_SERVICE_URL"
+  ),
   matchThreshold: Math.max(
     possibleMatchThreshold,
     readNumber("FACE_MATCH_THRESHOLD", "NEXT_PUBLIC_FACE_MATCH_THRESHOLD", 0.4, 0.2, 0.8)
@@ -82,4 +97,5 @@ export const FACE_CONFIG = {
   ),
   maxResults: readInteger("FACE_MAX_RESULTS", "NEXT_PUBLIC_FACE_MAX_RESULTS", 60, 1, 5000),
   scanSource: readString("FACE_SCAN_SOURCE", "NEXT_PUBLIC_FACE_SCAN_SOURCE", "original", ["thumbnail", "original"]),
+  queryMetric: "cosine_similarity",
 } as const;

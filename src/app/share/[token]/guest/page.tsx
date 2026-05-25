@@ -36,6 +36,8 @@ type MatchResponse = {
   photos?: (Photo & { score: number; faceCount?: number })[];
   guest?: { name?: string };
   source?: MatchSource;
+  thresholds?: { strong: number; possible: number };
+  metric?: string;
   error?: string;
 };
 
@@ -60,6 +62,10 @@ export default function GuestFaceDiscoveryPage() {
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewSelections, setReviewSelections] = useState<string[]>([]);
+  const [matchThresholds, setMatchThresholds] = useState<{ strong: number; possible: number }>({
+    strong: FACE_CONFIG.strongMatchThreshold,
+    possible: FACE_CONFIG.possibleMatchThreshold,
+  });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -250,6 +256,9 @@ export default function GuestFaceDiscoveryPage() {
     const resolvedSource = matchData.source || source;
     setMatchSource(resolvedSource);
     setGuestName(matchData.guest?.name || options?.fallbackName || "");
+    if (matchData.thresholds) {
+      setMatchThresholds(matchData.thresholds);
+    }
     
     const scored = matchData.photos || [];
 
@@ -276,10 +285,10 @@ export default function GuestFaceDiscoveryPage() {
         const aSingle = a.faceCount === 1 ? 1 : 0;
         const bSingle = b.faceCount === 1 ? 1 : 0;
         if (aSingle !== bSingle) return bSingle - aSingle;
-        return a.score - b.score;
+        return b.score - a.score;
       });
     } else {
-      matched.sort((a, b) => a.score - b.score);
+      matched.sort((a, b) => b.score - a.score);
     }
 
     setMatchedPhotos(matched);
@@ -823,7 +832,7 @@ export default function GuestFaceDiscoveryPage() {
                             bottom: 6,
                             left: 6,
                             background:
-                              photo.score < FACE_CONFIG.strongMatchThreshold
+                              photo.score >= matchThresholds.strong
                                 ? "rgba(34,197,94,0.88)"
                                 : "rgba(234,179,8,0.88)",
                             color: "#fff",
@@ -834,7 +843,7 @@ export default function GuestFaceDiscoveryPage() {
                             letterSpacing: "0.03em",
                           }}
                         >
-                          {photo.score < FACE_CONFIG.strongMatchThreshold ? "Strong match" : "Possible match"}
+                          {photo.score >= matchThresholds.strong ? "Strong match" : "Possible match"}
                         </span>
                       </button>
                       <button

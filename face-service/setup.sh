@@ -3,6 +3,16 @@ set -e
 
 echo "=== FotoHaven Face Service Setup ==="
 
+# Termux / Android builds sometimes need the platform API level exposed for
+# Rust-based Python packages such as orjson.
+if [ -z "${ANDROID_API_LEVEL:-}" ]; then
+  export ANDROID_API_LEVEL="$(getprop ro.build.version.sdk 2>/dev/null || true)"
+fi
+
+if [ -n "${ANDROID_API_LEVEL:-}" ]; then
+  echo "Using ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
+fi
+
 # 1. System packages
 pkg install -y \
   python \
@@ -12,6 +22,7 @@ pkg install -y \
   libjpeg-turbo \
   libpng \
   clang \
+  rust \
   make \
   pkg-config
 
