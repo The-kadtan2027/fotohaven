@@ -74,6 +74,8 @@ interface Album {
   compressionQuality?: number;
   compressionFormat?: CompressionFormat;
   dedupThreshold?: number;
+  highThreshold?: number | null;
+  lowThreshold?: number | null;
   ceremonies: Ceremony[];
   activityLogs?: ActivityLog[];
 }
@@ -114,6 +116,10 @@ export default function AlbumPage() {
   const [duplicateSourcePhotos, setDuplicateSourcePhotos] = useState<Photo[] | null>(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [isReprocessingFaces, setIsReprocessingFaces] = useState(false);
+  const [enrollStatus, setEnrollStatus] = useState("");
+  const [enrollRunning, setEnrollRunning] = useState(false);
+  const [highThreshold, setHighThreshold] = useState(0.7);
+  const [lowThreshold, setLowThreshold] = useState(0.55);
 
   const fetchAlbum = useCallback(async () => {
     try {
@@ -128,6 +134,8 @@ export default function AlbumPage() {
       setCompressionFormat(data.compressionFormat ?? "webp");
       setCompressionQuality(data.compressionQuality ?? 80);
       setDedupThreshold(data.dedupThreshold ?? 10);
+      setHighThreshold(data.highThreshold ?? 0.7);
+      setLowThreshold(data.lowThreshold ?? 0.55);
       
       setActiveCeremony((current) => {
         if (current === "ACTIVITY") return current;
@@ -444,6 +452,93 @@ export default function AlbumPage() {
     }
   };
 
+  const triggerEnroll = async () => {
+    if (!album || enrollRunning) return;
+
+    setEnrollRunning(true);
+    setEnrollStatus("Starting...");
+
+    try {
+      const response = await fetch(`/api/admin/enroll/${album.id}`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to start face enrollment");
+      }
+
+      let done = false;
+      while (!done) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        const statusResp = await fetch(`/api/admin/enroll/${album.id}`, { cache: "no-store" });
+        const statusData = await statusResp.json().catch(() => ({}));
+
+        if (!statusResp.ok) {
+          throw new Error(statusData.error || "Failed to fetch enrollment status");
+        }
+
+        if (statusData.running) {
+          const current = typeof statusData.current === "number" ? statusData.current : 0;
+          const total = typeof statusData.total === "number" ? statusData.total : 0;
+          setEnrollStatus(`Processing ${current} / ${total} photos...`);
+          continue;
+        }
+
+        done = true;
+        if (statusData.error) {
+          throw new Error(statusData.error);
+        }
+
+        const facesFound = typeof statusData.faces_found === "number" ? statusData.faces_found : 0;
+        const processed = typeof statusData.processed === "number" ? statusData.processed : 0;
+        setEnrollStatus(`Done - ${facesFound} faces found in ${processed} photos`);
+        await fetchAlbum();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Face enrollment failed";
+      setEnrollStatus(`Error: ${message}`);
+      toast(message, "error");
+    } finally {
+      setEnrollRunning(false);
+    }
+  };
+
+  const saveThresholds = async () => {
+    if (!album) return;
+    if (lowThreshold >= highThreshold) {
+      toast("Possible threshold must stay below definite threshold.", "error");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/events/${album.id}/thresholds`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          high_threshold: highThreshold,
+          low_threshold: lowThreshold,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to save thresholds");
+      }
+
+      setAlbum((current) =>
+        current
+          ? {
+              ...current,
+              highThreshold,
+              lowThreshold,
+            }
+          : current
+      );
+      toast("Face match thresholds saved.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save thresholds";
+      toast(message, "error");
+    }
+  };
+
   const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
 
   if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
@@ -541,12 +636,17 @@ export default function AlbumPage() {
                   {duplicateScanError ? <p style={{ fontSize: 12, color: "var(--blush)", marginTop: 6 }}>{duplicateScanError}</p> : null}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn-gold" onClick={triggerEnroll} style={{ fontSize: 12 }} disabled={enrollRunning}>
+                    {enrollRunning ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={12} />}
+                    {enrollRunning ? "Processing..." : "Process Faces"}
+                  </button>
                   <button className="btn-ghost" onClick={reprocessFaces} style={{ fontSize: 12 }} disabled={isReprocessingFaces}>{isReprocessingFaces ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : null}{isReprocessingFaces ? "Resetting..." : "Reprocess Faces"}</button>
                   <button className="btn-ghost" onClick={findDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Find Duplicates"}</button>
                   <button className="btn-ghost" onClick={rescanDuplicates} style={{ fontSize: 12 }} disabled={isFindingDuplicates}>{isFindingDuplicates ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}{isFindingDuplicates ? "Scanning..." : "Rescan Duplicates"}</button>
                   {activeCeremonyData.photos.some((photo) => photo.isReturn) ? <button className="btn-gold" onClick={() => downloadFinals(album, activeCeremonyData)} style={{ fontSize: 12 }}><PackageCheck size={12} />Download Finals</button> : null}
                 </div>
               </div>
+              {enrollStatus ? <p style={{ fontSize: 12, color: enrollStatus.startsWith("Error:") ? "var(--blush)" : "var(--brown)", marginTop: -16, marginBottom: 18 }}>{enrollStatus}</p> : null}
 
               <div {...getRootProps()} style={{ border: `2px dashed ${isDragActive ? "var(--gold)" : "var(--sand)"}`, borderRadius: 16, padding: "32px 24px", textAlign: "center", background: isDragActive ? "rgba(201, 150, 58, 0.04)" : "var(--warm-white)", cursor: "pointer", transition: "all 0.2s ease", marginBottom: 16 }}>
                 <input {...getInputProps()} />
@@ -588,6 +688,47 @@ export default function AlbumPage() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="card" style={{ padding: 18, marginBottom: 24, display: "grid", gap: 18 }}>
+                <div>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso)", display: "inline-flex", alignItems: "center", gap: 10 }}>
+                    <Camera size={16} color="var(--gold)" />
+                    Face Recognition
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--brown)", marginTop: 6 }}>
+                    Tune the face-service match cutoffs used when guests search for their photos.
+                  </p>
+                </div>
+                <label style={{ display: "grid", gap: 8 }}>
+                  <span style={settingsLabel}>Definite Match Threshold: {highThreshold.toFixed(2)}</span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={0.95}
+                    step={0.01}
+                    value={highThreshold}
+                    onChange={(event) => setHighThreshold(Number(event.target.value))}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 8 }}>
+                  <span style={settingsLabel}>Possible Match Threshold: {lowThreshold.toFixed(2)}</span>
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={0.85}
+                    step={0.01}
+                    value={lowThreshold}
+                    onChange={(event) => setLowThreshold(Number(event.target.value))}
+                  />
+                </label>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <p style={{ fontSize: 12, color: "var(--brown)" }}>Lower values show more photos. Higher values are stricter.</p>
+                  <button className="btn-gold" onClick={saveThresholds} disabled={lowThreshold >= highThreshold} style={{ fontSize: 12 }}>
+                    <Check size={12} />
+                    Save thresholds
+                  </button>
+                </div>
               </div>
 
               {uploads.length > 0 && (

@@ -4,7 +4,25 @@ from PIL import Image
 from pathlib import Path
 from typing import Callable, Optional
 import os
-from mtcnn import MTCNN
+
+if os.name == "nt":
+    _MTCNN_CACHE_ROOT = Path(__file__).parent / ".cache" / "windows-localappdata"
+    _MTCNN_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    import platformdirs.windows as _platformdirs_windows
+
+    _original_get_win_folder = _platformdirs_windows.get_win_folder
+
+    def _repo_local_get_win_folder(csidl_name: str) -> str:
+        if csidl_name == "CSIDL_LOCAL_APPDATA":
+            return str(_MTCNN_CACHE_ROOT)
+        return _original_get_win_folder(csidl_name)
+
+    _platformdirs_windows.get_win_folder = _repo_local_get_win_folder
+
+try:
+    from mtcnn_tflite.MTCNN import MTCNN
+except ImportError:
+    from mtcnn import MTCNN
 from inference import get_embedding
 from db import save_embedding, delete_event_embeddings, get_all_photo_paths
 
@@ -14,7 +32,7 @@ _detector = MTCNN()
 # Root path where photo files are stored on disk
 _PHOTO_ROOT = Path(os.environ.get(
     "LOCAL_UPLOAD_PATH",
-    "/data/data/com.termux/files/home/storage/shared/fotohaven"
+    "/data/data/com.termux/files/home/storage/shared/fotohaven-uploads"
 ))
 
 

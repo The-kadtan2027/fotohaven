@@ -5,11 +5,24 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import os
 
-# DB path: resolve relative to this file, or from env var
-_DB_PATH = os.environ.get(
-    "DB_PATH",
-    str(Path(__file__).parent.parent / "dev.db")
-)
+def _resolve_db_path() -> str:
+    db_path = os.environ.get("DB_PATH")
+    if db_path:
+        return db_path
+
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url and database_url.startswith("file:"):
+        return database_url.removeprefix("file:")
+
+    repo_root = Path(__file__).parent.parent
+    local_db = repo_root / "local.db"
+    if local_db.exists():
+        return str(local_db)
+
+    return str(repo_root / "dev.db")
+
+
+_DB_PATH = _resolve_db_path()
 
 
 def _conn() -> sqlite3.Connection:
