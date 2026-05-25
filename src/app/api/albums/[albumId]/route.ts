@@ -44,6 +44,7 @@ export async function GET(
       ...album,
       faceEnrollmentBackend: FACE_CONFIG.enrollmentBackend,
       remoteFaceServiceUrl: FACE_CONFIG.remoteServiceUrl,
+      localNativeServiceUrl: FACE_CONFIG.localNativeServiceUrl,
       ceremonies: await Promise.all(
         album.ceremonies.map(async (ceremony: any) => ({
           ...ceremony,

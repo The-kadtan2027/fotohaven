@@ -53,14 +53,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (FACE_CONFIG.enrollmentBackend !== "remote_python" || !FACE_CONFIG.remoteServiceUrl) {
+    const serviceUrl =
+      FACE_CONFIG.enrollmentBackend === "remote_python"
+        ? FACE_CONFIG.remoteServiceUrl
+        : FACE_CONFIG.enrollmentBackend === "local_native_http"
+          ? FACE_CONFIG.localNativeServiceUrl
+          : null;
+
+    if (!serviceUrl) {
       return NextResponse.json(
-        { error: "Remote Python face service is not configured." },
+        { error: "Configured face extraction service is not available." },
         { status: 501 }
       );
     }
 
-    const response = await fetch(`${FACE_CONFIG.remoteServiceUrl}/search`, {
+    const response = await fetch(`${serviceUrl}/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

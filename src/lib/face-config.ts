@@ -55,11 +55,15 @@ export const FACE_CONFIG = {
     "FACE_ENROLLMENT_BACKEND",
     "NEXT_PUBLIC_FACE_ENROLLMENT_BACKEND",
     "browser",
-    ["browser", "remote_python"]
+    ["browser", "remote_python", "local_native_http"]
   ),
   remoteServiceUrl: readOptionalString(
     "FACE_REMOTE_SERVICE_URL",
     "NEXT_PUBLIC_FACE_REMOTE_SERVICE_URL"
+  ),
+  localNativeServiceUrl: readOptionalString(
+    "FACE_LOCAL_SERVICE_URL",
+    "NEXT_PUBLIC_FACE_LOCAL_SERVICE_URL"
   ),
   matchThreshold: Math.max(
     possibleMatchThreshold,

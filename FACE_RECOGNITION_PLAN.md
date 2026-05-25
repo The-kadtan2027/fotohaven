@@ -1,6 +1,8 @@
 # FotoHaven — Face Recognition Feature
 # Implementation Plan
 
+> **Status correction (2026-05-26):** This document reflects an older Python/TFLite implementation direction. For current Termux-native on-device work, the validated install path is `apt` from the `termux-x11` repo with `opencv 4.13.0-2` and `opencv-python 4.13.0-2`, not the default `pkg` path. `cv2.dnn`, `FaceDetectorYN`, and `FaceRecognizerSF` are available in that build. Use [native-face-service/README.md](/D:/antigravity/files/fotohaven/native-face-service/README.md) and [docs/superpowers/plans/2026-05-25-termux-native-face-http.md](/D:/antigravity/files/fotohaven/docs/superpowers/plans/2026-05-25-termux-native-face-http.md) as the authoritative Termux-native reference.
+>
 > **For agentic workers:** Read this entire document before touching any file.
 > Use `executing-plans` skill to implement task-by-task using the checkboxes below.
 > Every task is self-contained. Do not skip ahead.

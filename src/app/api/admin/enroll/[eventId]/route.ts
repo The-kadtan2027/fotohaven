@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { FACE_CONFIG } from "@/lib/face-config";
 
 function getFaceServiceUrl() {
-  if (FACE_CONFIG.enrollmentBackend !== "remote_python" || !FACE_CONFIG.remoteServiceUrl) {
-    return null;
+  if (FACE_CONFIG.enrollmentBackend === "remote_python" && FACE_CONFIG.remoteServiceUrl) {
+    return FACE_CONFIG.remoteServiceUrl;
   }
-  return FACE_CONFIG.remoteServiceUrl;
+  if (FACE_CONFIG.enrollmentBackend === "local_native_http" && FACE_CONFIG.localNativeServiceUrl) {
+    return FACE_CONFIG.localNativeServiceUrl;
+  }
+  return null;
 }
 
 async function proxyJson(
@@ -15,7 +18,7 @@ async function proxyJson(
 ) {
   if (!input) {
     return NextResponse.json(
-      { error: "Remote Python face service is not configured." },
+      { error: "Configured face extraction service is not available." },
       { status: 501 }
     );
   }

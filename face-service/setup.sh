@@ -2,6 +2,9 @@
 set -e
 
 echo "=== FotoHaven Face Service Setup ==="
+echo "WARNING: Python face-service is experimental and not the default Termux path."
+echo "Preferred production mode is browser enrollment or local native HTTP enrollment."
+echo "For native Termux OpenCV work, use native-face-service/build.sh with apt + termux-x11."
 
 # Termux / Android builds sometimes need the platform API level exposed for
 # Rust-based Python packages such as orjson.

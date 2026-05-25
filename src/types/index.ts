@@ -44,8 +44,9 @@ export interface Album {
   dedupThreshold?: number;
   highThreshold?: number | null;
   lowThreshold?: number | null;
-  faceEnrollmentBackend?: "browser" | "remote_python";
+  faceEnrollmentBackend?: "browser" | "remote_python" | "local_native_http";
   remoteFaceServiceUrl?: string | null;
+  localNativeServiceUrl?: string | null;
   ceremonies: Ceremony[];
 }
 

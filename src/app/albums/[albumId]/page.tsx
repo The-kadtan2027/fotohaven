@@ -76,8 +76,9 @@ interface Album {
   dedupThreshold?: number;
   highThreshold?: number | null;
   lowThreshold?: number | null;
-  faceEnrollmentBackend?: "browser" | "remote_python";
+  faceEnrollmentBackend?: "browser" | "remote_python" | "local_native_http";
   remoteFaceServiceUrl?: string | null;
+  localNativeServiceUrl?: string | null;
   ceremonies: Ceremony[];
   activityLogs?: ActivityLog[];
 }
@@ -543,6 +544,8 @@ export default function AlbumPage() {
 
   const activeCeremonyData = album?.ceremonies.find((ceremony) => ceremony.id === activeCeremony);
   const usesRemoteFaceEnrollment = album?.faceEnrollmentBackend === "remote_python";
+  const usesLocalNativeFaceEnrollment = album?.faceEnrollmentBackend === "local_native_http";
+  const usesServiceEnrollment = usesRemoteFaceEnrollment || usesLocalNativeFaceEnrollment;
 
   if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
   if (!album || (!activeCeremonyData && activeCeremony !== "ACTIVITY")) return <CenteredState><p>Album not found.</p></CenteredState>;
@@ -639,7 +642,7 @@ export default function AlbumPage() {
                   {duplicateScanError ? <p style={{ fontSize: 12, color: "var(--blush)", marginTop: 6 }}>{duplicateScanError}</p> : null}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {usesRemoteFaceEnrollment ? (
+                  {usesServiceEnrollment ? (
                     <button className="btn-gold" onClick={triggerEnroll} style={{ fontSize: 12 }} disabled={enrollRunning}>
                       {enrollRunning ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={12} />}
                       {enrollRunning ? "Processing..." : "Process Faces"}
@@ -704,11 +707,14 @@ export default function AlbumPage() {
                   <p style={{ fontSize: 12, color: "var(--brown)", marginTop: 6 }}>
                     {usesRemoteFaceEnrollment
                       ? "Guests still match on the phone with pure JS cosine similarity. Photographer enrollment runs through the configured remote Python service."
+                      : usesLocalNativeFaceEnrollment
+                        ? "Guests still match on the phone with pure JS cosine similarity. Photographer enrollment runs through a local native HTTP service on Termux."
                       : "Photographer enrollment runs in this browser with face-api.js. Guests still match on the phone with pure JS cosine similarity."}
                   </p>
                   <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 6 }}>
-                    Backend: <strong>{usesRemoteFaceEnrollment ? "remote_python" : "browser"}</strong>
+                    Backend: <strong>{album.faceEnrollmentBackend || "browser"}</strong>
                     {usesRemoteFaceEnrollment && album.remoteFaceServiceUrl ? <> · {album.remoteFaceServiceUrl}</> : null}
+                    {usesLocalNativeFaceEnrollment && album.localNativeServiceUrl ? <> · {album.localNativeServiceUrl}</> : null}
                   </p>
                 </div>
                 <label style={{ display: "grid", gap: 8 }}>
@@ -806,7 +812,7 @@ export default function AlbumPage() {
         />
       )}
 
-      {album.faceEnrollmentBackend !== "remote_python" ? (
+      {album.faceEnrollmentBackend !== "remote_python" && album.faceEnrollmentBackend !== "local_native_http" ? (
         <FaceProcessor photos={(album.ceremonies ?? []).flatMap((ceremony) => ceremony.photos.map((photo) => { 
           const useOriginal = FACE_CONFIG.scanSource === "original" && Boolean(photo.originalUrl); 
           return { id: photo.id, url: useOriginal ? photo.originalUrl! : photo.url, faceProcessed: Boolean(photo.faceProcessed), scanSource: useOriginal ? "original" : "thumbnail" }; 
