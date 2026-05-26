@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config import (
+    ENROLL_WORKERS,
     FACE_LOCAL_SERVICE_BIND,
     FACE_LOCAL_SERVICE_PORT,
     FACE_QUERY_FALLBACK_SIZE,
@@ -35,7 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_executor = ThreadPoolExecutor(max_workers=1)
+_executor = ThreadPoolExecutor(max_workers=ENROLL_WORKERS)
 _enrollment_status: dict[str, dict] = {}
 
 
@@ -74,6 +75,7 @@ def health():
       "model_paths": model_paths(),
       "indexed_events": index_stats(),
       "query_fallback_size": FACE_QUERY_FALLBACK_SIZE,
+      "enroll_workers": ENROLL_WORKERS,
     }
 
 

@@ -18,9 +18,7 @@ from config import (
 )
 
 
-_model_lock = threading.Lock()
-_detector = None
-_recognizer = None
+_tls = threading.local()  # per-thread model instances
 
 
 def model_paths() -> Dict[str, str]:
@@ -40,24 +38,28 @@ def _require_model(path: Path) -> None:
 
 
 def get_models():
-    global _detector, _recognizer
+    """Return (detector, recognizer) that are private to the calling thread."""
+    detector = getattr(_tls, "detector", None)
+    recognizer = getattr(_tls, "recognizer", None)
 
-    with _model_lock:
-        if _detector is None:
-            _require_model(FACE_DETECTOR_MODEL)
-            _detector = cv2.FaceDetectorYN.create(
-                str(FACE_DETECTOR_MODEL),
-                "",
-                (320, 320),
-                FACE_DETECTION_SCORE_THRESHOLD,
-                FACE_DETECTION_NMS_THRESHOLD,
-                FACE_DETECTION_TOP_K,
-            )
-        if _recognizer is None:
-            _require_model(FACE_RECOGNIZER_MODEL)
-            _recognizer = cv2.FaceRecognizerSF.create(str(FACE_RECOGNIZER_MODEL), "")
+    if detector is None:
+        _require_model(FACE_DETECTOR_MODEL)
+        detector = cv2.FaceDetectorYN.create(
+            str(FACE_DETECTOR_MODEL),
+            "",
+            (320, 320),
+            FACE_DETECTION_SCORE_THRESHOLD,
+            FACE_DETECTION_NMS_THRESHOLD,
+            FACE_DETECTION_TOP_K,
+        )
+        _tls.detector = detector
 
-        return _detector, _recognizer
+    if recognizer is None:
+        _require_model(FACE_RECOGNIZER_MODEL)
+        recognizer = cv2.FaceRecognizerSF.create(str(FACE_RECOGNIZER_MODEL), "")
+        _tls.recognizer = recognizer
+
+    return detector, recognizer
 
 
 def decode_base64_image(image_b64: str) -> np.ndarray:

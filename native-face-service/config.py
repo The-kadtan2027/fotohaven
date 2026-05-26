@@ -66,3 +66,12 @@ FACE_DETECTION_NMS_THRESHOLD = _read_float("FACE_DETECTION_NMS_THRESHOLD", 0.3)
 FACE_DETECTION_TOP_K = _read_int("FACE_DETECTION_TOP_K", 5000)
 FACE_QUERY_FALLBACK_SIZE = _read_int("FACE_QUERY_FALLBACK_SIZE", 112)
 
+# Number of parallel threads for face enrollment.
+# Each thread loads its own model (~50 MB), so keep this low on memory-constrained devices.
+# Set via env var ENROLL_WORKERS; defaults to 2.
+import os as _os
+ENROLL_WORKERS = max(1, min(
+    _read_int("ENROLL_WORKERS", 2),
+    _os.cpu_count() or 1,
+))
+
