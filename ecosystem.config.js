@@ -65,5 +65,28 @@ module.exports = {
           merge_logs: true,
         }]
       : []),
+    ...(process.env.ENABLE_NATIVE_FACE_SERVICE === "1"
+      ? [{
+          name: "native-face-service",
+          script: process.platform === "win32" ? "python" : "python3",
+          args: "-m uvicorn main:app --host 127.0.0.1 --port 5080 --workers 1",
+          interpreter: "none",
+          cwd: `${process.env.APP_DIR || "/data/data/com.termux/files/home/fotohaven"}/native-face-service`,
+          autorestart: true,
+          restart_delay: 3000,
+          max_restarts: 10,
+          min_uptime: "10s",
+          watch: false,
+          env: {
+            DB_PATH: "../local.db",
+            LOCAL_UPLOAD_PATH: process.env.LOCAL_UPLOAD_PATH || "/data/data/com.termux/files/home/storage/shared/fotohaven",
+            PYTHONUNBUFFERED: "1",
+          },
+          out_file: "~/.pm2/logs/native-face-service-out.log",
+          error_file: "~/.pm2/logs/native-face-service-error.log",
+          log_date_format: "YYYY-MM-DD HH:mm:ss",
+          merge_logs: true,
+        }]
+      : []),
   ],
 };

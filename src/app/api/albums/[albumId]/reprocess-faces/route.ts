@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { ceremonies, photoFaces, photos } from "@/lib/schema";
+import { ceremonies, faceEmbeddings, photoFaces, photos } from "@/lib/schema";
 
 export async function POST(
   _req: Request,
@@ -23,6 +23,7 @@ export async function POST(
 
     db.transaction((tx) => {
       tx.delete(photoFaces).where(inArray(photoFaces.photoId, photoIds)).run();
+      tx.delete(faceEmbeddings).where(inArray(faceEmbeddings.photoId, photoIds)).run();
       tx.update(photos).set({ faceProcessed: false }).where(inArray(photos.id, photoIds)).run();
     });
 
