@@ -9,6 +9,7 @@ import { FACE_CONFIG } from "@/lib/face-config";
 import {
   averageDescriptors,
   cosineSimilarity,
+  euclideanDistance,
   parseDescriptor,
 } from "@/lib/face-math";
 
@@ -88,9 +89,13 @@ function getAlbumThresholds(albumId: string): MatchThresholds {
     .where(eq(albums.id, albumId))
     .get();
 
+  // Convert distance config to similarity score if fallback is used
+  const defaultStrong = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.strongMatchThreshold));
+  const defaultPossible = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.possibleMatchThreshold));
+
   return {
-    strong: album?.highThreshold ?? FACE_CONFIG.strongMatchThreshold,
-    possible: album?.lowThreshold ?? FACE_CONFIG.possibleMatchThreshold,
+    strong: album?.highThreshold ?? defaultStrong,
+    possible: album?.lowThreshold ?? defaultPossible,
   };
 }
 
@@ -114,10 +119,13 @@ function scoreMatches(
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
     
     try {
-      const similarity = cosineSimilarity(
+      const distance = euclideanDistance(
         referenceDescriptor,
         parseDescriptor(face.descriptor)
       );
+      // Linear map: Euclidean distance → similarity score [0,1]
+      // Calibrated so dist=0.36 → score=0.70 (strong), dist=0.40 → score=0.55 (possible)
+      const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
       if (similarity >= thresholds.possible) {
         const current = bestSimilarityByPhoto.get(face.photoId);
         if (current === undefined || similarity > current) {
@@ -218,7 +226,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
     guest: { name: guest.name },
     source,
     thresholds,
-    metric: "cosine_similarity",
+    metric: "euclidean_mapped",
   });
 }
 
