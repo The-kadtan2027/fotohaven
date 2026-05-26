@@ -46,6 +46,11 @@ def delete_event_embeddings(event_id: str) -> None:
         con.execute("DELETE FROM face_embeddings WHERE event_id = ?", (event_id,))
 
 
+def mark_photo_processed(photo_id: str) -> None:
+    with _conn() as con:
+        con.execute("UPDATE Photo SET faceProcessed = 1 WHERE id = ?", (photo_id,))
+
+
 def get_all_photo_paths(event_id: str) -> List[Tuple[str, str]]:
     with _conn() as con:
         return con.execute(
@@ -53,7 +58,7 @@ def get_all_photo_paths(event_id: str) -> List[Tuple[str, str]]:
             SELECT p.id, p.storageKey
             FROM Photo p
             INNER JOIN Ceremony c ON p.ceremonyId = c.id
-            WHERE c.albumId = ? AND p.isReturn = 0
+            WHERE c.albumId = ? AND p.isReturn = 0 AND p.faceProcessed = 0
             """,
             (event_id,),
         ).fetchall()

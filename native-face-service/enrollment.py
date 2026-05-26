@@ -8,7 +8,7 @@ from typing import Callable, Optional
 import cv2
 
 from config import ENROLL_WORKERS, LOCAL_UPLOAD_PATH
-from db import delete_event_embeddings, get_all_photo_paths, save_embedding
+from db import delete_event_embeddings, get_all_photo_paths, save_embedding, mark_photo_processed
 from opencv_backend import extract_photo_embeddings
 
 
@@ -46,6 +46,7 @@ def _process_single_photo(
             ),
         )
 
+    mark_photo_processed(photo_id)
     return len(embeddings)
 
 
@@ -55,7 +56,6 @@ def enroll_event(
     progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> dict:
     root = photo_root or LOCAL_UPLOAD_PATH
-    delete_event_embeddings(event_id)
 
     photo_rows = get_all_photo_paths(event_id)
     total = len(photo_rows)
