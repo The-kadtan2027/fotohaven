@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/ToastProvider";
+import { PwaInstaller } from "@/components/PwaInstaller";
 
 export const metadata: Metadata = {
   title: "FotoHaven | Professional Photo Handoff",
   description: "Secure, elegant photo delivery for photographers and clients.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#1a1208",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FotoHaven",
+  },
 };
 
 export const dynamic = "force-dynamic";
@@ -17,6 +25,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* PWA Meta Tags */}
+        <meta name="theme-color" content="#1a1208" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
         {/* Google Fonts loaded at runtime (not build time) — required for Android/Termux builds */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -27,9 +41,8 @@ export default function RootLayout({
       </head>
       <body className="antialiased" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
         <ToastProvider>
-          <div style={{ flex: 1 }}>
-            {children}
-          </div>
+          <PwaInstaller />
+          <div style={{ flex: 1 }}>{children}</div>
           <footer
             style={{
               padding: "10px 16px 18px",

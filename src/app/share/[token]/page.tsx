@@ -2,11 +2,12 @@
 // src/app/share/[token]/page.tsx
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useDropzone } from "react-dropzone";
 import {
   Download, FolderOpen, Image as ImageIcon,
   Loader2, X, ZoomIn, ChevronLeft, ChevronRight, Check,
-  MessageSquare, Send, Upload, PackageCheck,
+  MessageSquare, Send, Upload, PackageCheck, Sparkles,
 } from "lucide-react";
 import { Comment } from "@/types";
 
@@ -552,6 +553,27 @@ export default function SharePage() {
 
           {/* Download actions */}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link
+              href={`/share/${token}/guest`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 20px",
+                background: "rgba(201,150,58,0.25)",
+                color: "var(--gold)",
+                border: "1px solid rgba(201,150,58,0.4)",
+                borderRadius: 8,
+                fontSize: 13,
+                cursor: "pointer",
+                transition: "all 0.2s",
+                fontFamily: "var(--font-body)",
+                textDecoration: "none",
+              }}
+            >
+              <Sparkles size={14} />
+              Find My Photos
+            </Link>
             {selectedPhotos.size > 0 ? (
               <button
                 className="btn-gold"

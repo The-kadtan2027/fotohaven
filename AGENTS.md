@@ -1505,36 +1505,76 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ## Task: Share Link QR Code
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Add a QR code popup on the dashboard album cards so photographers can share links via printed cards or WhatsApp image.
 
 ### Affected files
 - `src/app/page.tsx` -- dashboard album card actions
 
 ### Acceptance criteria
-- [ ] Dashboard gains a "QR Code" button next to "Copy Link"
-- [ ] Clicking shows a modal with a rendered QR code for the share URL
-- [ ] QR code is downloadable as PNG
-- [ ] Generated client-side (use qrcode npm package or canvas-based generation)
+- [x] Dashboard gains a "QR Code" button next to "Copy Link"
+- [x] Clicking shows a modal with a rendered QR code for the share URL
+- [x] QR code is downloadable as PNG
+- [x] Generated client-side (use qrcode npm package or canvas-based generation)
 - [x] npx tsc --noEmit passes with zero errors
 
 ---
 
 ## Task: WhatsApp / Social OG Meta Tags on Share Page
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Add Open Graph and WhatsApp preview meta tags to the share page so the link looks rich when pasted in WhatsApp, iMessage, or any chat app.
 
 ### Affected files
-- `src/app/share/[token]/` -- add server component wrapper for generateMetadata()
+- `src/app/share/[token]/layout.tsx` -- Server Component layout exporting generateMetadata()
 
 ### Acceptance criteria
-- [ ] Share page has og:title, og:description, og:image meta tags
-- [ ] og:title shows album title and client name
-- [ ] og:description shows photo count and ceremony count
-- [ ] og:image points to the first photo thumbnail
-- [ ] Uses Next.js 15 App Router generateMetadata()
+- [x] Share page has og:title, og:description, og:image meta tags
+- [x] og:title shows album title and client name
+- [x] og:description shows photo count and ceremony count
+- [x] og:image points to the first photo thumbnail
+- [x] Uses Next.js 15 App Router generateMetadata()
 - [x] npx tsc --noEmit passes with zero errors
+
+---
+
+## Task: Vectorized Face Discovery Pipeline
+
+**Status:** Completed
+**Scope:** Accelerate guest face discovery matching on mobile/Android hardware by using zero-copy contiguous Float32Array matrix caching in Node.js and batch binary buffer deserialization in Python services.
+
+### Modified / New files
+- `src/lib/vector-cache.ts` -- In-memory album vector matrix cache with 15-min LRU TTL & invalidation hooks
+- `src/lib/face-math.ts` -- Vectorized Euclidean distance math using contiguous Float32Array dot products
+- `src/app/api/guest/my-photos/route.ts` -- Refactored discovery route to consume vectorized matrix cache
+- `src/app/api/photos/[photoId]/faces/route.ts` & `src/app/api/albums/[albumId]/reprocess-faces/route.ts` -- Cache invalidation hooks
+- `face-service/search.py` & `native-face-service/search.py` -- Single-pass `np.frombuffer` batch deserialization
+
+### Acceptance criteria
+- [x] Album descriptors are pre-parsed into a flat `Float32Array(N * 128)` matrix cached per album in Node.js server memory
+- [x] Distance calculation uses SIMD dot product identity $\|a_i - b\|^2 = \|a_i\|^2 + \|b\|^2 - 2(a_i \cdot b)$
+- [x] Cache is automatically invalidated on face indexing, reprocessing, or photo deletion
+- [x] Inactive album vector matrices are auto-pruned after 15 minutes of inactivity to save RAM
+- [x] Python `search.py` uses single-pass `np.frombuffer` batch deserialization instead of per-row Python `for` loops
+- [x] No dynamic TFLite tensor resizing is introduced, preserving mobile/ARM hardware safety
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
+## Task: Guest Page Photo View Modes & Mobile Touch Swipe UX
+
+**Status:** Completed
+**Scope:** Enhance the guest photo discovery page with layout view mode switching (Grid / Masonry / Single-Card Focus) and native mobile touch swipe gestures for Lightbox navigation.
+
+### Modified files
+- `src/app/share/[token]/guest/page.tsx` -- View mode switcher toolbar, Masonry & Single-Card feed layouts, mobile touch swipe gesture handlers (`onTouchStart`, `onTouchMove`, `onTouchEnd`), direct single-photo download button on cards
+
+### Acceptance criteria
+- [x] Header toolbar lets guests toggle between Grid (1:1 square), Masonry (composition preserving), and Focus (single-card feed) view modes
+- [x] Mobile touch swipe gestures supported in Lightbox: Swipe Left = Next, Swipe Right = Previous, Swipe Down = Dismiss/Close with pull-down tactile feedback
+- [x] Photo selection for search refinement remains on grid cards (gold border + floating action bar)
+- [x] Grid cards gain direct single-photo download buttons in addition to full Lightbox view button
+- [x] `npx tsc --noEmit` passes with zero errors
 
 ---
 
@@ -1616,3 +1656,26 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] Review wizard strictly displays up to 5 photos, prioritizing single-face shots.
 - [x] Confirming photos immediately runs the refined multi-anchor search automatically.
 - [x] User can skip the wizard to fallback to the full photo grid easily.
+
+---
+
+## Task: PWA & Mobile App Shell
+
+**Status:** Completed
+**Scope:** Convert FotoHaven into an installable Progressive Web App (PWA) with standalone app window display, hybrid offline thumbnail caching, home-screen installation banner, and network offline status indicators.
+
+### Modified / New Files
+- `src/app/manifest.ts` -- Next.js 15 PWA Manifest (standalone display, espresso & cream color tokens)
+- `public/sw.js` -- Service Worker with Cache-First thumbnail strategy (`/api/files/*`), Stale-While-Revalidate assets, and Network-First API data
+- `src/components/PwaInstaller.tsx` -- Client Component managing SW registration, `beforeinstallprompt` banner, and offline badge
+- `src/app/layout.tsx` -- Injected `<PwaInstaller />` and Apple/theme meta tags
+- `scripts/make-pwa-icons.js` -- Icon generator script yielding `icon-192.png`, `icon-512.png`, `icon-192.svg`, `icon-512.svg` in `public/icons/`
+
+### Acceptance criteria
+- [x] Web App Manifest configured with `standalone` display and luxury dark theme color (`#1a1208`)
+- [x] Service Worker auto-registers on page load and caches photo thumbnails (`/api/files/*`) for offline access
+- [x] Unobtrusive 'Install FotoHaven App' prompt banner displays when browser fires `beforeinstallprompt`
+- [x] Offline status badge displays automatically when device network drops
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

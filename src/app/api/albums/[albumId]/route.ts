@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPresignedUrl } from "@/lib/storage";
 import { albums } from "@/lib/schema";
+import { FACE_CONFIG } from "@/lib/face-config";
 import { eq } from "drizzle-orm";
 
 export async function GET(
@@ -41,6 +42,9 @@ export async function GET(
     // Generate presigned URLs for all photos
     const albumWithUrls = {
       ...album,
+      faceEnrollmentBackend: FACE_CONFIG.enrollmentBackend,
+      remoteFaceServiceUrl: FACE_CONFIG.remoteServiceUrl,
+      localNativeServiceUrl: FACE_CONFIG.localNativeServiceUrl,
       ceremonies: await Promise.all(
         album.ceremonies.map(async (ceremony: any) => ({
           ...ceremony,

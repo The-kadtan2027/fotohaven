@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, blob } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
 export const albums = sqliteTable('Album', {
@@ -13,6 +13,8 @@ export const albums = sqliteTable('Album', {
   dedupThreshold: integer('dedupThreshold').notNull().default(10),
   expiresAt:   integer('expiresAt', { mode: 'timestamp_ms' }),
   firstViewedAt: integer('firstViewedAt', { mode: 'timestamp_ms' }),
+  highThreshold: real('high_threshold').default(0.70),
+  lowThreshold:  real('low_threshold').default(0.55),
   createdAt:   integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
   updatedAt:   integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -96,6 +98,20 @@ export const activityLogs = sqliteTable('ActivityLog', {
   payload:   text('payload'),
   createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
 });
+
+export const faceEmbeddings = sqliteTable('face_embeddings', {
+  id:          integer('id').primaryKey({ autoIncrement: true }),
+  eventId:     text('event_id').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+  photoId:     text('photo_id').notNull().references(() => photos.id, { onDelete: 'cascade' }),
+  faceIndex:   integer('face_index').notNull(),   // 0-based, multiple faces per photo
+  embedding:   blob('embedding', { mode: 'buffer' }).notNull(), // 512 × float32 = 2048 bytes
+  bboxX:       real('bbox_x'),
+  bboxY:       real('bbox_y'),
+  bboxW:       real('bbox_w'),
+  bboxH:       real('bbox_h'),
+  createdAt:   integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+});
+
 
 export const albumsRelations = relations(albums, ({ many }) => ({
   ceremonies: many(ceremonies),

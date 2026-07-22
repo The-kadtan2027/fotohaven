@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { ceremonies, guests, photoFaces, photos } from "@/lib/schema";
+import { albums, ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 import { getPresignedUrl } from "@/lib/storage";
 import { FACE_CONFIG } from "@/lib/face-config";
 import {
   averageDescriptors,
-  euclideanDistance,
+  cosineSimilarity,
   parseDescriptor,
+  vectorizedEuclideanDistances,
 } from "@/lib/face-math";
+import { getAlbumVectorMatrix, AlbumVectorMatrix } from "@/lib/vector-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,14 @@ type AlbumFace = {
   id: string;
   photoId: string;
   descriptor: string;
+  storageKey: string;
+  thumbnailKey: string | null;
+  originalName: string;
+};
+
+type MatchThresholds = {
+  strong: number;
+  possible: number;
 };
 
 function noStoreJson(body: unknown, init?: ResponseInit) {
@@ -70,16 +80,43 @@ function getAlbumFaces(albumId: string) {
     .all();
 }
 
-function scoreMatches(
+function getAlbumThresholds(albumId: string): MatchThresholds {
+  const album = db
+    .select({
+      highThreshold: albums.highThreshold,
+      lowThreshold: albums.lowThreshold,
+    })
+    .from(albums)
+    .where(eq(albums.id, albumId))
+    .get();
+
+  // Convert distance config to similarity score if fallback is used
+  const defaultStrong = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.strongMatchThreshold));
+  const defaultPossible = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.possibleMatchThreshold));
+
+  return {
+    strong: album?.highThreshold ?? defaultStrong,
+    possible: album?.lowThreshold ?? defaultPossible,
+  };
+}
+
+function scoreMatchesVectorized(
   referenceDescriptor: Float32Array,
-  faces: any[],
-  threshold: number
+  vectorData: AlbumVectorMatrix,
+  thresholds: MatchThresholds
 ) {
   const photoDetails = new Map<string, { storageKey: string; thumbnailKey: string | null; originalName: string }>();
-  const bestDistanceByPhoto = new Map<string, number>();
+  const bestSimilarityByPhoto = new Map<string, number>();
   const faceCountByPhoto = new Map<string, number>();
 
-  for (const face of faces) {
+  const { matrix, norms, faces, count } = vectorData;
+  if (count === 0) return [];
+
+  // Compute all N Euclidean distances simultaneously using vectorized SIMD dot products
+  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count);
+
+  for (let i = 0; i < count; i++) {
+    const face = faces[i];
     if (!photoDetails.has(face.photoId)) {
       photoDetails.set(face.photoId, {
         storageKey: face.storageKey,
@@ -88,25 +125,19 @@ function scoreMatches(
       });
     }
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
-    
-    try {
-      const distance = euclideanDistance(
-        referenceDescriptor,
-        parseDescriptor(face.descriptor)
-      );
-      if (distance <= threshold) {
-        const current = bestDistanceByPhoto.get(face.photoId);
-        if (current === undefined || distance < current) {
-          bestDistanceByPhoto.set(face.photoId, distance);
-        }
+
+    const distance = distances[i];
+    const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
+    if (similarity >= thresholds.possible) {
+      const current = bestSimilarityByPhoto.get(face.photoId);
+      if (current === undefined || similarity > current) {
+        bestSimilarityByPhoto.set(face.photoId, similarity);
       }
-    } catch {
-      // Skip malformed descriptors silently.
     }
   }
 
-  return Array.from(bestDistanceByPhoto.entries())
-    .sort((a, b) => a[1] - b[1])
+  return Array.from(bestSimilarityByPhoto.entries())
+    .sort((a, b) => b[1] - a[1])
     .slice(0, FACE_CONFIG.maxResults)
     .map(async ([photoId, score]) => {
       const details = photoDetails.get(photoId)!;
@@ -136,14 +167,14 @@ function buildRefinedDescriptor(
   for (const photoId of uniquePhotoIds) {
     const candidateFaces = faces.filter((face) => face.photoId === photoId);
     let bestDescriptor: Float32Array | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestSimilarity = Number.NEGATIVE_INFINITY;
 
     for (const face of candidateFaces) {
       try {
         const parsed = parseDescriptor(face.descriptor);
-        const distance = euclideanDistance(guestDescriptor, parsed);
-        if (distance < bestDistance) {
-          bestDistance = distance;
+        const similarity = cosineSimilarity(guestDescriptor, parsed);
+        if (similarity > bestSimilarity) {
+          bestSimilarity = similarity;
           bestDescriptor = parsed;
         }
       } catch {
@@ -174,29 +205,29 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
   }
 
   const guestDescriptor = parseDescriptor(guest.faceDescriptor);
-  const faces = getAlbumFaces(guest.albumId);
+  const vectorData = getAlbumVectorMatrix(guest.albumId);
 
-  if (!faces.length) {
+  if (vectorData.count === 0) {
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
   }
 
-  const referenceDescriptor =
-    source === "refined" && confirmedPhotoIds?.length
-      ? buildRefinedDescriptor(guestDescriptor, confirmedPhotoIds, faces)
-      : guestDescriptor;
+  const thresholds = getAlbumThresholds(guest.albumId);
+  
+  let referenceDescriptor = guestDescriptor;
+  if (source === "refined" && confirmedPhotoIds?.length) {
+    const faces = getAlbumFaces(guest.albumId);
+    referenceDescriptor = buildRefinedDescriptor(guestDescriptor, confirmedPhotoIds, faces);
+  }
 
-  const threshold =
-    source === "refined"
-      ? FACE_CONFIG.possibleMatchThreshold
-      : FACE_CONFIG.matchThreshold;
-
-  const matchedPromises = scoreMatches(referenceDescriptor, faces, threshold);
+  const matchedPromises = scoreMatchesVectorized(referenceDescriptor, vectorData, thresholds);
   const matched = await Promise.all(matchedPromises);
 
   return noStoreJson({
     photos: matched,
     guest: { name: guest.name },
     source,
+    thresholds,
+    metric: "vectorized_euclidean_mapped",
   });
 }
 
