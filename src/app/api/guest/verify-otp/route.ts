@@ -16,6 +16,7 @@ type VerifyOtpBody = {
   name?: string;
   phone?: string;
   otp?: string;
+  code?: string;
 };
 
 function isOtpBypassEnabled() {
@@ -34,14 +35,14 @@ export async function POST(request: Request) {
     const body = (await request.json()) as VerifyOtpBody;
     const token = body.token?.trim();
     const email = body.email?.trim().toLowerCase();
-    const otp = body.otp?.trim();
-    const name = body.name?.trim();
+    const otp = (body.otp || body.code)?.trim();
+    let name = body.name?.trim();
     const phone = body.phone?.trim() || null;
     const bypass = isOtpBypassEnabled();
 
-    if (!token || !email || !name || (!bypass && !otp)) {
+    if (!token || !email || (!bypass && !otp)) {
       return NextResponse.json(
-        { error: "token, email, otp, and name are required" },
+        { error: "token, email, and passcode are required" },
         { status: 400 }
       );
     }
@@ -75,17 +76,17 @@ export async function POST(request: Request) {
         .get();
 
       if (!otpRow) {
-        return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
+        return NextResponse.json({ error: "Invalid passcode" }, { status: 401 });
       }
 
       const now = new Date();
       if (new Date(otpRow.expiresAt) < now) {
-        return NextResponse.json({ error: "OTP expired" }, { status: 401 });
+        return NextResponse.json({ error: "Passcode expired" }, { status: 401 });
       }
 
       const expected = buildOtpHash(otp!, album.id, email);
       if (expected !== otpRow.codeHash) {
-        return NextResponse.json({ error: "Invalid OTP" }, { status: 401 });
+        return NextResponse.json({ error: "Invalid passcode" }, { status: 401 });
       }
 
       db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
@@ -100,6 +101,10 @@ export async function POST(request: Request) {
       .from(guests)
       .where(and(eq(guests.albumId, album.id), eq(guests.email, email)))
       .get();
+
+    if (!name) {
+      name = existingGuest?.name || email.split("@")[0];
+    }
 
     const sessionToken = uuidv4();
     let guestId = existingGuest?.id;
@@ -121,7 +126,7 @@ export async function POST(request: Request) {
       db.update(guests)
         .set({
           name,
-          phone,
+          phone: phone || existingGuest?.phone || null,
           sessionToken,
         })
         .where(eq(guests.id, guestId))
@@ -167,4 +172,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
-

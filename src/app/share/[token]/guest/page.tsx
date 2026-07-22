@@ -184,7 +184,7 @@ export default function GuestFaceDiscoveryPage() {
       const res = await fetch("/api/guest/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, email, code: otp }),
+        body: JSON.stringify({ token, email, name, phone, otp: otp.trim() }),
       });
 
       const data = await res.json();
