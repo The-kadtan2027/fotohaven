@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Activity, Database, HardDrive, Cpu, RefreshCw,
   AlertCircle, CheckCircle2, Clock, Server, ChevronLeft,
-  Terminal, Globe, Smartphone,
+  Terminal, Globe, Smartphone, Layers, Play, Trash2,
 } from "lucide-react";
 
 interface SystemInfo {
@@ -53,6 +53,25 @@ interface TunnelInfo {
   status: "online" | "offline" | "unknown";
   publicUrl: string | null;
   detail: string;
+}
+
+interface JobMetrics {
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+}
+
+interface JobData {
+  metrics: JobMetrics;
+  recentJobs: Array<{
+    id: string;
+    type: string;
+    status: string;
+    attempts: number;
+    lastError: string | null;
+    createdAt: number;
+  }>;
 }
 
 interface HealthData {
@@ -159,18 +178,30 @@ const REFRESH_MS = 30_000;
 
 export default function HealthPage() {
   const [data, setData] = useState<HealthData | null>(null);
+  const [jobData, setJobData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [jobActionBusy, setJobActionBusy] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
 
   const fetchHealth = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/admin/health", { cache: "no-store" });
+      const [res, jobsRes] = await Promise.all([
+        fetch("/api/admin/health", { cache: "no-store" }),
+        fetch("/api/admin/jobs", { cache: "no-store" }),
+      ]);
+
       if (!res.ok) throw new Error(`Status ${res.status}`);
-      const json = await res.json() as HealthData;
+      const json = (await res.json()) as HealthData;
       setData(json);
+
+      if (jobsRes.ok) {
+        const jobsJson = (await jobsRes.json()) as JobData;
+        setJobData(jobsJson);
+      }
+
       setError(null);
       setLastRefresh(new Date());
       setCountdown(REFRESH_MS / 1000);
@@ -180,6 +211,22 @@ export default function HealthPage() {
       setLoading(false);
     }
   }, []);
+
+  async function handleJobAction(action: "retry_failed" | "clear_completed") {
+    setJobActionBusy(true);
+    try {
+      await fetch("/api/admin/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      await fetchHealth();
+    } catch {
+      // Ignore
+    } finally {
+      setJobActionBusy(false);
+    }
+  }
 
   useEffect(() => {
     fetchHealth();
@@ -320,58 +367,69 @@ export default function HealthPage() {
                   : "var(--taupe)"
             }
           />
-
-          <StatCard
-            icon={Activity}
-            label="Platform"
-            value={data ? `${data.platform.arch}` : na}
-            sub={data ? `${data.platform.platform} · ${data.platform.cpus} CPU · Load: ${data.platform.loadAvg.map((l) => l.toFixed(2)).join(", ")}` : undefined}
-            accent="var(--taupe)"
-          />
         </div>
 
-        {data && (
-          <div
-            className="card"
-            style={{ padding: "16px 24px", marginBottom: 24, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {data.pm2?.status === "online"
-                ? <CheckCircle2 size={16} color="var(--sage)" />
-                : <AlertCircle size={16} color="#d97706" />}
-              <span style={{ fontSize: 13, color: "var(--brown)" }}>
-                {data.pm2 ? `PM2: ${data.pm2.status}` : "PM2: not detected"}
-              </span>
+        {/* Background Job Queue Monitor Card */}
+        <div className="card" style={{ padding: 24, marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Layers size={18} color="var(--gold)" />
+              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--espresso)", margin: 0 }}>
+                Background Processing Queue
+              </h2>
             </div>
-            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {data.memory.usedPct < 85
-                ? <CheckCircle2 size={16} color="var(--sage)" />
-                : <AlertCircle size={16} color="#dc2626" />}
-              <span style={{ fontSize: 13, color: "var(--brown)" }}>Memory: {data.memory.usedPct}%</span>
-            </div>
-            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <CheckCircle2 size={16} color="var(--sage)" />
-              <span style={{ fontSize: 13, color: "var(--brown)" }}>
-                DB: {data.dbSize != null ? formatBytes(data.dbSize) : "N/A"}
-              </span>
-            </div>
-            <div style={{ width: 1, height: 20, background: "var(--sand)" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {data.tunnel?.status === "online"
-                ? <CheckCircle2 size={16} color="var(--sage)" />
-                : data.tunnel?.status === "offline"
-                  ? <AlertCircle size={16} color="#dc2626" />
-                  : <AlertCircle size={16} color="#d97706" />}
-              <span style={{ fontSize: 13, color: "var(--brown)" }}>
-                {data.tunnel
-                  ? `Tunnel: ${data.tunnel.status}${data.tunnel.publicUrl ? ` · ${data.tunnel.publicUrl}` : ""}`
-                  : "Tunnel: N/A"}
-              </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => handleJobAction("retry_failed")}
+                disabled={jobActionBusy || !jobData?.metrics.failed}
+                style={{ padding: "6px 12px", fontSize: 12, gap: 6 }}
+              >
+                <Play size={13} /> Retry Failed
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => handleJobAction("clear_completed")}
+                disabled={jobActionBusy || !jobData?.metrics.completed}
+                style={{ padding: "6px 12px", fontSize: 12, gap: 6 }}
+              >
+                <Trash2 size={13} /> Clear Finished
+              </button>
             </div>
           </div>
-        )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 180px), 1fr))", gap: 12 }}>
+            <div style={{ padding: 14, background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)" }}>
+              <span style={{ fontSize: 11, color: "var(--taupe)", textTransform: "uppercase" }}>Pending</span>
+              <p style={{ fontSize: 22, fontFamily: "var(--font-display)", color: "var(--espresso)", marginTop: 4, margin: 0 }}>
+                {jobData?.metrics.pending ?? 0}
+              </p>
+            </div>
+
+            <div style={{ padding: 14, background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)" }}>
+              <span style={{ fontSize: 11, color: "var(--taupe)", textTransform: "uppercase" }}>Processing</span>
+              <p style={{ fontSize: 22, fontFamily: "var(--font-display)", color: "var(--gold)", marginTop: 4, margin: 0 }}>
+                {jobData?.metrics.processing ?? 0}
+              </p>
+            </div>
+
+            <div style={{ padding: 14, background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)" }}>
+              <span style={{ fontSize: 11, color: "var(--taupe)", textTransform: "uppercase" }}>Completed</span>
+              <p style={{ fontSize: 22, fontFamily: "var(--font-display)", color: "var(--sage)", marginTop: 4, margin: 0 }}>
+                {jobData?.metrics.completed ?? 0}
+              </p>
+            </div>
+
+            <div style={{ padding: 14, background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)" }}>
+              <span style={{ fontSize: 11, color: "var(--taupe)", textTransform: "uppercase" }}>Failed</span>
+              <p style={{ fontSize: 22, fontFamily: "var(--font-display)", color: jobData?.metrics.failed ? "#dc2626" : "var(--espresso)", marginTop: 4, margin: 0 }}>
+                {jobData?.metrics.failed ?? 0}
+              </p>
+            </div>
+          </div>
+        </div>
 
         <div className="card" style={{ padding: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>

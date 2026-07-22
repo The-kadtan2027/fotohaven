@@ -4,61 +4,7 @@ import { createWriteStream } from "fs";
 import path from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
-import sharp from "sharp";
-import { db } from "@/lib/db";
-import { photos } from "@/lib/schema";
-import { eq } from "drizzle-orm";
-
-// --- Background Thumbnail Queue for Android ---
-// Sharp WASM can take 15+ seconds per image on a low-end phone. 
-// If we block the PUT response, the HTTP tunnel connection times out.
-// We use a global queue to run ONE sharp process at a time in the background.
-
-type ThumbTask = {
-  resolvedPath: string;
-  decodedKey: string;
-};
-
-const thumbQueue: ThumbTask[] = [];
-let isProcessingThumbs = false;
-
-async function processThumbnails() {
-  if (isProcessingThumbs) return;
-  isProcessingThumbs = true;
-
-  while (thumbQueue.length > 0) {
-    const task = thumbQueue.shift();
-    if (!task) continue;
-
-    try {
-      // Small buffer delay to ensure frontend has finished POSTing the database record creation
-      await new Promise(r => setTimeout(r, 2000));
-
-      const parsedPath = path.parse(task.resolvedPath);
-      const thumbFilename = `thumb_${parsedPath.name}.jpg`;
-      const thumbResolved = path.join(parsedPath.dir, thumbFilename);
-      const thumbKey = task.decodedKey.replace(parsedPath.base, thumbFilename);
-
-      await sharp(task.resolvedPath)
-        .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toFile(thumbResolved);
-
-      // Update DB to link thumbnail
-      await db
-        .update(photos)
-        .set({ thumbnailKey: thumbKey })
-        .where(eq(photos.storageKey, task.decodedKey));
-
-      console.log(`[Queue] Successfully generated thumbnail for ${task.decodedKey}`);
-    } catch (err) {
-      console.error("[Queue] Failed to process thumbnail:", err);
-    }
-  }
-
-  isProcessingThumbs = false;
-}
-// ----------------------------------------------
+import { enqueueJob } from "@/lib/job-runner";
 
 // POST /api/upload/local?key=<encoded-storage-key>
 // In local storage mode, the browser can't PUT directly to a filesystem path.
@@ -124,10 +70,9 @@ async function handleUpload(req: NextRequest) {
 
     await pipeline(nodeReadable, sizeGuard, writeStream);
 
-    // ── Generate Thumbnail (Background Queue) ──
-    // Push the file paths to the module-level queue and kick off processing without awaiting.
-    thumbQueue.push({ resolvedPath: resolved, decodedKey });
-    processThumbnails().catch((err) => console.error("[ThumbWorker] Fatal Error:", err));
+    // ── Enqueue Persistent Background Thumbnail Job ──
+    // Saves thumbnail creation to SQLite job queue (survives PM2 & server reboots)
+    await enqueueJob("thumbnail", { resolvedPath: resolved, decodedKey });
 
     return new NextResponse(null, { status: 200 });
   } catch (err: any) {
@@ -140,7 +85,9 @@ async function handleUpload(req: NextRequest) {
         const filePath = path.join(UPLOAD_BASE, decodeURIComponent(key));
         await fs.unlink(filePath).catch(() => {});
       }
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
 
     if (err?.message?.includes("limit")) {
       return NextResponse.json({ error: err.message }, { status: 413 });

@@ -112,6 +112,18 @@ export const faceEmbeddings = sqliteTable('face_embeddings', {
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
 });
 
+export const jobQueue = sqliteTable('JobQueue', {
+  id:          text('id').primaryKey(),
+  type:        text('type').notNull(),
+  status:      text('status').notNull().default('pending'),
+  payload:     text('payload').notNull(),
+  attempts:    integer('attempts').notNull().default(0),
+  maxAttempts: integer('maxAttempts').notNull().default(3),
+  lastError:   text('lastError'),
+  createdAt:   integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt:   integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
+});
+
 
 export const albumsRelations = relations(albums, ({ many }) => ({
   ceremonies: many(ceremonies),

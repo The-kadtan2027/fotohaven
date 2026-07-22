@@ -1679,3 +1679,25 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Persistent Background Processing Queue & Job Engine
+
+**Status:** Completed
+**Scope:** Architect and implement a persistent SQLite-backed background job queue and worker runner for heavy tasks (Thumbnail generation, Face Indexing, Album Disk Cleanup). Eliminates HTTP timeouts on uploads, ensures zero lost jobs across PM2 reboots, and throttles Termux CPU/RAM usage safely.
+
+### Modified / New Files
+- `src/lib/schema.ts` -- Added `jobQueue` SQLite table schema
+- `src/lib/job-runner.ts` -- Core worker engine (`enqueueJob`, `processNextJob`, sequential concurrency = 1, exponential retry, job handlers)
+- `src/app/api/upload/local/route.ts` -- Replaced volatile in-memory array with persistent `enqueueJob("thumbnail", ...)`
+- `src/app/api/admin/jobs/route.ts` -- Admin API route for queue stats and control actions (`retry_failed`, `clear_completed`)
+- `src/app/admin/health/page.tsx` -- Added Background Processing Queue monitor card with real-time job counters and control buttons
+
+### Acceptance criteria
+- [x] Background tasks stored in `JobQueue` SQLite table surviving server reboots and crash restarts
+- [x] Worker engine runs tasks sequentially (Concurrency = 1, 100ms pause) for mobile/Termux CPU & RAM safety
+- [x] Upload route enqueues thumbnail creation as a persistent SQLite job
+- [x] `/admin/health` displays real-time job queue metrics and controls to retry failed jobs or clear completed jobs
+- [x] `npm run db:push` applied schema without errors
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
