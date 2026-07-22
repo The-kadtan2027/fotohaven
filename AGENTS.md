@@ -1656,3 +1656,26 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] Review wizard strictly displays up to 5 photos, prioritizing single-face shots.
 - [x] Confirming photos immediately runs the refined multi-anchor search automatically.
 - [x] User can skip the wizard to fallback to the full photo grid easily.
+
+---
+
+## Task: PWA & Mobile App Shell
+
+**Status:** Completed
+**Scope:** Convert FotoHaven into an installable Progressive Web App (PWA) with standalone app window display, hybrid offline thumbnail caching, home-screen installation banner, and network offline status indicators.
+
+### Modified / New Files
+- `src/app/manifest.ts` -- Next.js 15 PWA Manifest (standalone display, espresso & cream color tokens)
+- `public/sw.js` -- Service Worker with Cache-First thumbnail strategy (`/api/files/*`), Stale-While-Revalidate assets, and Network-First API data
+- `src/components/PwaInstaller.tsx` -- Client Component managing SW registration, `beforeinstallprompt` banner, and offline badge
+- `src/app/layout.tsx` -- Injected `<PwaInstaller />` and Apple/theme meta tags
+- `scripts/make-pwa-icons.js` -- Icon generator script yielding `icon-192.png`, `icon-512.png`, `icon-192.svg`, `icon-512.svg` in `public/icons/`
+
+### Acceptance criteria
+- [x] Web App Manifest configured with `standalone` display and luxury dark theme color (`#1a1208`)
+- [x] Service Worker auto-registers on page load and caches photo thumbnails (`/api/files/*`) for offline access
+- [x] Unobtrusive 'Install FotoHaven App' prompt banner displays when browser fires `beforeinstallprompt`
+- [x] Offline status badge displays automatically when device network drops
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
