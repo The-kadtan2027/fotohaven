@@ -4,7 +4,8 @@ import { jwtVerify } from "jose/jwt/verify";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "@/lib/db";
-import { photoFaces, photos } from "@/lib/schema";
+import { ceremonies, photoFaces, photos } from "@/lib/schema";
+import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
 
 type FacePayload = {
   descriptor: number[];
@@ -57,13 +58,14 @@ export async function POST(
     }
 
     const { photoId } = await params;
-    const photo = db
-      .select({ id: photos.id })
+    const photoInfo = db
+      .select({ id: photos.id, albumId: ceremonies.albumId })
       .from(photos)
+      .innerJoin(ceremonies, eq(photos.ceremonyId, ceremonies.id))
       .where(eq(photos.id, photoId))
       .get();
 
-    if (!photo) {
+    if (!photoInfo) {
       return NextResponse.json({ error: "Photo not found" }, { status: 404 });
     }
 
@@ -96,6 +98,10 @@ export async function POST(
         .where(eq(photos.id, photoId))
         .run();
     });
+
+    if (photoInfo.albumId) {
+      invalidateAlbumVectorCache(photoInfo.albumId);
+    }
 
     return NextResponse.json({ saved: faces.length });
   } catch (error) {

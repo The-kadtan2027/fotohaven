@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ceremonies, faceEmbeddings, photoFaces, photos } from "@/lib/schema";
+import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
 
 export async function POST(
   _req: Request,
@@ -18,6 +19,7 @@ export async function POST(
 
     const photoIds = albumPhotos.map((photo) => photo.id);
     if (!photoIds.length) {
+      invalidateAlbumVectorCache(albumId);
       return NextResponse.json({ resetCount: 0 });
     }
 
@@ -26,6 +28,8 @@ export async function POST(
       tx.delete(faceEmbeddings).where(inArray(faceEmbeddings.photoId, photoIds)).run();
       tx.update(photos).set({ faceProcessed: false }).where(inArray(photos.id, photoIds)).run();
     });
+
+    invalidateAlbumVectorCache(albumId);
 
     return NextResponse.json({ resetCount: photoIds.length });
   } catch (error) {

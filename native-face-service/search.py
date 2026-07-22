@@ -31,16 +31,12 @@ def load_event(event_id: str, rows: List[Tuple[str, int, bytes]]) -> int:
             )
         return 0
 
-    embeddings: List[np.ndarray] = []
-    photo_ids: List[str] = []
-    face_indices: List[int] = []
+    photo_ids = [r[0] for r in rows]
+    face_indices = [r[1] for r in rows]
 
-    for photo_id, face_index, emb_bytes in rows:
-        embeddings.append(np.frombuffer(emb_bytes, dtype=np.float32).copy())
-        photo_ids.append(photo_id)
-        face_indices.append(face_index)
-
-    matrix = np.stack(embeddings, axis=0)
+    # Vectorized single-pass byte buffer concatenation + zero-copy NumPy reshape
+    all_bytes = b"".join(r[2] for r in rows)
+    matrix = np.frombuffer(all_bytes, dtype=np.float32).reshape(len(rows), -1)
 
     with _lock:
         _store[event_id] = EmbeddingIndex(
@@ -95,4 +91,3 @@ def unload_event(event_id: str) -> None:
 def index_stats() -> Dict[str, int]:
     with _lock:
         return {event_id: index.size() for event_id, index in _store.items()}
-

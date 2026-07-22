@@ -9,9 +9,10 @@ import { FACE_CONFIG } from "@/lib/face-config";
 import {
   averageDescriptors,
   cosineSimilarity,
-  euclideanDistance,
   parseDescriptor,
+  vectorizedEuclideanDistances,
 } from "@/lib/face-math";
+import { getAlbumVectorMatrix, AlbumVectorMatrix } from "@/lib/vector-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -99,16 +100,23 @@ function getAlbumThresholds(albumId: string): MatchThresholds {
   };
 }
 
-function scoreMatches(
+function scoreMatchesVectorized(
   referenceDescriptor: Float32Array,
-  faces: AlbumFace[],
+  vectorData: AlbumVectorMatrix,
   thresholds: MatchThresholds
 ) {
   const photoDetails = new Map<string, { storageKey: string; thumbnailKey: string | null; originalName: string }>();
   const bestSimilarityByPhoto = new Map<string, number>();
   const faceCountByPhoto = new Map<string, number>();
 
-  for (const face of faces) {
+  const { matrix, norms, faces, count } = vectorData;
+  if (count === 0) return [];
+
+  // Compute all N Euclidean distances simultaneously using vectorized SIMD dot products
+  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count);
+
+  for (let i = 0; i < count; i++) {
+    const face = faces[i];
     if (!photoDetails.has(face.photoId)) {
       photoDetails.set(face.photoId, {
         storageKey: face.storageKey,
@@ -117,23 +125,14 @@ function scoreMatches(
       });
     }
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
-    
-    try {
-      const distance = euclideanDistance(
-        referenceDescriptor,
-        parseDescriptor(face.descriptor)
-      );
-      // Linear map: Euclidean distance → similarity score [0,1]
-      // Calibrated so dist=0.36 → score=0.70 (strong), dist=0.40 → score=0.55 (possible)
-      const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
-      if (similarity >= thresholds.possible) {
-        const current = bestSimilarityByPhoto.get(face.photoId);
-        if (current === undefined || similarity > current) {
-          bestSimilarityByPhoto.set(face.photoId, similarity);
-        }
+
+    const distance = distances[i];
+    const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
+    if (similarity >= thresholds.possible) {
+      const current = bestSimilarityByPhoto.get(face.photoId);
+      if (current === undefined || similarity > current) {
+        bestSimilarityByPhoto.set(face.photoId, similarity);
       }
-    } catch {
-      // Skip malformed descriptors silently.
     }
   }
 
@@ -206,19 +205,21 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
   }
 
   const guestDescriptor = parseDescriptor(guest.faceDescriptor);
-  const faces = getAlbumFaces(guest.albumId);
+  const vectorData = getAlbumVectorMatrix(guest.albumId);
 
-  if (!faces.length) {
+  if (vectorData.count === 0) {
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
   }
 
   const thresholds = getAlbumThresholds(guest.albumId);
-  const referenceDescriptor =
-    source === "refined" && confirmedPhotoIds?.length
-      ? buildRefinedDescriptor(guestDescriptor, confirmedPhotoIds, faces)
-      : guestDescriptor;
+  
+  let referenceDescriptor = guestDescriptor;
+  if (source === "refined" && confirmedPhotoIds?.length) {
+    const faces = getAlbumFaces(guest.albumId);
+    referenceDescriptor = buildRefinedDescriptor(guestDescriptor, confirmedPhotoIds, faces);
+  }
 
-  const matchedPromises = scoreMatches(referenceDescriptor, faces, thresholds);
+  const matchedPromises = scoreMatchesVectorized(referenceDescriptor, vectorData, thresholds);
   const matched = await Promise.all(matchedPromises);
 
   return noStoreJson({
@@ -226,7 +227,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
     guest: { name: guest.name },
     source,
     thresholds,
-    metric: "euclidean_mapped",
+    metric: "vectorized_euclidean_mapped",
   });
 }
 

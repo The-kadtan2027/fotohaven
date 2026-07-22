@@ -22,7 +22,7 @@ _lock = threading.RLock()
 
 def load_event(event_id: str, rows: List[Tuple[str, int, bytes]]) -> int:
     """
-    Load embeddings for an event from raw DB rows into RAM.
+    Load embeddings for an event from raw DB rows into RAM using single-pass batch deserialization.
 
     Args:
         event_id: str
@@ -41,17 +41,12 @@ def load_event(event_id: str, rows: List[Tuple[str, int, bytes]]) -> int:
             )
         return 0
 
-    embeddings = []
-    photo_ids  = []
-    face_idxs  = []
+    photo_ids = [r[0] for r in rows]
+    face_idxs = [r[1] for r in rows]
 
-    for photo_id, face_index, emb_bytes in rows:
-        vec = np.frombuffer(emb_bytes, dtype=np.float32).copy()  # (D,)
-        embeddings.append(vec)
-        photo_ids.append(photo_id)
-        face_idxs.append(face_index)
-
-    matrix = np.stack(embeddings, axis=0)  # (N, D)
+    # Vectorized single-pass byte buffer concatenation + zero-copy NumPy reshape
+    all_bytes = b"".join(r[2] for r in rows)
+    matrix = np.frombuffer(all_bytes, dtype=np.float32).reshape(len(rows), -1)
 
     with _lock:
         _store[event_id] = EmbeddingIndex(
@@ -90,7 +85,7 @@ def search(
     if index is None or index.size() == 0:
         return {"definite": [], "possible": []}
 
-    # Single matrix multiply — O(N)
+    # Vectorized matrix-vector multiplication via BLAS/SIMD — O(N)
     similarities = index.matrix @ query_embedding  # (N,)
 
     definite_ids: List[str] = []

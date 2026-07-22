@@ -1538,6 +1538,29 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ---
 
+## Task: Vectorized Face Discovery Pipeline
+
+**Status:** Completed
+**Scope:** Accelerate guest face discovery matching on mobile/Android hardware by using zero-copy contiguous Float32Array matrix caching in Node.js and batch binary buffer deserialization in Python services.
+
+### Modified / New files
+- `src/lib/vector-cache.ts` -- In-memory album vector matrix cache with 15-min LRU TTL & invalidation hooks
+- `src/lib/face-math.ts` -- Vectorized Euclidean distance math using contiguous Float32Array dot products
+- `src/app/api/guest/my-photos/route.ts` -- Refactored discovery route to consume vectorized matrix cache
+- `src/app/api/photos/[photoId]/faces/route.ts` & `src/app/api/albums/[albumId]/reprocess-faces/route.ts` -- Cache invalidation hooks
+- `face-service/search.py` & `native-face-service/search.py` -- Single-pass `np.frombuffer` batch deserialization
+
+### Acceptance criteria
+- [x] Album descriptors are pre-parsed into a flat `Float32Array(N * 128)` matrix cached per album in Node.js server memory
+- [x] Distance calculation uses SIMD dot product identity $\|a_i - b\|^2 = \|a_i\|^2 + \|b\|^2 - 2(a_i \cdot b)$
+- [x] Cache is automatically invalidated on face indexing, reprocessing, or photo deletion
+- [x] Inactive album vector matrices are auto-pruned after 15 minutes of inactivity to save RAM
+- [x] Python `search.py` uses single-pass `np.frombuffer` batch deserialization instead of per-row Python `for` loops
+- [x] No dynamic TFLite tensor resizing is introduced, preserving mobile/ARM hardware safety
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
 ## Task: Album Activity Timeline
 
 **Status:** Completed
