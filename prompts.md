@@ -1,8 +1,8 @@
-Bug report: picture click from phone camera taking more time, when clicked on find and scan my face instead of taking pictures it is waiting until the model loads and then taking pictures.
-- Where: fotohaven website https://equality-hygiene-running-anna.trycloudflare.com/share/1e56ed95545f46c1/guest
-- What happens: when clicked on find and scan my face button in shared album page , it is waiting until the model loads and then taking pictures. it should capture the picture immediately and then show a progress bar or something to indicate the model loading progress.
-- What should happen: Website should show a progress bar or something to indicate the model loading progress.
-- Error message: no errors as such but face capture is not working as expected and taking too much time to load the model.
+Bug report: When we create new ceremoney in an album where photos are already present and processed faces, but when we want to start processing on new ceremoney it starts processing whole album again. It should only process the new photos.
+- Where: fotohaven website https://www.fotohaven.live/albums/19889a2a-eb91-4743-be58-c6c2ba9f6cb4
+- What happens: when i clicked on find and scan my face button, it runs the job for whole album again instead of just new photos
+- What should happen: It should only process the new photos.
+- Error message: no errors as such
 
 Before fixing:
 1. Read the relevant file(s) in full — do not guess at their contents.

@@ -1505,35 +1505,35 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ## Task: Share Link QR Code
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Add a QR code popup on the dashboard album cards so photographers can share links via printed cards or WhatsApp image.
 
 ### Affected files
 - `src/app/page.tsx` -- dashboard album card actions
 
 ### Acceptance criteria
-- [ ] Dashboard gains a "QR Code" button next to "Copy Link"
-- [ ] Clicking shows a modal with a rendered QR code for the share URL
-- [ ] QR code is downloadable as PNG
-- [ ] Generated client-side (use qrcode npm package or canvas-based generation)
+- [x] Dashboard gains a "QR Code" button next to "Copy Link"
+- [x] Clicking shows a modal with a rendered QR code for the share URL
+- [x] QR code is downloadable as PNG
+- [x] Generated client-side (use qrcode npm package or canvas-based generation)
 - [x] npx tsc --noEmit passes with zero errors
 
 ---
 
 ## Task: WhatsApp / Social OG Meta Tags on Share Page
 
-**Status:** Planned
+**Status:** Completed
 **Scope:** Add Open Graph and WhatsApp preview meta tags to the share page so the link looks rich when pasted in WhatsApp, iMessage, or any chat app.
 
 ### Affected files
-- `src/app/share/[token]/` -- add server component wrapper for generateMetadata()
+- `src/app/share/[token]/layout.tsx` -- Server Component layout exporting generateMetadata()
 
 ### Acceptance criteria
-- [ ] Share page has og:title, og:description, og:image meta tags
-- [ ] og:title shows album title and client name
-- [ ] og:description shows photo count and ceremony count
-- [ ] og:image points to the first photo thumbnail
-- [ ] Uses Next.js 15 App Router generateMetadata()
+- [x] Share page has og:title, og:description, og:image meta tags
+- [x] og:title shows album title and client name
+- [x] og:description shows photo count and ceremony count
+- [x] og:image points to the first photo thumbnail
+- [x] Uses Next.js 15 App Router generateMetadata()
 - [x] npx tsc --noEmit passes with zero errors
 
 ---
