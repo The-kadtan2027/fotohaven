@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
 import sharp from "sharp";
-import { eq, and, lt, desc, count } from "drizzle-orm";
+import { eq, and, lt, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobQueue, photos } from "@/lib/schema";
 import { FACE_CONFIG } from "@/lib/face-config";
@@ -28,6 +28,13 @@ export interface CleanupJobPayload {
 
 let isWorkerRunning = false;
 let workerTimer: NodeJS.Timeout | null = null;
+
+function isBuildPhase(): boolean {
+  return (
+    process.env.NEXT_PHASE === "phase-production-build" ||
+    process.env.NEXT_PHASE === "phase-export"
+  );
+}
 
 export async function enqueueJob(
   type: JobType,
@@ -55,7 +62,7 @@ export async function enqueueJob(
 }
 
 export function triggerWorker() {
-  if (isWorkerRunning) return;
+  if (isWorkerRunning || isBuildPhase()) return;
   if (workerTimer) clearTimeout(workerTimer);
 
   workerTimer = setTimeout(() => {
@@ -64,7 +71,7 @@ export function triggerWorker() {
 }
 
 async function processNextJob() {
-  if (isWorkerRunning) return;
+  if (isWorkerRunning || isBuildPhase()) return;
   isWorkerRunning = true;
 
   try {
@@ -72,18 +79,35 @@ async function processNextJob() {
 
     // 1. Recover stuck jobs (processing for > 5 minutes)
     const fiveMinsAgo = new Date(now.getTime() - 5 * 60 * 1000);
-    db.update(jobQueue)
-      .set({ status: "pending", updatedAt: now })
-      .where(and(eq(jobQueue.status, "processing"), lt(jobQueue.updatedAt, fiveMinsAgo)))
-      .run();
+    try {
+      db.update(jobQueue)
+        .set({ status: "pending", updatedAt: now })
+        .where(and(eq(jobQueue.status, "processing"), lt(jobQueue.updatedAt, fiveMinsAgo)))
+        .run();
+    } catch (err: any) {
+      if (err?.code === "SQLITE_ERROR" || err?.message?.includes("no such table")) {
+        isWorkerRunning = false;
+        return;
+      }
+      throw err;
+    }
 
     // 2. Fetch oldest pending job
-    const job = db
-      .select()
-      .from(jobQueue)
-      .where(eq(jobQueue.status, "pending"))
-      .orderBy(jobQueue.createdAt)
-      .get();
+    let job;
+    try {
+      job = db
+        .select()
+        .from(jobQueue)
+        .where(eq(jobQueue.status, "pending"))
+        .orderBy(jobQueue.createdAt)
+        .get();
+    } catch (err: any) {
+      if (err?.code === "SQLITE_ERROR" || err?.message?.includes("no such table")) {
+        isWorkerRunning = false;
+        return;
+      }
+      throw err;
+    }
 
     if (!job) {
       isWorkerRunning = false;
@@ -146,14 +170,18 @@ async function processNextJob() {
     isWorkerRunning = false;
 
     // Check if more pending jobs exist
-    const hasMore = db
-      .select({ id: jobQueue.id })
-      .from(jobQueue)
-      .where(eq(jobQueue.status, "pending"))
-      .get();
+    try {
+      const hasMore = db
+        .select({ id: jobQueue.id })
+        .from(jobQueue)
+        .where(eq(jobQueue.status, "pending"))
+        .get();
 
-    if (hasMore) {
-      triggerWorker();
+      if (hasMore) {
+        triggerWorker();
+      }
+    } catch {
+      // Ignore if table missing
     }
   }
 }
@@ -222,30 +250,50 @@ async function handleCleanupJob(payload: CleanupJobPayload) {
 
 // Admin / Health Metrics Functions
 export function getQueueMetrics() {
-  const allJobs = db.select().from(jobQueue).orderBy(desc(jobQueue.createdAt)).all();
+  try {
+    const allJobs = db.select().from(jobQueue).orderBy(desc(jobQueue.createdAt)).all();
 
-  const metrics = {
-    pending: allJobs.filter((j) => j.status === "pending").length,
-    processing: allJobs.filter((j) => j.status === "processing").length,
-    completed: allJobs.filter((j) => j.status === "completed").length,
-    failed: allJobs.filter((j) => j.status === "failed").length,
-  };
+    const metrics = {
+      pending: allJobs.filter((j) => j.status === "pending").length,
+      processing: allJobs.filter((j) => j.status === "processing").length,
+      completed: allJobs.filter((j) => j.status === "completed").length,
+      failed: allJobs.filter((j) => j.status === "failed").length,
+    };
 
-  return { metrics, recentJobs: allJobs.slice(0, 20) };
+    return { metrics, recentJobs: allJobs.slice(0, 20) };
+  } catch (err: any) {
+    if (err?.code === "SQLITE_ERROR" || err?.message?.includes("no such table")) {
+      return {
+        metrics: { pending: 0, processing: 0, completed: 0, failed: 0 },
+        recentJobs: [],
+      };
+    }
+    throw err;
+  }
 }
 
 export function retryFailedJobs() {
-  db.update(jobQueue)
-    .set({ status: "pending", attempts: 0, lastError: null, updatedAt: new Date() })
-    .where(eq(jobQueue.status, "failed"))
-    .run();
+  try {
+    db.update(jobQueue)
+      .set({ status: "pending", attempts: 0, lastError: null, updatedAt: new Date() })
+      .where(eq(jobQueue.status, "failed"))
+      .run();
 
-  triggerWorker();
+    triggerWorker();
+  } catch {
+    // Ignore if table missing
+  }
 }
 
 export function clearCompletedJobs() {
-  db.delete(jobQueue).where(eq(jobQueue.status, "completed")).run();
+  try {
+    db.delete(jobQueue).where(eq(jobQueue.status, "completed")).run();
+  } catch {
+    // Ignore if table missing
+  }
 }
 
-// Auto-trigger worker loop on server startup
-triggerWorker();
+// Auto-trigger worker loop on server runtime startup (skips Next.js build phase)
+if (!isBuildPhase()) {
+  triggerWorker();
+}
