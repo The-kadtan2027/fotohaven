@@ -1561,6 +1561,23 @@ alert() is used for copy-link confirmation and errors. confirm() is used for del
 
 ---
 
+## Task: Guest Page Photo View Modes & Mobile Touch Swipe UX
+
+**Status:** Completed
+**Scope:** Enhance the guest photo discovery page with layout view mode switching (Grid / Masonry / Single-Card Focus) and native mobile touch swipe gestures for Lightbox navigation.
+
+### Modified files
+- `src/app/share/[token]/guest/page.tsx` -- View mode switcher toolbar, Masonry & Single-Card feed layouts, mobile touch swipe gesture handlers (`onTouchStart`, `onTouchMove`, `onTouchEnd`), direct single-photo download button on cards
+
+### Acceptance criteria
+- [x] Header toolbar lets guests toggle between Grid (1:1 square), Masonry (composition preserving), and Focus (single-card feed) view modes
+- [x] Mobile touch swipe gestures supported in Lightbox: Swipe Left = Next, Swipe Right = Previous, Swipe Down = Dismiss/Close with pull-down tactile feedback
+- [x] Photo selection for search refinement remains on grid cards (gold border + floating action bar)
+- [x] Grid cards gain direct single-photo download buttons in addition to full Lightbox view button
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
+
 ## Task: Album Activity Timeline
 
 **Status:** Completed

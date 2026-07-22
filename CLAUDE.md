@@ -219,6 +219,22 @@ npm run db:studio     # Open Drizzle GUI for DB browsing
 ```bash
 npm run build         # Next.js production build
 pm2 start ecosystem.config.js
+pm2 restart ecosystem.config.js
+pm2 logs fotohaven --lines 20
+```
+
+### SSH Remote Access (Computer to Mobile Termux)
+```bash
+# On Termux (Phone): Setup & start SSH server (runs on port 8022)
+pkg install openssh -y && passwd && sshd
+
+# On Computer (PowerShell / Terminal): Connect via SSH
+ssh <termux_user>@<phone_ip> -p 8022
+
+# Over SSH: Update deployment from GitHub
+cd ~/storage/shared/fotohaven
+git fetch origin && git checkout feat/python-face-recognition && git pull origin feat/python-face-recognition
+npm run db:push && npm run build && pm2 restart ecosystem.config.js
 ```
 
 ---

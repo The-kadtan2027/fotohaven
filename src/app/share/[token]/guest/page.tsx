@@ -3,7 +3,18 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Download, Sparkles, X, Maximize } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Sparkles,
+  X,
+  Maximize,
+  LayoutGrid,
+  Columns,
+  Square,
+} from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
 
@@ -31,6 +42,7 @@ type Album = {
 };
 
 type Step = "otp" | "consent" | "scan" | "review" | "results";
+type ViewMode = "grid" | "masonry" | "single";
 
 type MatchResponse = {
   photos?: (Photo & { score: number; faceCount?: number })[];
@@ -58,6 +70,7 @@ export default function GuestFaceDiscoveryPage() {
   const [cameraReady, setCameraReady] = useState(false);
   const [confirmedPhotoIds, setConfirmedPhotoIds] = useState<string[]>([]);
   const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [lightbox, setLightbox] = useState<{ photos: MatchedPhoto[]; index: number } | null>(null);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
@@ -66,6 +79,10 @@ export default function GuestFaceDiscoveryPage() {
     strong: FACE_CONFIG.strongMatchThreshold,
     possible: FACE_CONFIG.possibleMatchThreshold,
   });
+
+  // Mobile Touch Swipe Gesture Tracking
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const [touchDeltaY, setTouchDeltaY] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -90,89 +107,104 @@ export default function GuestFaceDiscoveryPage() {
       try {
         const matchResp = await fetch("/api/guest/my-photos", { cache: "no-store" });
         if (!mounted || !matchResp.ok) return;
-        
-        const data = await matchResp.json() as MatchResponse;
+
+        const data = (await matchResp.json()) as MatchResponse;
         if (data.guest?.name) {
           setGuestName(data.guest.name);
-          
+
           if (data.photos && data.photos.length > 0) {
-            // Use the photos directly from the my-photos API (which we just enriched)
-            // instead of fetching the shallow album API.
-            const matched: MatchedPhoto[] = data.photos as MatchedPhoto[];
-            setMatchedPhotos(matched);
+            setMatchedPhotos(data.photos);
             setIsReturningGuest(true);
+            if (data.source) setMatchSource(data.source);
+            if (data.thresholds) setMatchThresholds(data.thresholds);
             setStep("results");
-            return;
+          } else {
+            setIsReturningGuest(true);
+            setStep("consent");
           }
-          
-          setStep("consent");
         }
-      } catch (err) {
-        // Ignore error and stay on OTP step
+      } catch {
+        // Guest session missing or invalid
       }
     }
 
-    checkSession();
+    void checkSession();
 
     return () => {
       mounted = false;
       stopCamera();
     };
-  }, [token]);
+  }, []);
 
   async function requestOtp(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError("");
     setStatus("");
 
+    if (!name.trim() || !email.trim()) {
+      setError("Please provide your name and email.");
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      const resp = await fetch("/api/guest/request-otp", {
+      const res = await fetch("/api/guest/request-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, name, email }),
+        body: JSON.stringify({ token, name, email, phone }),
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || "Failed to send OTP");
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to request OTP");
       }
 
       setOtpSent(true);
-      setStatus("OTP sent. Check your email.");
-    } catch (err: any) {
-      setError(err.message || "Failed to send OTP");
+      setStatus("Passcode sent to your email.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to request OTP");
     } finally {
       setBusy(false);
     }
   }
 
   async function verifyOtp() {
-    setBusy(true);
     setError("");
     setStatus("");
 
+    if (!otp.trim()) {
+      setError("Enter the passcode.");
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      const resp = await fetch("/api/guest/verify-otp", {
+      const res = await fetch("/api/guest/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, name, email, phone, otp }),
+        body: JSON.stringify({ token, email, code: otp }),
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || "OTP verification failed");
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Invalid passcode");
       }
-      const resolvedName = data.name || name;
-      setGuestName(resolvedName);
+
+      if (data.name) {
+        setGuestName(data.name);
+      }
+
       if (data.hasFaceDescriptor) {
         setIsReturningGuest(true);
-        setStatus("Face profile found. Loading your matched photos...");
-        await loadMatchedPhotos({ source: "selfie", fallbackName: resolvedName });
+        setStatus("Loading your matched photos...");
+        await loadMatchedPhotos({ source: "selfie" });
       } else {
-        setIsReturningGuest(false);
         setStep("consent");
       }
-    } catch (err: any) {
-      setError(err.message || "OTP verification failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
       setBusy(false);
     }
@@ -180,11 +212,9 @@ export default function GuestFaceDiscoveryPage() {
 
   async function startCamera() {
     setError("");
-    setStatus("");
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -193,319 +223,303 @@ export default function GuestFaceDiscoveryPage() {
       }
       setCameraReady(true);
     } catch {
-      setError("Unable to access camera. You can browse all photos instead.");
+      setError("Camera access is blocked or unavailable. Try uploading a face photo instead.");
     }
   }
 
   async function getFaceApi() {
     if (!faceApiPromiseRef.current) {
-      faceApiPromiseRef.current = (async () => {
-        const faceapi = await import("face-api.js");
+      faceApiPromiseRef.current = import("face-api.js").then(async (faceapi) => {
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
           faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
           faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
         ]);
         return faceapi;
-      })();
+      });
     }
-
     return faceApiPromiseRef.current;
   }
 
-  async function enrollDescriptor(descriptor: number[]) {
-    const enrollResp = await fetch("/api/guest/enroll-face", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ descriptor }),
-    });
-    if (!enrollResp.ok) {
-      const data = await enrollResp.json();
-      throw new Error(data.error || "Failed to save face profile");
-    }
-  }
-
-  function loadImageElement(src: string) {
-    return new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Unable to read that image. Please try another photo."));
-      img.src = src;
-    });
-  }
-
-  async function loadMatchedPhotos(options?: {
-    source?: MatchSource;
-    photoIds?: string[];
-    fallbackName?: string;
-  }) {
-    const source = options?.source || "selfie";
-    setStatus(source === "refined" ? "Finding more photos like these..." : "Finding your photos...");
-
-    const matchResp = await fetch("/api/guest/my-photos", {
-      method: source === "refined" ? "POST" : "GET",
-      cache: "no-store",
-      headers: source === "refined" ? { "Content-Type": "application/json" } : undefined,
-      body: source === "refined" ? JSON.stringify({ photoIds: options?.photoIds || [] }) : undefined,
-    });
-    const matchData = (await matchResp.json()) as MatchResponse;
-    if (!matchResp.ok) {
-      throw new Error(matchData.error || "Failed to find matches");
-    }
-
-    const resolvedSource = matchData.source || source;
-    setMatchSource(resolvedSource);
-    setGuestName(matchData.guest?.name || options?.fallbackName || "");
-    if (matchData.thresholds) {
-      setMatchThresholds(matchData.thresholds);
-    }
-    
-    const scored = matchData.photos || [];
-
-    if (!scored.length) {
-      setMatchedPhotos([]);
-      setStep("results");
-      setConfirmedPhotoIds([]);
-      setStatus("");
-      return;
-    }
-
-    if (resolvedSource === "selfie") {
-      setConfirmedPhotoIds([]);
-      setReviewIndex(0);
-      setReviewSelections([]);
-    }
-
-    // The my-photos API now returns the full photo metadata (url, originalName, etc.)
-    // so we can use the scored results directly and skip the heavy album fetch.
-    const matched: MatchedPhoto[] = scored as MatchedPhoto[];
-
-    if (resolvedSource === "selfie") {
-      matched.sort((a, b) => {
-        const aSingle = a.faceCount === 1 ? 1 : 0;
-        const bSingle = b.faceCount === 1 ? 1 : 0;
-        if (aSingle !== bSingle) return bSingle - aSingle;
-        return b.score - a.score;
-      });
-    } else {
-      matched.sort((a, b) => b.score - a.score);
-    }
-
-    setMatchedPhotos(matched);
-    setStep(resolvedSource === "selfie" ? "review" : "results");
-    setStatus("");
-  }
-
-  async function handleReviewChoice(isMe: boolean) {
-    const currentPhotoId = matchedPhotos[reviewIndex].id;
-    const newSelections = isMe ? [...reviewSelections, currentPhotoId] : reviewSelections;
-    
-    if (isMe) setReviewSelections(newSelections);
-    
-    const maxReviewPhotos = Math.min(5, matchedPhotos.length);
-    if (newSelections.length >= 3 || reviewIndex + 1 >= maxReviewPhotos) {
-      if (newSelections.length > 0) {
-        setBusy(true);
-        setStatus("Finding more photos based on your review...");
-        try {
-          await loadMatchedPhotos({ source: "refined", photoIds: newSelections });
-        } catch (err: any) {
-          setError(err.message || "Failed to refine matches");
-          setStep("results");
-        } finally {
-          setBusy(false);
-        }
-      } else {
-        setStep("results");
-      }
-    } else {
-      setReviewIndex(i => i + 1);
-    }
-  }
-
   async function scanAndMatch() {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !cameraReady) return;
     setBusy(true);
     setError("");
 
     try {
-      const SAMPLES = FACE_CONFIG.enrollmentSamples;
-      const DELAY_MS = 500;
-      const canvases: HTMLCanvasElement[] = [];
-
-      for (let i = 0; i < SAMPLES; i++) {
-        if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
-        setStatus(`Capturing sample ${i + 1} of ${SAMPLES} - hold still...`);
-
-        const video = videoRef.current;
-        if (!video) break;
-
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) continue;
-        ctx.drawImage(video, 0, 0);
-        canvases.push(canvas);
-      }
-
-      stopCamera();
-
-      setStatus("Loading models...");
+      setStatus("Loading face detection models...");
       const faceapi = await getFaceApi();
 
-      setStatus("Computing face profile...");
-      const collectedDescriptors: Float32Array[] = [];
-      for (const canvas of canvases) {
+      const samplesNeeded = FACE_CONFIG.enrollmentSamples;
+      const minSuccess = FACE_CONFIG.enrollmentMinSuccess;
+      const descriptors: Float32Array[] = [];
+
+      for (let i = 0; i < samplesNeeded; i++) {
+        setStatus(`Capturing frame ${i + 1} of ${samplesNeeded} - hold still...`);
+
         const detection = await faceapi
-          .detectSingleFace(canvas)
+          .detectSingleFace(
+            videoRef.current,
+            new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
+          )
           .withFaceLandmarks()
           .withFaceDescriptor();
 
         if (detection) {
-          collectedDescriptors.push(Float32Array.from(detection.descriptor));
+          descriptors.push(detection.descriptor);
+        }
+
+        if (i < samplesNeeded - 1) {
+          await new Promise((r) => setTimeout(r, 400));
         }
       }
 
-      if (collectedDescriptors.length < FACE_CONFIG.enrollmentMinSuccess) {
+      if (descriptors.length < minSuccess) {
         throw new Error(
-          `Only ${collectedDescriptors.length} of ${SAMPLES} samples detected a face. Need at least ${FACE_CONFIG.enrollmentMinSuccess}. ` +
-          "Make sure your face is well-lit and centred in the frame."
+          `Could not detect a clear face (${descriptors.length}/${minSuccess} frames captured). Please position your face in good lighting and try again.`
         );
       }
 
-      const averaged = averageDescriptors(collectedDescriptors);
-      const descriptor = Array.from(averaged);
-      await enrollDescriptor(descriptor);
+      setStatus("Processing face profile...");
+      const avgDescriptor = averageDescriptors(descriptors);
 
-      await loadMatchedPhotos({ source: "selfie" });
-      fetch("/api/guest/log-activity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventType: "face_scan_completed" }),
-      }).catch(console.error);
-    } catch (err: any) {
-      setError(err.message || "Scan failed");
-      setStatus("");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleUploadedPhoto(file: File) {
-    setBusy(true);
-    setError("");
-    setStatus("");
-
-    try {
       stopCamera();
-      setStatus("Loading uploaded photo...");
 
-      const objectUrl = URL.createObjectURL(file);
-      try {
-        const image = await loadImageElement(objectUrl);
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth || image.width;
-        canvas.height = image.naturalHeight || image.height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          throw new Error("Unable to process that image right now. Please try another photo.");
-        }
-        ctx.drawImage(image, 0, 0);
+      setStatus("Enrolling face profile...");
+      const enrollRes = await fetch("/api/guest/enroll-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ descriptor: Array.from(avgDescriptor) }),
+      });
 
-        setStatus("Loading models...");
-        const faceapi = await getFaceApi();
-
-        setStatus("Analyzing uploaded photo...");
-        const detections = await faceapi
-          .detectAllFaces(canvas)
-          .withFaceLandmarks()
-          .withFaceDescriptors();
-
-        if (detections.length === 0) {
-          throw new Error("No face was detected in that photo. Try a clearer photo with one visible face.");
-        }
-        if (detections.length > 1) {
-          throw new Error("Multiple faces were detected. Please upload a photo with only one visible face.");
-        }
-
-        setStatus("Saving face profile...");
-        await enrollDescriptor(Array.from(detections[0].descriptor));
-      } finally {
-        URL.revokeObjectURL(objectUrl);
+      if (!enrollRes.ok) {
+        const errData = await enrollRes.json();
+        throw new Error(errData.error || "Failed to save face profile.");
       }
 
       await loadMatchedPhotos({ source: "selfie" });
-      fetch("/api/guest/log-activity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventType: "face_scan_completed" }),
-      }).catch(console.error);
-    } catch (err: any) {
-      setError(err.message || "Photo upload failed");
-      setStatus("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Face scan failed.");
     } finally {
       setBusy(false);
-      if (uploadInputRef.current) {
-        uploadInputRef.current.value = "";
-      }
     }
   }
 
   async function handleUploadSelection(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    await handleUploadedPhoto(file);
+
+    setBusy(true);
+    setError("");
+    setStatus("Analyzing face photo...");
+
+    try {
+      const faceapi = await getFaceApi();
+      const img = await faceapi.bufferToImage(file);
+
+      const detections = await faceapi
+        .detectAllFaces(
+          img,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
+        )
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      if (detections.length === 0) {
+        throw new Error("No face was detected in this photo. Please upload a clear photo of your face.");
+      }
+
+      if (detections.length > 1) {
+        throw new Error(
+          `Found ${detections.length} faces in this photo. Please upload a photo with only your face visible.`
+        );
+      }
+
+      const descriptor = detections[0].descriptor;
+      stopCamera();
+
+      setStatus("Enrolling face profile...");
+      const enrollRes = await fetch("/api/guest/enroll-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ descriptor: Array.from(descriptor) }),
+      });
+
+      if (!enrollRes.ok) {
+        const errData = await enrollRes.json();
+        throw new Error(errData.error || "Failed to save face profile.");
+      }
+
+      await loadMatchedPhotos({ source: "selfie" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process uploaded face photo.");
+    } finally {
+      setBusy(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  }
+
+  async function loadMatchedPhotos(opts?: { source: MatchSource; photoIds?: string[] }) {
+    const source = opts?.source || "selfie";
+    setStatus("Matching photos...");
+
+    let res: Response;
+    if (source === "refined" && opts?.photoIds?.length) {
+      res = await fetch("/api/guest/my-photos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoIds: opts.photoIds }),
+      });
+    } else {
+      res = await fetch("/api/guest/my-photos", { cache: "no-store" });
+    }
+
+    if (!res.ok) throw new Error("Failed to load matches.");
+
+    const data = (await res.json()) as MatchResponse;
+    const photos = data.photos || [];
+    setMatchedPhotos(photos);
+    setMatchSource(data.source || source);
+    if (data.thresholds) setMatchThresholds(data.thresholds);
+
+    if (source === "selfie" && photos.length > 0 && !isReturningGuest) {
+      const sortedCandidates = [...photos].sort((a, b) => {
+        const countA = a.faceCount ?? 1;
+        const countB = b.faceCount ?? 1;
+        if (countA === 1 && countB !== 1) return -1;
+        if (countA !== 1 && countB === 1) return 1;
+        return b.score - a.score;
+      });
+
+      setMatchedPhotos(sortedCandidates);
+      setReviewIndex(0);
+      setReviewSelections([]);
+      setStep("review");
+    } else {
+      setStep("results");
+    }
+
+    setStatus("");
+  }
+
+  function handleReviewChoice(isMe: boolean) {
+    const currentPhoto = matchedPhotos[reviewIndex];
+    let nextSelections = [...reviewSelections];
+
+    if (isMe && currentPhoto) {
+      nextSelections.push(currentPhoto.id);
+      setReviewSelections(nextSelections);
+    }
+
+    const nextIndex = reviewIndex + 1;
+    const maxReview = Math.min(5, matchedPhotos.length);
+
+    if (nextIndex < maxReview) {
+      setReviewIndex(nextIndex);
+    } else {
+      setBusy(true);
+      setStatus("Refining search based on your selections...");
+
+      if (nextSelections.length > 0) {
+        loadMatchedPhotos({ source: "refined", photoIds: nextSelections })
+          .catch(() => setStep("results"))
+          .finally(() => setBusy(false));
+      } else {
+        setStep("results");
+        setBusy(false);
+      }
+    }
   }
 
   function toggleConfirmedPhoto(photoId: string) {
-    setError("");
     setConfirmedPhotoIds((prev) => {
       if (prev.includes(photoId)) {
         return prev.filter((id) => id !== photoId);
       }
       if (prev.length >= 3) {
-        setError("Choose up to 3 confirmed photos for refined discovery.");
+        setError("You can select up to 3 photos to refine the search.");
         return prev;
       }
+      setError("");
       return [...prev, photoId];
     });
   }
 
   async function refineMatches() {
-    if (!confirmedPhotoIds.length) {
-      setError("Choose at least 1 confirmed photo first.");
-      return;
-    }
-
+    if (!confirmedPhotoIds.length) return;
     setBusy(true);
     setError("");
+
     try {
       await loadMatchedPhotos({ source: "refined", photoIds: confirmedPhotoIds });
-    } catch (err: any) {
-      setError(err.message || "Failed to refine matches");
-      setStatus("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refine search.");
     } finally {
       setBusy(false);
     }
   }
 
   function rescanFace() {
-    stopCamera();
-    setLightbox(null);
-    setMatchedPhotos([]);
     setConfirmedPhotoIds([]);
-    setMatchSource("selfie");
-    setIsReturningGuest(false);
+    setError("");
+    setStatus("");
     setStep("scan");
     void startCamera();
+  }
+
+  // Mobile Touch Swipe Handlers for Lightbox
+  function handleTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 1) {
+      touchStartRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        time: Date.now(),
+      };
+      setTouchDeltaY(0);
+    }
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!touchStartRef.current || e.touches.length !== 1) return;
+    const deltaY = e.touches[0].clientY - touchStartRef.current.y;
+    if (deltaY > 0) {
+      setTouchDeltaY(deltaY);
+    }
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (!touchStartRef.current || !lightbox) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const elapsed = Date.now() - touchStartRef.current.time;
+
+    touchStartRef.current = null;
+    setTouchDeltaY(0);
+
+    // Swipe Down to Dismiss Lightbox (vertical downward displacement > 80px)
+    if (deltaY > 80 && Math.abs(deltaY) > Math.abs(deltaX)) {
+      setLightbox(null);
+      return;
+    }
+
+    // Horizontal Swipe (Left = Next, Right = Prev)
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) && elapsed < 500) {
+      if (deltaX < 0 && lightbox.index < lightbox.photos.length - 1) {
+        setLightbox((lb) => lb && { ...lb, index: lb.index + 1 });
+      } else if (deltaX > 0 && lightbox.index > 0) {
+        setLightbox((lb) => lb && { ...lb, index: lb.index - 1 });
+      }
+    }
   }
 
   useEffect(() => {
     if (!lightbox) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
-      if (e.key === "ArrowLeft") setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
+      if (e.key === "ArrowRight")
+        setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
+      if (e.key === "ArrowLeft")
+        setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
       if (e.key === "Escape") setLightbox(null);
     };
     window.addEventListener("keydown", handler);
@@ -542,7 +556,10 @@ export default function GuestFaceDiscoveryPage() {
     fetch("/api/guest/log-activity", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventType: "download_started", payload: { count: matchedPhotos.length, source: "matched_zip" } }),
+      body: JSON.stringify({
+        eventType: "download_started",
+        payload: { count: matchedPhotos.length, source: "matched_zip" },
+      }),
     }).catch(console.error);
   }
 
@@ -557,7 +574,10 @@ export default function GuestFaceDiscoveryPage() {
     fetch("/api/guest/log-activity", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventType: "download_started", payload: { count: 1, source: "single_photo" } }),
+      body: JSON.stringify({
+        eventType: "download_started",
+        payload: { count: 1, source: "single_photo" },
+      }),
     }).catch(console.error);
   }
 
@@ -636,7 +656,13 @@ export default function GuestFaceDiscoveryPage() {
               extracted from this album to find likely matches. You can skip this and browse all photos.
             </p>
             <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn-gold" onClick={() => { setStep("scan"); void startCamera(); }}>
+              <button
+                className="btn-gold"
+                onClick={() => {
+                  setStep("scan");
+                  void startCamera();
+                }}
+              >
                 I consent, scan my face
               </button>
               <Link href={`/share/${token}`} className="btn-ghost">
@@ -703,28 +729,28 @@ export default function GuestFaceDiscoveryPage() {
             <p style={{ marginTop: 6, fontSize: 14, color: "var(--brown)", textAlign: "center", maxWidth: 460 }}>
               Help FotoHaven learn exactly what you look like today. Are you in this photo? ({reviewIndex + 1} of {Math.min(5, matchedPhotos.length)})
             </p>
-            
+
             {matchedPhotos[reviewIndex] && (
               <div style={{ marginTop: 24, width: "100%", maxWidth: 360, borderRadius: 12, overflow: "hidden", background: "#000", position: "relative" }}>
-                <img 
-                  src={matchedPhotos[reviewIndex].url} 
-                  alt="Review candidate" 
-                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }} 
+                <img
+                  src={matchedPhotos[reviewIndex].url}
+                  alt="Review candidate"
+                  style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }}
                 />
               </div>
             )}
-            
+
             <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 360 }}>
-              <button 
-                className="btn-ghost" 
+              <button
+                className="btn-ghost"
                 style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
                 onClick={() => handleReviewChoice(false)}
                 disabled={busy}
               >
                 No, not me
               </button>
-              <button 
-                className="btn-gold" 
+              <button
+                className="btn-gold"
                 style={{ flex: 1, padding: "14px 10px", fontSize: 15 }}
                 onClick={() => handleReviewChoice(true)}
                 disabled={busy}
@@ -732,24 +758,24 @@ export default function GuestFaceDiscoveryPage() {
                 Yes, that's me
               </button>
             </div>
-            
-            <button 
-              className="btn-ghost" 
+
+            <button
+              className="btn-ghost"
               style={{ marginTop: 24, fontSize: 13, border: "none" }}
               onClick={async () => {
-                 if (reviewSelections.length > 0) {
-                   setBusy(true);
-                   setStatus("Finding more photos based on your review...");
-                   try {
-                     await loadMatchedPhotos({ source: "refined", photoIds: reviewSelections });
-                   } catch {
-                     setStep("results");
-                   } finally {
-                     setBusy(false);
-                   }
-                 } else {
-                   setStep("results");
-                 }
+                if (reviewSelections.length > 0) {
+                  setBusy(true);
+                  setStatus("Finding more photos based on your review...");
+                  try {
+                    await loadMatchedPhotos({ source: "refined", photoIds: reviewSelections });
+                  } catch {
+                    setStep("results");
+                  } finally {
+                    setBusy(false);
+                  }
+                } else {
+                  setStep("results");
+                }
               }}
               disabled={busy}
             >
@@ -774,7 +800,7 @@ export default function GuestFaceDiscoveryPage() {
                   Missing some photos? Tap up to 3 photos of yourself to improve the search.
                 </p>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <button className="btn-ghost" onClick={rescanFace}>
                   Rescan Face
                 </button>
@@ -786,12 +812,243 @@ export default function GuestFaceDiscoveryPage() {
               </div>
             </div>
 
+            {/* View Mode Switcher Toolbar */}
+            {matchedPhotos.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 20, marginBottom: 16, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--warm-white)", padding: 4, borderRadius: 8, border: "1px solid var(--sand)" }}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("grid")}
+                    className={viewMode === "grid" ? "btn-gold" : "btn-ghost"}
+                    style={{ padding: "6px 12px", fontSize: 12, gap: 6, borderRadius: 6 }}
+                    title="1:1 Square Grid View"
+                  >
+                    <LayoutGrid size={14} />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("masonry")}
+                    className={viewMode === "masonry" ? "btn-gold" : "btn-ghost"}
+                    style={{ padding: "6px 12px", fontSize: 12, gap: 6, borderRadius: 6 }}
+                    title="Masonry Composition View"
+                  >
+                    <Columns size={14} />
+                    <span>Masonry</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("single")}
+                    className={viewMode === "single" ? "btn-gold" : "btn-ghost"}
+                    style={{ padding: "6px 12px", fontSize: 12, gap: 6, borderRadius: 6 }}
+                    title="Single Card Focus View"
+                  >
+                    <Square size={14} />
+                    <span>Focus</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {matchedPhotos.length === 0 ? (
               <p style={{ marginTop: 14, color: "var(--brown)", fontSize: 14 }}>
                 No strong matches found yet. You can browse all photos instead or rescan your face.
               </p>
+            ) : viewMode === "single" ? (
+              /* Single Card Focus View Mode */
+              <div style={{ display: "flex", flexDirection: "column", gap: 24, alignItems: "center", marginTop: 16 }}>
+                {matchedPhotos.map((photo, index) => {
+                  const selected = confirmedPhotoIds.includes(photo.id);
+                  return (
+                    <div
+                      key={photo.id}
+                      style={{
+                        width: "100%",
+                        maxWidth: 560,
+                        borderRadius: 14,
+                        overflow: "hidden",
+                        background: "var(--sand)",
+                        border: selected ? "3px solid #C4A86C" : "1px solid var(--sand)",
+                        boxShadow: selected ? "0 0 0 3px rgba(196, 168, 108, 0.85)" : "0 4px 16px rgba(0,0,0,0.06)",
+                        position: "relative",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleConfirmedPhoto(photo.id)}
+                        style={{ position: "relative", display: "block", width: "100%", border: "none", padding: 0, background: "transparent", cursor: "pointer" }}
+                      >
+                        <img
+                          src={photo.url}
+                          alt={photo.originalName}
+                          style={{
+                            width: "100%",
+                            maxHeight: 500,
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
+                      </button>
+
+                      <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff" }}>
+                        <div>
+                          <span
+                            style={{
+                              background:
+                                photo.score >= matchThresholds.strong
+                                  ? "rgba(34,197,94,0.88)"
+                                  : "rgba(234,179,8,0.88)",
+                              color: "#fff",
+                              borderRadius: 4,
+                              padding: "3px 8px",
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {photo.score >= matchThresholds.strong ? "Strong match" : "Possible match"}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => downloadPhoto(photo)}
+                            style={{ padding: "6px 12px", fontSize: 13, gap: 6 }}
+                          >
+                            <Download size={14} />
+                            Download
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-gold"
+                            onClick={() => setLightbox({ photos: matchedPhotos, index })}
+                            style={{ padding: "6px 12px", fontSize: 13, gap: 6 }}
+                          >
+                            <Maximize size={14} />
+                            Expand
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : viewMode === "masonry" ? (
+              /* Masonry Composition View Mode */
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 280px), 1fr))",
+                  gap: 16,
+                  marginTop: 16,
+                }}
+              >
+                {matchedPhotos.map((photo, index) => {
+                  const selected = confirmedPhotoIds.includes(photo.id);
+                  return (
+                    <div
+                      key={photo.id}
+                      style={{
+                        position: "relative",
+                        borderRadius: 12,
+                        overflow: "hidden",
+                        background: "var(--sand)",
+                        border: selected ? "3px solid #C4A86C" : "1px solid var(--sand)",
+                        boxShadow: selected ? "0 0 0 3px rgba(196, 168, 108, 0.85)" : undefined,
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleConfirmedPhoto(photo.id)}
+                        style={{ position: "relative", background: "transparent", display: "block", width: "100%", padding: 0, border: "none", cursor: "pointer" }}
+                      >
+                        <img
+                          src={photo.url}
+                          alt={photo.originalName}
+                          style={{
+                            width: "100%",
+                            maxHeight: 380,
+                            objectFit: "cover",
+                            display: "block",
+                            transform: selected ? "scale(0.95)" : "scale(1)",
+                            transition: "transform 0.2s ease",
+                          }}
+                        />
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: 8,
+                            left: 8,
+                            background:
+                              photo.score >= matchThresholds.strong
+                                ? "rgba(34,197,94,0.88)"
+                                : "rgba(234,179,8,0.88)",
+                            color: "#fff",
+                            borderRadius: 4,
+                            padding: "2px 7px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {photo.score >= matchThresholds.strong ? "Strong match" : "Possible match"}
+                        </span>
+                      </button>
+                      <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadPhoto(photo);
+                          }}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "rgba(26,18,8,0.6)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            backdropFilter: "blur(6px)",
+                          }}
+                          title="Download photo"
+                        >
+                          <Download size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightbox({ photos: matchedPhotos, index });
+                          }}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: "50%",
+                            border: selected ? "none" : "1px solid rgba(255,255,255,0.9)",
+                            background: selected ? "rgba(196, 168, 108, 0.96)" : "rgba(26,18,8,0.6)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            backdropFilter: "blur(6px)",
+                          }}
+                          aria-label="View large photo"
+                        >
+                          {selected ? <Check size={16} /> : <Maximize size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
+              /* Grid View Mode (Default 1:1) */
               <div className="photo-grid" style={{ marginTop: 16 }}>
                 {matchedPhotos.map((photo, index) => {
                   const selected = confirmedPhotoIds.includes(photo.id);
@@ -817,13 +1074,13 @@ export default function GuestFaceDiscoveryPage() {
                         <img
                           src={photo.url}
                           alt={photo.originalName}
-                          style={{ 
-                            width: "100%", 
-                            height: "100%", 
-                            objectFit: "cover", 
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
                             aspectRatio: "1 / 1",
                             transform: selected ? "scale(0.92)" : "scale(1)",
-                            transition: "transform 0.2s ease" 
+                            transition: "transform 0.2s ease",
                           }}
                         />
                         <span
@@ -846,29 +1103,54 @@ export default function GuestFaceDiscoveryPage() {
                           {photo.score >= matchThresholds.strong ? "Strong match" : "Possible match"}
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setLightbox({ photos: matchedPhotos, index }); }}
-                        style={{
-                          position: "absolute",
-                          top: 8,
-                          right: 8,
-                          width: 32,
-                          height: 32,
-                          borderRadius: "50%",
-                          border: selected ? "none" : "1px solid rgba(255,255,255,0.9)",
-                          background: selected ? "rgba(196, 168, 108, 0.96)" : "rgba(26,18,8,0.55)",
-                          color: "#fff",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "pointer",
-                          backdropFilter: "blur(6px)",
-                        }}
-                        aria-label="View large photo"
-                      >
-                        {selected ? <Check size={16} /> : <Maximize size={14} />}
-                      </button>
+                      <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadPhoto(photo);
+                          }}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "rgba(26,18,8,0.6)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            backdropFilter: "blur(6px)",
+                          }}
+                          title="Download photo"
+                        >
+                          <Download size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightbox({ photos: matchedPhotos, index });
+                          }}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: "50%",
+                            border: selected ? "none" : "1px solid rgba(255,255,255,0.9)",
+                            background: selected ? "rgba(196, 168, 108, 0.96)" : "rgba(26,18,8,0.6)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            backdropFilter: "blur(6px)",
+                          }}
+                          aria-label="View large photo"
+                        >
+                          {selected ? <Check size={16} /> : <Maximize size={14} />}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -886,28 +1168,40 @@ export default function GuestFaceDiscoveryPage() {
       </div>
 
       {confirmedPhotoIds.length > 0 && (
-        <div style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: "16px",
-          background: "rgba(255,255,255,0.95)",
-          backdropFilter: "blur(12px)",
-          borderTop: "1px solid rgba(0,0,0,0.08)",
-          boxShadow: "0 -4px 12px rgba(0,0,0,0.05)",
-          display: "flex",
-          justifyContent: "center",
-          zIndex: 50
-        }}>
-          <div style={{ width: "100%", maxWidth: 980, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: "16px",
+            background: "rgba(255,255,255,0.95)",
+            backdropFilter: "blur(12px)",
+            borderTop: "1px solid rgba(0,0,0,0.08)",
+            boxShadow: "0 -4px 12px rgba(0,0,0,0.05)",
+            display: "flex",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 980,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--espresso)" }}>
-              {confirmedPhotoIds.length} photo{confirmedPhotoIds.length !== 1 ? 's' : ''} selected
+              {confirmedPhotoIds.length} photo{confirmedPhotoIds.length !== 1 ? "s" : ""} selected
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <button 
+              <button
                 type="button"
-                className="btn-ghost" 
+                className="btn-ghost"
                 onClick={() => setConfirmedPhotoIds([])}
                 style={{ fontSize: 13 }}
               >
@@ -926,9 +1220,22 @@ export default function GuestFaceDiscoveryPage() {
         </div>
       )}
 
+      {/* Lightbox with Native Mobile Touch Swipe Gestures */}
       {lightbox && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex" }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(26,18,8,0.95)",
+            zIndex: 1000,
+            display: "flex",
+            transform: `translateY(${touchDeltaY}px)`,
+            opacity: touchDeltaY > 0 ? Math.max(0.3, 1 - touchDeltaY / 300) : 1,
+            transition: touchDeltaY === 0 ? "transform 0.25s ease, opacity 0.25s ease" : "none",
+          }}
           onClick={() => setLightbox(null)}
         >
           <div
@@ -938,20 +1245,50 @@ export default function GuestFaceDiscoveryPage() {
               alignItems: "center",
               justifyContent: "center",
               position: "relative",
-              padding: "40px"
+              padding: "40px",
             }}
           >
             <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 8, zIndex: 10 }}>
               <button
-                onClick={(e) => { e.stopPropagation(); downloadPhoto(lightbox.photos[lightbox.index]); }}
-                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 999, minWidth: 40, height: 40, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", gap: 8 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadPhoto(lightbox.photos[lightbox.index]);
+                }}
+                style={{
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: 999,
+                  minWidth: 40,
+                  height: 40,
+                  padding: "0 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: "#fff",
+                  gap: 8,
+                }}
               >
                 <Download size={16} />
                 <span style={{ fontSize: 12 }}>Download</span>
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
-                style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightbox(null);
+                }}
+                style={{
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 40,
+                  height: 40,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: "#fff",
+                }}
               >
                 <X size={18} />
               </button>
@@ -959,8 +1296,25 @@ export default function GuestFaceDiscoveryPage() {
 
             {lightbox.index > 0 && (
               <button
-                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index - 1 }); }}
-                style={{ position: "absolute", left: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightbox((lb) => lb && { ...lb, index: lb.index - 1 });
+                }}
+                style={{
+                  position: "absolute",
+                  left: 20,
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 44,
+                  height: 44,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: "#fff",
+                  zIndex: 10,
+                }}
               >
                 <ChevronLeft size={20} />
               </button>
@@ -1008,8 +1362,25 @@ export default function GuestFaceDiscoveryPage() {
 
             {lightbox.index < lightbox.photos.length - 1 && (
               <button
-                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => lb && { ...lb, index: lb.index + 1 }); }}
-                style={{ position: "absolute", right: 20, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", zIndex: 10 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightbox((lb) => lb && { ...lb, index: lb.index + 1 });
+                }}
+                style={{
+                  position: "absolute",
+                  right: 20,
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 44,
+                  height: 44,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: "#fff",
+                  zIndex: 10,
+                }}
               >
                 <ChevronRight size={20} />
               </button>

@@ -578,6 +578,28 @@ npm install
 npm run db:push
 npm run build
 pm2 reload fotohaven           # zero-downtime reload
+### Remote Access via SSH (PC to Mobile Termux)
+
+```bash
+# 1. Setup on Termux (Phone): Install OpenSSH, set password, & start daemon
+pkg install openssh -y
+passwd
+sshd                           # Listens on port 8022
+
+# 2. Get Termux Username & WiFi IP:
+whoami                         # e.g., u0_a245
+ifconfig                       # look for wlan0 IP (e.g., 192.168.1.50)
+
+# 3. Connect from PC (PowerShell / Terminal):
+ssh <termux_user>@<phone_ip> -p 8022
+
+# 4. Pull updates and redeploy over SSH:
+cd ~/storage/shared/fotohaven
+git fetch origin && git checkout feat/python-face-recognition && git pull origin feat/python-face-recognition
+npm run db:push
+npm run build
+pm2 restart ecosystem.config.js
+pm2 status
 ```
 
 ---
