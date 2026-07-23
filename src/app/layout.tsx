@@ -1,13 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/ToastProvider";
 import { PwaInstaller } from "@/components/PwaInstaller";
+
+export const viewport: Viewport = {
+  themeColor: "#1a1208",
+};
 
 export const metadata: Metadata = {
   title: "FotoHaven | Professional Photo Handoff",
   description: "Secure, elegant photo delivery for photographers and clients.",
   manifest: "/manifest.webmanifest",
-  themeColor: "#1a1208",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -26,7 +29,6 @@ export default function RootLayout({
     <html lang="en">
       <head>
         {/* PWA Meta Tags */}
-        <meta name="theme-color" content="#1a1208" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
