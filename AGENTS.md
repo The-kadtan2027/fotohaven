@@ -1701,3 +1701,27 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Workspace Code Health & Architecture Enhancement (Phase 1)
+
+**Status:** Completed
+**Scope:** Establish centralized structured logging framework, standardized API response contracts, high-order route error boundary wrappers (`withHandler`), and refactor core API routes.
+
+### Modified / New Files
+- `src/lib/logger.ts` -- Structured logging utility (`DEBUG`, `INFO`, `WARN`, `ERROR`), request execution timing, and automatic secret masking (`password`, `otp`, `jwt`, `token`)
+- `src/lib/api-response.ts` -- Standardized API response constructors (`apiSuccess`, `apiBadRequest`, `apiUnauthorized`, `apiNotFound`, `apiError`) and `withHandler` error boundary
+- `src/middleware.ts` -- Upgraded API request logging to consume `logger.info("API", ...)`
+- `src/app/api/auth/login/route.ts` -- Migrated to `withHandler` and `logger`
+- `src/app/api/guest/request-otp/route.ts` -- Migrated to `withHandler` and `logger`
+- `src/app/api/guest/verify-otp/route.ts` -- Migrated to `withHandler` and `logger`
+- `src/app/api/upload/local/route.ts` -- Migrated to `withHandler` and `logger`
+- `src/app/api/photos/[photoId]/route.ts` -- Migrated to `withHandler` and `logger`
+
+### Acceptance criteria
+- [x] Centralized logger provides level filtering, execution timers, and auto-masks sensitive credentials
+- [x] Standardized API response helpers return uniform `{ ok, error, code }` JSON contracts
+- [x] `withHandler` boundary catches uncaught async exceptions and formats HTTP 500 responses safely
+- [x] Core API routes migrated and compiled cleanly
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

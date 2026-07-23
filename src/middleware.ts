@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose/jwt/verify';
 
+import { logger } from "@/lib/logger";
+
 // Routes that do NOT require authentication
 const PUBLIC_API_PREFIXES = [
   '/api/auth/',
@@ -44,7 +46,7 @@ export async function middleware(request: NextRequest) {
 
   // Log all API requests
   if (pathname.startsWith('/api/')) {
-    console.log(`[API] ${request.method} ${pathname}`);
+    logger.info("API", `${request.method} ${pathname}`);
   }
 
   // Skip auth check for public API routes
