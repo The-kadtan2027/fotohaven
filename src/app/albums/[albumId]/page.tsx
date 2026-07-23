@@ -243,34 +243,16 @@ export default function AlbumPage() {
         }
       }
 
-      const preparedFiles = await mapWithConcurrency(
-        acceptedFiles,
-        compressionConcurrency,
-        async (file) => {
-          const preparedFile = await compressImageFile(file, compressionFormat, compressionQuality);
-          return preparedFile;
-        }
-      );
-
-      const prepared: UploadItem[] = preparedFiles.map((file, index) => {
-        const originalFile = acceptedFiles[index];
-        const relativePath = (originalFile as any).webkitRelativePath || "";
+      const prepared: UploadItem[] = acceptedFiles.map((file) => {
+        const relativePath = (file as any).webkitRelativePath || "";
         const folderName = resolveFolderCeremonyName(relativePath);
         const ceremonyId =
           (folderName && ceremonyMap[folderName]) || activeCeremony || album.ceremonies[0]?.id || "";
-
-        let previewUrl: string | undefined;
-        try {
-          previewUrl = URL.createObjectURL(originalFile);
-        } catch {
-          /* best effort */
-        }
 
         return {
           file,
           ceremonyId,
           folderName: folderName || undefined,
-          previewUrl,
           status: "pending",
           progress: 0,
         };
@@ -280,7 +262,7 @@ export default function AlbumPage() {
     } finally {
       setIsPreparingUploads(false);
     }
-  }, [album, activeCeremony, compressionConcurrency, compressionFormat, compressionQuality, toast]);
+  }, [album, activeCeremony]);
 
   // Auto-start upload when new pending files enter queue
   useEffect(() => {
@@ -327,25 +309,45 @@ export default function AlbumPage() {
     const pending = uploads.filter((item) => item.status === "pending");
     if (!pending.length) return;
     setIsUploading(true);
+
     for (const item of pending) {
       const index = uploads.findIndex((entry) => entry.file === item.file && entry.ceremonyId === item.ceremonyId);
-      setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "uploading", progress: 0 } : entry));
+      if (index === -1) continue;
+
+      setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "uploading", progress: 0 } : entry)));
+
       try {
+        // Streamed 1-by-1 compression right before upload transmit
+        const fileToUpload = await compressImageFile(
+          item.file,
+          compressionFormat,
+          compressionQuality
+        );
+
         const metaRes = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ceremonyId: item.ceremonyId, filename: item.file.name, contentType: item.file.type, size: item.file.size }),
+          body: JSON.stringify({
+            ceremonyId: item.ceremonyId,
+            filename: fileToUpload.name,
+            contentType: fileToUpload.type,
+            size: fileToUpload.size,
+          }),
         });
+
         if (!metaRes.ok) throw new Error("Failed to get upload URL");
         const { uploadUrl } = await metaRes.json();
-        await xhrUploadWithProgress(uploadUrl, item.file, (progress) => {
-          setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, progress } : entry));
+
+        await xhrUploadWithProgress(uploadUrl, fileToUpload, (progress) => {
+          setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, progress } : entry)));
         });
-        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "done", progress: 100 } : entry));
+
+        setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "done", progress: 100 } : entry)));
       } catch (error) {
-        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "error", error: String(error) } : entry));
+        setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "error", error: String(error) } : entry)));
       }
     }
+
     setIsUploading(false);
     await fetchAlbum();
     window.setTimeout(() => setUploads((prev) => prev.filter((entry) => entry.status !== "done")), 2000);

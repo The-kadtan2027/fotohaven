@@ -28,35 +28,78 @@ function blobToFile(blob: Blob, originalName: string, format: CompressionFormat)
 export async function compressImageFile(
   file: File,
   format: CompressionFormat,
-  quality: number
+  quality: number,
+  maxDimension = 2560
 ): Promise<File> {
   if (format === "original") {
     return file;
   }
 
-  const objectUrl = URL.createObjectURL(file);
+  let canvas: HTMLCanvasElement | null = null;
+  let objectUrl: string | null = null;
 
   try {
-    const image = await loadImageFromUrl(objectUrl);
-    const canvas = createCanvas(image.naturalWidth || image.width, image.naturalHeight || image.height);
-    const ctx = canvas.getContext("2d");
+    let width = 0;
+    let height = 0;
+    let source: CanvasImageSource | null = null;
 
-    if (!ctx) {
-      return file;
+    // Hardware downscaling via createImageBitmap
+    if (typeof createImageBitmap === "function") {
+      try {
+        const bitmap = await createImageBitmap(file);
+        width = bitmap.width;
+        height = bitmap.height;
+
+        if (width > maxDimension || height > maxDimension) {
+          const ratio = Math.min(maxDimension / width, maxDimension / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+          bitmap.close();
+          source = await createImageBitmap(file, {
+            resizeWidth: width,
+            resizeHeight: height,
+            resizeQuality: "medium",
+          });
+        } else {
+          source = bitmap;
+        }
+      } catch {
+        /* fallback */
+      }
     }
 
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    if (!source) {
+      objectUrl = URL.createObjectURL(file);
+      const image = await loadImageFromUrl(objectUrl);
+      width = image.naturalWidth || image.width;
+      height = image.naturalHeight || image.height;
+      if (width > maxDimension || height > maxDimension) {
+        const ratio = Math.min(maxDimension / width, maxDimension / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      source = image;
+    }
+
+    canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+
+    ctx.drawImage(source, 0, 0, width, height);
+
+    if ("close" in source && typeof (source as any).close === "function") {
+      (source as any).close();
+    }
+
+    const targetCanvas = canvas;
+    if (!targetCanvas) return file;
 
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/webp";
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, mimeType, Math.max(0.1, Math.min(1, quality / 100)))
+      targetCanvas.toBlob(resolve, mimeType, Math.max(0.1, Math.min(1, quality / 100)))
     );
 
-    if (!blob) {
-      return file;
-    }
-
-    if (blob.size >= file.size) {
+    if (!blob || blob.size >= file.size) {
       return file;
     }
 
@@ -64,7 +107,11 @@ export async function compressImageFile(
   } catch {
     return file;
   } finally {
-    URL.revokeObjectURL(objectUrl);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 }
 

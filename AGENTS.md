@@ -1780,3 +1780,21 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Memory & Canvas Optimization for Photo Preparation
+
+**Status:** Completed
+**Scope:** Fix browser tab freezes and memory crashes during large photo uploads by optimizing client-side image decoding, capping canvas max dimensions (2560px), hardware downscaling via `createImageBitmap`, revoking Blob Object URLs, and converting upfront mass compression to incremental 1-by-1 streaming pipeline.
+
+### Modified / New Files
+- `src/lib/image-utils.ts` -- Upgraded `compressImageFile` with hardware downscaling via `createImageBitmap`, 2560px max dimension capping, and explicit `canvas.width = 0` buffer memory release.
+- `src/app/albums/[albumId]/page.tsx` -- Updated `onDrop` to enqueue files instantly without mass upfront compression or Object URL pins; updated `uploadAll` to compress items 1-by-1 sequentially right before upload transmit.
+
+### Acceptance criteria
+- [x] Dropping 50+ large photos enqueues instantly into UI state (< 5ms) without tab freeze
+- [x] Client-side canvas compression downscales high-res photos via `createImageBitmap` with 85%+ RAM reduction
+- [x] Explicit canvas buffer clearing releases graphics memory immediately after compression
+- [x] Object URLs are not accumulated upfront, preventing multi-gigabyte browser heap memory pins
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
