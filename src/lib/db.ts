@@ -19,6 +19,21 @@ sqlite.pragma("synchronous = NORMAL");
 // Store temp tables in memory
 sqlite.pragma("temp_store = MEMORY");
 
+// Auto-create JobQueue table if missing
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS JobQueue (
+    id TEXT PRIMARY KEY NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    payload TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    maxAttempts INTEGER NOT NULL DEFAULT 3,
+    lastError TEXT,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+`);
+
 import { DefaultLogger } from "drizzle-orm/logger";
 
 export const db = drizzle(sqlite, { 
