@@ -1763,3 +1763,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Explicit Folder Picker Button & Top-Level Folder Upload Action
+
+**Status:** Completed
+**Scope:** Enhance Photographer Admin Album Manager (`src/app/albums/[albumId]/page.tsx`) with dedicated native folder picker input (`webkitdirectory`), top-level **"📁 Upload Event Folders"** sidebar button, and dual dropzone picker controls (`Browse Files` / `Browse Folders`).
+
+### Modified / New Files
+- `src/app/albums/[albumId]/page.tsx` -- Added hidden folder input (`webkitdirectory`), sidebar **"Upload Event Folders"** action button, dual dropzone buttons (`Browse Files` & `Browse Folders`), and `handleFolderSelect` change listener.
+
+### Acceptance criteria
+- [x] Photographers can click 'Browse Folders' in dropzone to pick event folders via native OS file browser
+- [x] Top-level sidebar action '📁 Upload Event Folders' triggers folder selection from anywhere in the album
+- [x] Selected folder names auto-create ceremony entries in SQLite
+- [x] Dual picker buttons ('Browse Files' and 'Browse Folders') render cleanly in dropzone
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

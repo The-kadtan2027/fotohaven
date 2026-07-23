@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDropzone } from "react-dropzone";
@@ -295,6 +295,15 @@ export default function AlbumPage() {
     accept: { "image/*": [".jpg", ".jpeg", ".png", ".webp", ".heic"] },
     multiple: true,
   });
+
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      void onDrop(files);
+    }
+  };
 
   const xhrUploadWithProgress = (url: string, file: File, onProgress: (pct: number) => void, retries = 3) =>
     new Promise<void>((resolve, reject) => {
@@ -642,6 +651,14 @@ export default function AlbumPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      {/* Hidden Folder Picker Input */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        style={{ display: "none" }}
+        {...({ webkitdirectory: "", directory: "", multiple: true } as any)}
+        onChange={handleFolderSelect}
+      />
       <header className="glass px-4 md:px-8" style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
@@ -694,6 +711,7 @@ export default function AlbumPage() {
               );
             })}
             <button onClick={addCeremony} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500 }}><span style={{ fontSize: 18 }}>+</span> Add Ceremony</button>
+            <button onClick={() => folderInputRef.current?.click()} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-2.5 transition-colors text-[var(--gold)] hover:bg-[rgba(201,150,58,0.1)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500, cursor: "pointer" }}><FolderOpen size={14} /> Upload Event Folders</button>
             <div className="hidden md:block" style={{ height: 1, background: "var(--sand)", margin: "16px 20px" }} />
             <button onClick={() => setActiveCeremony("ACTIVITY")} className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]" style={{ background: activeCeremony === "ACTIVITY" ? "var(--warm-white)" : "transparent", borderColor: activeCeremony === "ACTIVITY" ? "var(--gold)" : "transparent", cursor: "pointer" }}><span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === "ACTIVITY" ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === "ACTIVITY" ? 500 : 400 }}><Activity size={14} />Activity Feed</span></button>
           </div>
@@ -745,8 +763,12 @@ export default function AlbumPage() {
               <div {...getRootProps()} style={{ border: `2px dashed ${isDragActive ? "var(--gold)" : "var(--sand)"}`, borderRadius: 16, padding: "32px 24px", textAlign: "center", background: isDragActive ? "rgba(201, 150, 58, 0.04)" : "var(--warm-white)", cursor: "pointer", transition: "all 0.2s ease", marginBottom: 16 }}>
                 <input {...getInputProps()} />
                 <div style={{ width: 48, height: 48, borderRadius: "50%", background: isDragActive ? "var(--gold)" : "var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}><Upload size={20} color={isDragActive ? "#fff" : "var(--brown)"} /></div>
-                <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>{isDragActive ? "Drop photos here" : "Drag & drop photos"}</p>
-                <p style={{ fontSize: 13, color: "var(--brown)" }}>or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 100MB</p>
+                <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>{isDragActive ? "Drop photos or event folders here" : "Drag & drop photos or event folders"}</p>
+                <p style={{ fontSize: 13, color: "var(--brown)", marginBottom: 14 }}>Folder names auto-create ceremonies! · JPG, PNG, WebP, HEIC up to 100MB</p>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                  <button className="btn-ghost" onClick={() => { const input = document.querySelector('input[type="file"]:not([webkitdirectory])') as HTMLInputElement; input?.click(); }} style={{ fontSize: 12, padding: "6px 14px" }}>Browse Files</button>
+                  <button className="btn-gold" onClick={() => folderInputRef.current?.click()} style={{ fontSize: 12, padding: "6px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><FolderOpen size={13} />Browse Folders</button>
+                </div>
                 {isPreparingUploads ? <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 10 }}>Preparing files with album compression settings...</p> : null}
               </div>
 
