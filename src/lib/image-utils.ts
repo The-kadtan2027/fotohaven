@@ -29,7 +29,7 @@ export async function compressImageFile(
   file: File,
   format: CompressionFormat,
   quality: number,
-  maxDimension = 2560
+  maxDimension = 2048
 ): Promise<File> {
   if (format === "original") {
     return file;
@@ -42,6 +42,7 @@ export async function compressImageFile(
     let width = 0;
     let height = 0;
     let source: CanvasImageSource | null = null;
+    let wasResized = false;
 
     // Hardware downscaling via createImageBitmap
     if (typeof createImageBitmap === "function") {
@@ -60,6 +61,7 @@ export async function compressImageFile(
             resizeHeight: height,
             resizeQuality: "medium",
           });
+          wasResized = true;
         } else {
           source = bitmap;
         }
@@ -77,6 +79,7 @@ export async function compressImageFile(
         const ratio = Math.min(maxDimension / width, maxDimension / height);
         width = Math.round(width * ratio);
         height = Math.round(height * ratio);
+        wasResized = true;
       }
       source = image;
     }
@@ -92,18 +95,21 @@ export async function compressImageFile(
     }
 
     const targetCanvas = canvas;
-    if (!targetCanvas) return file;
-
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/webp";
     const blob = await new Promise<Blob | null>((resolve) =>
       targetCanvas.toBlob(resolve, mimeType, Math.max(0.1, Math.min(1, quality / 100)))
     );
 
-    if (!blob || blob.size >= file.size) {
+    if (!blob) {
       return file;
     }
 
-    return blobToFile(blob, file.name, format);
+    // Always use compressed file if downscaled or smaller in bytes
+    if (wasResized || blob.size < file.size) {
+      return blobToFile(blob, file.name, format);
+    }
+
+    return file;
   } catch {
     return file;
   } finally {

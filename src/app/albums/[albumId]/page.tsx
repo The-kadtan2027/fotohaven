@@ -323,6 +323,9 @@ export default function AlbumPage() {
           compressionFormat,
           compressionQuality
         );
+        const origMb = (item.file.size / 1024 / 1024).toFixed(1);
+        const compMb = (fileToUpload.size / 1024 / 1024).toFixed(1);
+        console.info(`[upload] ${item.file.name}: ${origMb} MB -> ${compMb} MB (${compressionFormat.toUpperCase()} @ ${compressionQuality}%)`);
 
         const metaRes = await fetch("/api/upload", {
           method: "POST",

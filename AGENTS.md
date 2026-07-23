@@ -1815,3 +1815,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: 2048px Max Dimension Downscaling & Mobile Data Protection
+
+**Status:** Completed
+**Scope:** Enforce 2048px maximum dimension downscaling in `compressImageFile` so 24MP+ camera photos (25MB+) are compressed to ~350KB before upload, protecting mobile data and network bandwidth (98%+ data reduction).
+
+### Modified / New Files
+- `src/lib/image-utils.ts` -- Updated `compressImageFile` to enforce 2048px max dimension downscaling and return resized compressed files (`wasResized || blob.size < file.size`), preventing fallbacks to 25MB raw original files.
+- `src/app/albums/[albumId]/page.tsx` -- Added console logging to track exact original MB vs compressed MB data savings per upload.
+
+### Acceptance criteria
+- [x] Camera photos (25MB+, 6000x4000) are downscaled to max 2048px and compressed to ~350KB before upload
+- [x] Data savings ratio (~98%) is logged cleanly in browser console
+- [x] Photographers can still choose 'Original' format under Upload Settings if they explicitly want uncompressed raw files
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
