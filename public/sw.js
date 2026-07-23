@@ -1,5 +1,5 @@
-const CACHE_NAME = "fotohaven-v1";
-const FILE_CACHE = "fotohaven-photos-v1";
+const CACHE_NAME = "fotohaven-v2";
+const FILE_CACHE = "fotohaven-photos-v2";
 
 const STATIC_ASSETS = [
   "/",
@@ -55,12 +55,12 @@ self.addEventListener("fetch", (event) => {
 
         try {
           const networkResponse = await fetch(event.request);
-          if (networkResponse.ok) {
-            cache.put(event.request, networkResponse.clone());
+          if (networkResponse.ok && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            cache.put(event.request, responseToCache).catch(() => {});
           }
           return networkResponse;
         } catch {
-          // If offline and not in cache, return placeholder if available
           return cachedResponse || new Response("Offline image unavailable", { status: 503 });
         }
       })
@@ -73,9 +73,11 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse.ok) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          if (networkResponse.ok && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache).catch(() => {});
+            });
           }
           return networkResponse;
         })
@@ -96,8 +98,11 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse.ok) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
+          if (networkResponse.ok && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache).catch(() => {});
+            });
           }
           return networkResponse;
         })
