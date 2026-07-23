@@ -42,52 +42,42 @@ export async function compressImageFile(
     let width = 0;
     let height = 0;
     let source: CanvasImageSource | null = null;
-    let wasResized = false;
 
-    // Hardware downscaling via createImageBitmap
+    // 1. Try createImageBitmap (fastest, GPU-accelerated)
     if (typeof createImageBitmap === "function") {
       try {
         const bitmap = await createImageBitmap(file);
         width = bitmap.width;
         height = bitmap.height;
-
-        if (width > maxDimension || height > maxDimension) {
-          const ratio = Math.min(maxDimension / width, maxDimension / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-          bitmap.close();
-          source = await createImageBitmap(file, {
-            resizeWidth: width,
-            resizeHeight: height,
-            resizeQuality: "medium",
-          });
-          wasResized = true;
-        } else {
-          source = bitmap;
-        }
+        source = bitmap;
       } catch {
-        /* fallback */
+        /* fallback to Image() */
       }
     }
 
+    // 2. Fallback to HTMLImageElement
     if (!source) {
       objectUrl = URL.createObjectURL(file);
       const image = await loadImageFromUrl(objectUrl);
       width = image.naturalWidth || image.width;
       height = image.naturalHeight || image.height;
-      if (width > maxDimension || height > maxDimension) {
-        const ratio = Math.min(maxDimension / width, maxDimension / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
-        wasResized = true;
-      }
       source = image;
     }
 
+    // Calculate downscaled dimensions (max 2048px)
+    if (width > maxDimension || height > maxDimension) {
+      const ratio = Math.min(maxDimension / width, maxDimension / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+
+    // Render onto 2D canvas
     canvas = createCanvas(width, height);
     const ctx = canvas.getContext("2d");
     if (!ctx) return file;
 
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(source, 0, 0, width, height);
 
     if ("close" in source && typeof (source as any).close === "function") {
@@ -104,13 +94,10 @@ export async function compressImageFile(
       return file;
     }
 
-    // Always use compressed file if downscaled or smaller in bytes
-    if (wasResized || blob.size < file.size) {
-      return blobToFile(blob, file.name, format);
-    }
-
-    return file;
-  } catch {
+    // Always return the compressed blob when format is webp or jpeg
+    return blobToFile(blob, file.name, format);
+  } catch (err) {
+    console.warn("[compressImageFile] Compression error, using original file:", err);
     return file;
   } finally {
     if (objectUrl) URL.revokeObjectURL(objectUrl);

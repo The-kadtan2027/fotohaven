@@ -290,12 +290,21 @@ export default function AlbumPage() {
   const xhrUploadWithProgress = (url: string, file: File, onProgress: (pct: number) => void, retries = 3) =>
     new Promise<void>((resolve, reject) => {
       let attempt = 0;
+      let lastProgressTime = 0;
       const tryUpload = () => {
         attempt += 1;
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", url, true);
         xhr.setRequestHeader("Content-Type", file.type);
-        xhr.upload.onprogress = (event) => event.lengthComputable && onProgress(Math.round((event.loaded / event.total) * 100));
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+          const now = Date.now();
+          const pct = Math.round((event.loaded / event.total) * 100);
+          if (pct === 100 || now - lastProgressTime >= 200) {
+            lastProgressTime = now;
+            onProgress(pct);
+          }
+        };
         xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? (onProgress(100), resolve()) : reject(new Error(`Upload failed (HTTP ${xhr.status})`));
         xhr.onerror = () => attempt < retries ? window.setTimeout(tryUpload, Math.pow(2, attempt - 1) * 1000) : reject(new Error(`Upload failed after ${retries} retries`));
         xhr.send(file);
