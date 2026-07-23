@@ -1798,3 +1798,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: FaceProcessor Upload Competition & Resource Exhaustion Fix
+
+**Status:** Completed
+**Scope:** Resolve Chrome socket exhaustion (`ERR_INSUFFICIENT_RESOURCES`) and lingering Blob memory leaks (`GET blob:... ERR_FAILED`) caused by background TensorFlow `FaceProcessor` running concurrently during active photo uploads.
+
+### Modified / New Files
+- `src/app/albums/[albumId]/page.tsx` -- Suspended `FaceProcessor` execution while `isUploading` or pending queue items exist (`!isUploading && uploads.length === 0`).
+- `src/app/albums/[albumId]/FaceProcessor.tsx` -- Added strict `try/finally` block for immediate `URL.revokeObjectURL` cleanup and explicit `canvas.width = 0` buffer memory release.
+
+### Acceptance criteria
+- [x] FaceProcessor stays idle during active photo uploads, preventing network socket exhaustion
+- [x] Object URLs generated during face scanning are revoked immediately in `finally` block
+- [x] Canvas memory allocated during face detection is reset immediately after processing each photo
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

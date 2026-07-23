@@ -922,7 +922,7 @@ export default function AlbumPage() {
         />
       )}
 
-      {album.faceEnrollmentBackend !== "remote_python" && album.faceEnrollmentBackend !== "local_native_http" ? (
+      {album.faceEnrollmentBackend !== "remote_python" && album.faceEnrollmentBackend !== "local_native_http" && !isUploading && uploads.length === 0 ? (
         <FaceProcessor photos={(album.ceremonies ?? []).flatMap((ceremony) => ceremony.photos.map((photo) => { 
           const useOriginal = FACE_CONFIG.scanSource === "original" && Boolean(photo.originalUrl); 
           return { id: photo.id, url: useOriginal ? photo.originalUrl! : photo.url, faceProcessed: Boolean(photo.faceProcessed), scanSource: useOriginal ? "original" : "thumbnail" }; 

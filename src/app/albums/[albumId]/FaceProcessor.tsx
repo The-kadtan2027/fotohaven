@@ -85,6 +85,9 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
       for (const photo of queue) {
         if (cancelled || shouldStopRef.current) break;
 
+        let currentObjectUrl: string | null = null;
+        let canvas: HTMLCanvasElement | null = null;
+
         try {
           const response = await fetch(photo.url);
           if (!response.ok) {
@@ -93,96 +96,102 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
 
           const blob = await response.blob();
           const { img, objectUrl } = await blobToImageElement(blob);
-          try {
-            const width = img.naturalWidth || img.width;
-            const height = img.naturalHeight || img.height;
+          currentObjectUrl = objectUrl;
 
-            if (!width || !height) {
-              throw new Error(
-                `Decoded image has zero dimensions for ${photo.id} (${photo.url})`
-              );
-            }
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
 
-            const canvas = document.createElement("canvas");
-            const scale = Math.min(1, MAX_DETECTION_SIDE / Math.max(width, height));
-            const targetWidth = Math.max(1, Math.floor(width * scale));
-            const targetHeight = Math.max(1, Math.floor(height * scale));
-            canvas.width = targetWidth;
-            canvas.height = targetHeight;
-
-            if (!canvas.width || !canvas.height) {
-              throw new Error(
-                `Canvas collapsed to zero for ${photo.id} (${width}x${height} -> ${targetWidth}x${targetHeight})`
-              );
-            }
-
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
-            if (!ctx) {
-              throw new Error(`Failed to get canvas context for ${photo.id}`);
-            }
-            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-            const detections = await faceapi.detectAllFaces(
-              canvas as any,
-              new faceapi.SsdMobilenetv1Options({
-                minConfidence: FACE_CONFIG.detectionMinConfidence,
-                inputSize: 416,
-              } as any)
-            )
-              .withFaceLandmarks()
-              .withFaceDescriptors();
-
-            const validDetections = detections.filter((det) => {
-              const box = det.detection.box;
-              return (
-                Number.isFinite(box.x) &&
-                Number.isFinite(box.y) &&
-                Number.isFinite(box.width) &&
-                Number.isFinite(box.height) &&
-                det.detection.score >= FACE_CONFIG.detectionMinConfidence &&
-                box.width >= FACE_CONFIG.minFaceBoxSize &&
-                box.height >= FACE_CONFIG.minFaceBoxSize
-              );
-            });
-
-            const faces: Array<{
-              descriptor: number[];
-              boundingBox: { x: number; y: number; width: number; height: number };
-            }> = [];
-
-            for (const det of validDetections) {
-              const box = det.detection.box;
-              faces.push({
-                descriptor: Array.from(det.descriptor as Float32Array),
-                boundingBox: {
-                  x: box.x,
-                  y: box.y,
-                  width: box.width,
-                  height: box.height,
-                },
-              });
-            }
-
-            const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ faces }),
-            });
-
-            if (!saveResponse.ok) {
-              throw new Error(`Failed to save faces for ${photo.id}`);
-            }
-
-            successCount += 1;
-            setProcessed((prev) => prev + 1);
-            console.log(
-              `[FaceProcessor] Processed ${photo.id} (source: ${photo.scanSource || "unknown"}): ${faces.length} face(s)`
+          if (!width || !height) {
+            throw new Error(
+              `Decoded image has zero dimensions for ${photo.id} (${photo.url})`
             );
-          } finally {
-            URL.revokeObjectURL(objectUrl);
           }
+
+          canvas = document.createElement("canvas");
+          const scale = Math.min(1, MAX_DETECTION_SIDE / Math.max(width, height));
+          const targetWidth = Math.max(1, Math.floor(width * scale));
+          const targetHeight = Math.max(1, Math.floor(height * scale));
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+
+          if (!canvas.width || !canvas.height) {
+            throw new Error(
+              `Canvas collapsed to zero for ${photo.id} (${width}x${height} -> ${targetWidth}x${targetHeight})`
+            );
+          }
+
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx) {
+            throw new Error(`Failed to get canvas context for ${photo.id}`);
+          }
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          const detections = await faceapi.detectAllFaces(
+            canvas as any,
+            new faceapi.SsdMobilenetv1Options({
+              minConfidence: FACE_CONFIG.detectionMinConfidence,
+              inputSize: 416,
+            } as any)
+          )
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+          const validDetections = detections.filter((det) => {
+            const box = det.detection.box;
+            return (
+              Number.isFinite(box.x) &&
+              Number.isFinite(box.y) &&
+              Number.isFinite(box.width) &&
+              Number.isFinite(box.height) &&
+              det.detection.score >= FACE_CONFIG.detectionMinConfidence &&
+              box.width >= FACE_CONFIG.minFaceBoxSize &&
+              box.height >= FACE_CONFIG.minFaceBoxSize
+            );
+          });
+
+          const faces: Array<{
+            descriptor: number[];
+            boundingBox: { x: number; y: number; width: number; height: number };
+          }> = [];
+
+          for (const det of validDetections) {
+            const box = det.detection.box;
+            faces.push({
+              descriptor: Array.from(det.descriptor as Float32Array),
+              boundingBox: {
+                x: box.x,
+                y: box.y,
+                width: box.width,
+                height: box.height,
+              },
+            });
+          }
+
+          const saveResponse = await fetch(`/api/photos/${photo.id}/faces`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ faces }),
+          });
+
+          if (!saveResponse.ok) {
+            throw new Error(`Failed to save faces for ${photo.id}`);
+          }
+
+          successCount += 1;
+          setProcessed((prev) => prev + 1);
+          console.log(
+            `[FaceProcessor] Processed ${photo.id} (source: ${photo.scanSource || "unknown"}): ${faces.length} face(s)`
+          );
         } catch (error) {
           console.error(`[FaceProcessor] Failed photo ${photo.id}`, error);
+        } finally {
+          if (currentObjectUrl) {
+            URL.revokeObjectURL(currentObjectUrl);
+          }
+          if (canvas) {
+            canvas.width = 0;
+            canvas.height = 0;
+          }
         }
       }
 
