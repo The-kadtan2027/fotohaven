@@ -72,7 +72,11 @@ async function handleUpload(req: NextRequest) {
 
     // ── Enqueue Persistent Background Thumbnail Job ──
     // Saves thumbnail creation to SQLite job queue (survives PM2 & server reboots)
-    await enqueueJob("thumbnail", { resolvedPath: resolved, decodedKey });
+    try {
+      await enqueueJob("thumbnail", { resolvedPath: resolved, decodedKey });
+    } catch (err) {
+      console.warn("[PUT /api/upload/local] Thumbnail enqueue warning:", err);
+    }
 
     return new NextResponse(null, { status: 200 });
   } catch (err: any) {

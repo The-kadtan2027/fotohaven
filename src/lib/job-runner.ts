@@ -44,20 +44,25 @@ export async function enqueueJob(
   const jobId = uuidv4();
   const now = new Date();
 
-  db.insert(jobQueue)
-    .values({
-      id: jobId,
-      type,
-      status: "pending",
-      payload: JSON.stringify(payload),
-      attempts: 0,
-      maxAttempts,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
+  try {
+    db.insert(jobQueue)
+      .values({
+        id: jobId,
+        type,
+        status: "pending",
+        payload: JSON.stringify(payload),
+        attempts: 0,
+        maxAttempts,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
 
-  triggerWorker();
+    triggerWorker();
+  } catch (err) {
+    console.warn(`[JobRunner] Failed to enqueue ${type} job:`, err);
+  }
+
   return jobId;
 }
 
