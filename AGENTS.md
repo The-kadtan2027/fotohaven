@@ -1744,3 +1744,22 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Admin Photo Upload UI/UX & Folder Auto-Ceremony Parsing
+
+**Status:** Completed
+**Scope:** Upgrade Photographer Admin Album Manager (`src/app/albums/[albumId]/page.tsx`) with automatic folder-to-ceremony parsing, auto-creation of missing ceremony folders in DB, instant live thumbnail preview cards, auto-start background upload pipeline, and global queue progress tracking.
+
+### Modified / New Files
+- `src/app/albums/[albumId]/page.tsx` -- Added folder path parser (`webkitRelativePath`), auto-ceremony creator (`POST /api/ceremonies`), auto-start background upload trigger, queue total progress bar, and upgraded `UploadQueue` component with live thumbnail cards.
+
+### Acceptance criteria
+- [x] Photographer can drag folders of photos; folder names are extracted as Ceremony names
+- [x] Missing ceremony folders are created automatically in database without manual steps
+- [x] Nested subfolders inside ceremony folders are grouped into parent ceremony safely
+- [x] Live image thumbnail previews (`blob:`) render inside upload queue cards
+- [x] Upload pipeline starts automatically on file drop
+- [x] Aggregate queue progress bar and total MB size badge displayed
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

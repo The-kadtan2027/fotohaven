@@ -88,6 +88,8 @@ type UploadStatus = "pending" | "uploading" | "done" | "error";
 interface UploadItem {
   file: File;
   ceremonyId: string;
+  folderName?: string;
+  previewUrl?: string;
   status: UploadStatus;
   progress: number;
   error?: string;
@@ -176,33 +178,117 @@ export default function AlbumPage() {
     setDuplicateScanError("");
   }, [activeCeremony]);
 
+  const GENERIC_FOLDERS = new Set(["photos", "album", "export", "exports", "dcim", "new folder", "images", "pictures", "raw"]);
+
+  const resolveFolderCeremonyName = (relativePath: string): string | null => {
+    if (!relativePath || !relativePath.includes("/")) return null;
+    const parts = relativePath.split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+
+    let folderName = parts[0];
+    if (GENERIC_FOLDERS.has(folderName.toLowerCase()) && parts.length > 2) {
+      folderName = parts[1];
+    }
+    return folderName.trim() || null;
+  };
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!activeCeremony || activeCeremony === "ACTIVITY" || acceptedFiles.length === 0) return;
+    if (!album || acceptedFiles.length === 0) return;
     setIsPreparingUploads(true);
+
     try {
+      // Map folderName -> ceremonyId
+      const ceremonyMap: Record<string, string> = {};
+
+      // Auto-resolve or create ceremonies for dropped folders
+      for (const file of acceptedFiles) {
+        const relativePath = (file as any).webkitRelativePath || "";
+        const folderName = resolveFolderCeremonyName(relativePath);
+
+        if (folderName && !ceremonyMap[folderName]) {
+          const existing = album.ceremonies.find(
+            (c) => c.name.toLowerCase() === folderName.toLowerCase()
+          );
+
+          if (existing) {
+            ceremonyMap[folderName] = existing.id;
+          } else {
+            // Auto-create ceremony via API
+            try {
+              const res = await fetch("/api/ceremonies", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: folderName, albumId: album.id }),
+              });
+              if (res.ok) {
+                const newCeremony = await res.json();
+                ceremonyMap[folderName] = newCeremony.id;
+                setAlbum((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        ceremonies: [
+                          ...prev.ceremonies,
+                          { id: newCeremony.id, name: folderName, order: prev.ceremonies.length, photos: [] },
+                        ],
+                      }
+                    : prev
+                );
+                toast(`Created new ceremony "${folderName}"`, "success");
+              }
+            } catch (err) {
+              console.error(`Failed to auto-create ceremony '${folderName}'`, err);
+            }
+          }
+        }
+      }
+
       const preparedFiles = await mapWithConcurrency(
         acceptedFiles,
         compressionConcurrency,
-        async (file, index) => {
-          const startedAt = performance.now();
-          console.info(`[upload-prepare] start ${index + 1}/${acceptedFiles.length}: ${file.name} (${formatMb(file.size)} MB) using ${compressionFormat}`);
+        async (file) => {
           const preparedFile = await compressImageFile(file, compressionFormat, compressionQuality);
-          const elapsedMs = Math.round(performance.now() - startedAt);
-          console.info(`[upload-prepare] done ${index + 1}/${acceptedFiles.length}: ${file.name} -> ${preparedFile.name} (${formatMb(file.size)} MB -> ${formatMb(preparedFile.size)} MB) in ${elapsedMs}ms`);
           return preparedFile;
         }
       );
-      const prepared: UploadItem[] = preparedFiles.map((file) => ({
-        file,
-        ceremonyId: activeCeremony,
-        status: "pending",
-        progress: 0,
-      }));
+
+      const prepared: UploadItem[] = preparedFiles.map((file, index) => {
+        const originalFile = acceptedFiles[index];
+        const relativePath = (originalFile as any).webkitRelativePath || "";
+        const folderName = resolveFolderCeremonyName(relativePath);
+        const ceremonyId =
+          (folderName && ceremonyMap[folderName]) || activeCeremony || album.ceremonies[0]?.id || "";
+
+        let previewUrl: string | undefined;
+        try {
+          previewUrl = URL.createObjectURL(originalFile);
+        } catch {
+          /* best effort */
+        }
+
+        return {
+          file,
+          ceremonyId,
+          folderName: folderName || undefined,
+          previewUrl,
+          status: "pending",
+          progress: 0,
+        };
+      });
+
       setUploads((prev) => [...prev, ...prepared]);
     } finally {
       setIsPreparingUploads(false);
     }
-  }, [activeCeremony, compressionConcurrency, compressionFormat, compressionQuality]);
+  }, [album, activeCeremony, compressionConcurrency, compressionFormat, compressionQuality, toast]);
+
+  // Auto-start upload when new pending files enter queue
+  useEffect(() => {
+    const hasPending = uploads.some((item) => item.status === "pending");
+    if (hasPending && !isUploading && !isPreparingUploads) {
+      void uploadAll();
+    }
+  }, [uploads, isUploading, isPreparingUploads]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -823,26 +909,121 @@ export default function AlbumPage() {
   );
 }
 
-function UploadQueue({ uploads, isUploading, onUploadAll, onClear }: { uploads: UploadItem[]; isUploading: boolean; onUploadAll: () => void; onClear: (index: number) => void; }) {
+function UploadQueue({
+  uploads,
+  isUploading,
+  onUploadAll,
+  onClear,
+}: {
+  uploads: UploadItem[];
+  isUploading: boolean;
+  onUploadAll: () => void;
+  onClear: (index: number) => void;
+}) {
+  const pendingCount = uploads.filter((i) => i.status === "pending").length;
+  const doneCount = uploads.filter((i) => i.status === "done").length;
+  const totalSizeMb = (uploads.reduce((sum, item) => sum + item.file.size, 0) / 1024 / 1024).toFixed(1);
+
+  // Overall progress percentage
+  const totalProgress = Math.round(
+    uploads.reduce((sum, item) => {
+      if (item.status === "done") return sum + 100;
+      if (item.status === "uploading") return sum + item.progress;
+      return sum;
+    }, 0) / (uploads.length || 1)
+  );
+
   return (
     <div className="card" style={{ padding: 20, marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--espresso)" }}>Upload Queue ({uploads.filter((item) => item.status === "pending").length} pending)</p>
-        <button className="btn-primary" onClick={onUploadAll} disabled={isUploading || uploads.every((item) => item.status !== "pending")} style={{ fontSize: 12, padding: "8px 16px" }}>
-          {isUploading ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />Uploading...</> : <><Upload size={12} />Upload All</>}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso)" }}>
+              Upload Queue ({doneCount}/{uploads.length} complete)
+            </p>
+            <span style={{ fontSize: 11, background: "var(--sand)", color: "var(--brown)", padding: "2px 8px", borderRadius: 100, fontWeight: 500 }}>
+              {totalSizeMb} MB total
+            </span>
+          </div>
+          {isUploading && (
+            <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 2, fontWeight: 500 }}>
+              Uploading in background ({totalProgress}% overall)...
+            </p>
+          )}
+        </div>
+        <button
+          className="btn-gold"
+          onClick={onUploadAll}
+          disabled={isUploading || pendingCount === 0}
+          style={{ fontSize: 12, padding: "8px 16px" }}
+        >
+          {isUploading ? (
+            <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Uploading…</>
+          ) : (
+            <><Upload size={12} /> Upload Pending ({pendingCount})</>
+          )}
         </button>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+
+      {/* Global Progress Bar */}
+      {isUploading && (
+        <div style={{ height: 4, background: "var(--sand)", borderRadius: 2, overflow: "hidden", marginBottom: 16 }}>
+          <div style={{ height: "100%", width: `${totalProgress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} />
+        </div>
+      )}
+
+      {/* Queue items list with Live Thumbnails */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {uploads.map((item, index) => (
-          <div key={`${item.file.name}-${index}`} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px" }}>
-              <StatusIcon status={item.status} />
-              <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.file.name}</span>
-              {item.status === "uploading" && <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>{item.progress}%</span>}
-              <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(item.file.size / 1024 / 1024).toFixed(1)} MB</span>
-              {item.status !== "uploading" && <button onClick={() => onClear(index)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}><X size={12} /></button>}
+          <div key={`${item.file.name}-${index}`} style={{ background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
+              {/* Live Thumbnail Preview */}
+              {item.previewUrl ? (
+                <div style={{ width: 36, height: 36, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--sand)" }}>
+                  <img src={item.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              ) : (
+                <StatusIcon status={item.status} />
+              )}
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "var(--espresso)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.file.name}
+                  </span>
+                  {item.folderName && (
+                    <span style={{ fontSize: 10, background: "rgba(201,150,58,0.15)", color: "var(--gold)", padding: "1px 6px", borderRadius: 4, fontWeight: 600, flexShrink: 0 }}>
+                      📁 {item.folderName}
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: "var(--taupe)" }}>
+                  {(item.file.size / 1024 / 1024).toFixed(1)} MB · {item.status.toUpperCase()}
+                </span>
+              </div>
+
+              {item.status === "uploading" && (
+                <span style={{ fontSize: 12, color: "var(--gold)", fontWeight: 600, minWidth: 40, textAlign: "right" }}>
+                  {item.progress}%
+                </span>
+              )}
+
+              {item.status !== "uploading" && (
+                <button
+                  onClick={() => onClear(index)}
+                  title="Remove from queue"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", padding: 4, display: "flex", alignItems: "center" }}
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
-            {item.status === "uploading" && <div style={{ height: 3, background: "var(--sand)" }}><div style={{ height: "100%", width: `${item.progress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} /></div>}
+
+            {item.status === "uploading" && (
+              <div style={{ height: 3, background: "var(--sand)" }}>
+                <div style={{ height: "100%", width: `${item.progress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} />
+              </div>
+            )}
           </div>
         ))}
       </div>
