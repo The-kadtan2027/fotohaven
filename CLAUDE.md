@@ -244,6 +244,7 @@ npm run db:push && npm run build && pm2 restart ecosystem.config.js
 - **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries). `db.ts` uses WAL mode and custom timeouts for concurrency.
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
+- **Build-Phase Safety for Background Workers**: Top-level server singletons, background worker queues (`job-runner.ts`), and interval timers MUST check `process.env.NEXT_PHASE` (`phase-production-build` | `phase-export`) to prevent background DB execution during `npm run build`. Wrap top-level DB calls in `try/catch` blocks.
 - **Album manager extras**:
   - Uploads can be client-side compressed to JPEG or WebP before queueing.
   - Duplicate review uses browser-side dHash and persists `Photo.imageHash`.
