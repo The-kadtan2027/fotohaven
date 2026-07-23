@@ -1725,3 +1725,22 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: End-User Gallery Speed, Smooth Transitions & Functional UX
+
+**Status:** Completed
+**Scope:** Enhance public Share Gallery (`src/app/share/[token]/page.tsx`) with zero-lag in-memory Lightbox pre-fetching, multi-layout view modes (Grid, Masonry, Focus), an instant Search & Selection Filter Bar, touch swipe gestures on mobile, and expanded Lightbox keyboard shortcuts.
+
+### Modified / New Files
+- `src/app/share/[token]/page.tsx` -- Added View Mode Toolbar (Grid 1:1, Masonry, Focus Feed), Search & Filter Bar (`All`, `Selected`, `With Notes`), memory pre-fetching hook for adjacent Lightbox photos, touch swipe gestures (`onTouchStart`, `onTouchMove`, `onTouchEnd`), and keyboard shortcuts (`Space`/`s` select, `d` download, `c` notes).
+
+### Acceptance criteria
+- [x] Lightbox pre-fetches next and previous high-res photos in memory for 0ms transitions
+- [x] View mode switcher allows clients to toggle between 1:1 Grid, Masonry, and Focus Feed layouts
+- [x] Search input filters photos by filename in real-time
+- [x] Filter pills allow quick filtering by Selected photos and Photos with Notes
+- [x] Touch swipe gestures work on mobile (Swipe Left = Next, Swipe Right = Prev, Swipe Down = Dismiss)
+- [x] Keyboard shortcuts (`ArrowLeft`, `ArrowRight`, `Space`, `d`, `c`, `Escape`) work cleanly in Lightbox
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
