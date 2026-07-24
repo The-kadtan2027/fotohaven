@@ -733,242 +733,249 @@ export default function GuestFaceDiscoveryPage() {
         )}
 
         {step === "scan" && (
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              background: "#000000",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100vw",
+              height: "100vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* Camera Flash Visual Feedback Overlay */}
             <div
               style={{
+                position: "absolute",
+                inset: 0,
+                background: "#ffffff",
+                opacity: isFlashing ? 0.85 : 0,
+                transition: isFlashing ? "none" : "opacity 0.25s ease-out",
+                pointerEvents: "none",
+                zIndex: 30,
+              }}
+            />
+
+            {/* Live Camera Video Stream */}
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              style={{
                 width: "100%",
-                maxWidth: 480,
-                height: "clamp(480px, 72vh, 640px)",
-                position: "relative",
-                borderRadius: 24,
-                overflow: "hidden",
-                background: "#09090b",
-                boxShadow: "0 24px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(212, 175, 55, 0.3)",
+                height: "100%",
+                objectFit: "cover",
+                transform: facingMode === "user" ? "scaleX(-1)" : "none",
+                display: "block",
+              }}
+            />
+
+            {/* SVG Viewfinder Overlay: Masked Backdrop + THIN ELEGANT GOLD OVAL (NO BRACKETS) */}
+            <svg
+              viewBox="0 0 100 100"
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
+                zIndex: 10,
               }}
             >
-              {/* Camera Flash Visual Feedback Overlay */}
-              <div
+              <defs>
+                <mask id="faceOvalMaskFull">
+                  <rect width="100" height="100" fill="white" />
+                  <ellipse cx="50" cy="45" rx="30" ry="38" fill="black" />
+                </mask>
+                <linearGradient id="goldRingGradThin" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#f59e0b" />
+                  <stop offset="50%" stopColor="#fbbf24" />
+                  <stop offset="100%" stopColor="#d97706" />
+                </linearGradient>
+              </defs>
+              
+              {/* Darkened Masking Backdrop */}
+              <rect width="100" height="100" fill="rgba(0, 0, 0, 0.58)" mask="url(#faceOvalMaskFull)" />
+
+              {/* THIN Elegant Gold Oval Border (NO BRACKETS) */}
+              <ellipse
+                cx="50"
+                cy="45"
+                rx="30"
+                ry="38"
+                fill="none"
+                stroke="url(#goldRingGradThin)"
+                strokeWidth="0.8"
+                style={{ filter: "drop-shadow(0 0 4px rgba(245, 158, 11, 0.5))" }}
+              />
+            </svg>
+
+            {/* Status Pill Badge (Top Center) */}
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(env(safe-area-inset-top, 0px) + 20px)",
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "rgba(0, 0, 0, 0.72)",
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+                border: "1px solid rgba(255, 255, 255, 0.18)",
+                padding: "8px 20px",
+                borderRadius: 30,
+                color: "#f9fafb",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.02em",
+                pointerEvents: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                zIndex: 20,
+                boxShadow: "0 4px 20px rgba(0, 0, 0, 0.4)",
+              }}
+            >
+              <span
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  background: "#ffffff",
-                  opacity: isFlashing ? 0.85 : 0,
-                  transition: isFlashing ? "none" : "opacity 0.25s ease-out",
-                  pointerEvents: "none",
-                  zIndex: 20,
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: busy ? "#f59e0b" : cameraReady ? "#22c55e" : "#9ca3af",
+                  boxShadow: cameraReady && !busy ? "0 0 10px #22c55e" : "none",
                 }}
               />
+              {busy ? status || "Analyzing face..." : "Align face inside oval"}
+            </div>
 
-              {/* Live Mirrored or Rear Camera Feed */}
-              <video
-                ref={videoRef}
-                muted
-                playsInline
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  transform: facingMode === "user" ? "scaleX(-1)" : "none",
-                  display: "block",
-                }}
-              />
+            {/* Top-Right Camera Flip Button */}
+            <button
+              type="button"
+              onClick={toggleFacingMode}
+              disabled={busy}
+              title="Switch Camera (Front/Rear)"
+              style={{
+                position: "absolute",
+                top: "calc(env(safe-area-inset-top, 0px) + 16px)",
+                right: 16,
+                background: "rgba(0, 0, 0, 0.55)",
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                border: "1px solid rgba(255, 255, 255, 0.22)",
+                color: "#ffffff",
+                borderRadius: "50%",
+                width: 44,
+                height: 44,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                zIndex: 20,
+              }}
+            >
+              <RotateCw size={20} />
+            </button>
 
-              {/* Centered SVG Face Viewfinder: Solid Gold Oval + 4 Corner Tracking Brackets */}
-              <svg
-                viewBox="0 0 100 100"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "none",
-                  zIndex: 1,
-                }}
-              >
-                <defs>
-                  <mask id="faceOvalMask">
-                    <rect width="100" height="100" fill="white" />
-                    <ellipse cx="50" cy="45" rx="27" ry="35" fill="black" />
-                  </mask>
-                  <linearGradient id="goldRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#f59e0b" />
-                    <stop offset="50%" stopColor="#fbbf24" />
-                    <stop offset="100%" stopColor="#d97706" />
-                  </linearGradient>
-                </defs>
-                <rect width="100" height="100" fill="rgba(0,0,0,0.52)" mask="url(#faceOvalMask)" />
-                <ellipse
-                  cx="50"
-                  cy="45"
-                  rx="27"
-                  ry="35"
-                  fill="none"
-                  stroke="url(#goldRingGrad)"
-                  strokeWidth="1.8"
-                  style={{ filter: "drop-shadow(0 0 8px rgba(245, 158, 11, 0.6))" }}
-                />
-
-                {/* 4 Corner AF Tracking Brackets */}
-                <path d="M 18 20 L 18 13 L 25 13" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                <path d="M 82 20 L 82 13 L 75 13" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                <path d="M 18 70 L 18 77 L 25 77" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                <path d="M 82 70 L 82 77 L 75 77" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-              </svg>
-
-              {/* Status Header Badge with Live Indicator Dot */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  background: "rgba(0, 0, 0, 0.7)",
-                  backdropFilter: "blur(12px)",
-                  border: "1px solid rgba(255, 255, 255, 0.18)",
-                  padding: "6px 16px",
-                  borderRadius: 20,
-                  color: "#f3f4f6",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  letterSpacing: "0.02em",
-                  pointerEvents: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  zIndex: 2,
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: busy ? "#f59e0b" : cameraReady ? "#22c55e" : "#9ca3af",
-                    boxShadow: cameraReady && !busy ? "0 0 8px #22c55e" : "none",
-                  }}
-                />
-                {busy ? status || "Analyzing face..." : "Align face inside guide"}
-              </div>
-
-              {/* Camera Switcher Button (Top Right) */}
+            {/* Bottom Floating Deck (Full Width Immersive Control Bar) */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: "24px 36px calc(env(safe-area-inset-bottom, 0px) + 32px)",
+                background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 70%, transparent 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                maxWidth: 480,
+                margin: "0 auto",
+                zIndex: 20,
+              }}
+            >
+              {/* Upload Photo Button */}
               <button
                 type="button"
-                onClick={toggleFacingMode}
+                onClick={() => uploadInputRef.current?.click()}
                 disabled={busy}
-                title="Switch Camera (Front/Rear)"
+                title="Upload face photo instead"
                 style={{
-                  position: "absolute",
-                  top: 14,
-                  right: 14,
-                  background: "rgba(0, 0, 0, 0.55)",
-                  backdropFilter: "blur(8px)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  color: "#fff",
+                  background: "rgba(255, 255, 255, 0.16)",
+                  border: "1px solid rgba(255, 255, 255, 0.25)",
+                  color: "#ffffff",
                   borderRadius: "50%",
-                  width: 38,
-                  height: 38,
+                  width: 48,
+                  height: 48,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  zIndex: 2,
-                  transition: "transform 0.2s ease",
+                  backdropFilter: "blur(8px)",
                 }}
               >
-                <RotateCw size={18} />
+                <Upload size={22} />
               </button>
 
-              {/* Bottom Control Deck (iOS Dual-Ring Shutter) */}
-              <div
+              {/* Tactical iOS Dual-Ring Shutter Button */}
+              <button
+                onClick={scanAndMatch}
+                disabled={busy || !cameraReady}
+                title="Capture snapshot"
                 style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  padding: "16px 24px 20px",
-                  background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.45) 75%, transparent 100%)",
-                  backdropFilter: "blur(8px)",
+                  width: 76,
+                  height: 76,
+                  borderRadius: "50%",
+                  border: "4px solid rgba(255, 255, 255, 0.95)",
+                  background: "transparent",
+                  boxShadow: "0 0 28px rgba(0, 0, 0, 0.7)",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "space-between",
-                  zIndex: 2,
+                  justifyContent: "center",
+                  cursor: busy || !cameraReady ? "not-allowed" : "pointer",
+                  padding: 0,
+                  transition: "transform 0.15s ease",
                 }}
               >
-                {/* Upload Photo Option Button */}
-                <button
-                  type="button"
-                  onClick={() => uploadInputRef.current?.click()}
-                  disabled={busy}
-                  title="Upload face photo instead"
+                <div
                   style={{
-                    background: "rgba(255, 255, 255, 0.14)",
-                    border: "1px solid rgba(255, 255, 255, 0.22)",
-                    color: "#fff",
+                    width: 58,
+                    height: 58,
                     borderRadius: "50%",
-                    width: 44,
-                    height: 44,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
+                    background: busy ? "#9ca3af" : "#f59e0b",
+                    boxShadow: "0 0 18px rgba(245, 158, 11, 0.7)",
+                    transition: "background 0.2s ease",
                   }}
-                >
-                  <Upload size={20} />
-                </button>
+                />
+              </button>
 
-                {/* Tactical iOS Dual-Ring Shutter Button */}
-                <button
-                  onClick={scanAndMatch}
-                  disabled={busy || !cameraReady}
-                  title="Capture snapshot"
-                  style={{
-                    width: 72,
-                    height: 72,
-                    borderRadius: "50%",
-                    border: "4px solid rgba(255, 255, 255, 0.95)",
-                    background: "transparent",
-                    boxShadow: "0 0 24px rgba(0, 0, 0, 0.6)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: busy || !cameraReady ? "not-allowed" : "pointer",
-                    padding: 0,
-                    transition: "transform 0.15s ease",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 54,
-                      height: 54,
-                      borderRadius: "50%",
-                      background: busy ? "#9ca3af" : "#f59e0b",
-                      boxShadow: "0 0 16px rgba(245, 158, 11, 0.6)",
-                      transition: "background 0.2s ease, transform 0.15s ease",
-                    }}
-                  />
-                </button>
-
-                {/* Close / Browse All Button */}
-                <Link
-                  href={`/share/${token}`}
-                  title="Browse all photos"
-                  style={{
-                    background: "rgba(255, 255, 255, 0.14)",
-                    border: "1px solid rgba(255, 255, 255, 0.22)",
-                    color: "#fff",
-                    borderRadius: "50%",
-                    width: 44,
-                    height: 44,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    textDecoration: "none",
-                  }}
-                >
-                  <X size={20} />
-                </Link>
-              </div>
+              {/* Close / Exit Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  setStep("consent");
+                }}
+                title="Close camera"
+                style={{
+                  background: "rgba(255, 255, 255, 0.16)",
+                  border: "1px solid rgba(255, 255, 255, 0.25)",
+                  color: "#ffffff",
+                  borderRadius: "50%",
+                  width: 48,
+                  height: 48,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  backdropFilter: "blur(8px)",
+                }}
+              >
+                <X size={22} />
+              </button>
             </div>
 
             <input
@@ -978,9 +985,6 @@ export default function GuestFaceDiscoveryPage() {
               onChange={handleUploadSelection}
               style={{ display: "none" }}
             />
-            <p style={{ marginTop: 10, fontSize: 13, color: "var(--brown)", textAlign: "center" }}>
-              Tap shutter or upload a photo to find your photos instantly.
-            </p>
           </div>
         )}
 
