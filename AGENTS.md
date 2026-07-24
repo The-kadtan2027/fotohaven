@@ -1882,3 +1882,21 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: 502 Bad Gateway Auto-Retry & Clean Upload Queue
+
+**Status:** Completed
+**Scope:** Fix 502 Bad Gateway / Cloudflare Tunnel upload failures by adding exponential backoff retries for metadata requests, server-side SQLite write resilience, instant removal of completed items from the UI queue, and an explicit `↺ Retry` button for failed items.
+
+### Modified / New Files
+- `src/app/api/upload/route.ts` -- Wrapped `db.insert(photos)` in a 3-attempt retry loop handling `SQLITE_BUSY` / `SQLITE_LOCKED` contention.
+- `src/app/albums/[albumId]/page.tsx` -- Added `fetchWithRetry` for exponential backoff retries on `POST /api/upload`, instant removal of `done` items, and `↺ Retry` button on error item cards.
+
+### Acceptance criteria
+- [x] Exponential backoff retries `POST /api/upload` up to 3 times (1s, 2s, 4s) when transient 502 Bad Gateway or 500 errors occur
+- [x] SQLite photo insertion retries up to 3 times on lock contention
+- [x] Completed upload cards (`status: "done"`) are removed from the UI queue instantly upon finish
+- [x] Failed item cards render an explicit `↺ Retry` button allowing 1-click retry
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

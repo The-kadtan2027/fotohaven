@@ -314,8 +314,26 @@ export default function AlbumPage() {
 
   const duplicateGroups = buildDuplicateGroups(duplicateSourcePhotos ?? [], dedupThreshold);
 
+  const fetchWithRetry = async (url: string, init: RequestInit, retries = 3): Promise<Response> => {
+    let attempt = 0;
+    while (attempt < retries) {
+      attempt += 1;
+      try {
+        const res = await fetch(url, init);
+        if (res.ok || res.status < 500) {
+          return res;
+        }
+        if (attempt >= retries) return res;
+      } catch (err) {
+        if (attempt >= retries) throw err;
+      }
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
+    }
+    throw new Error("Request failed after retries");
+  };
+
   const uploadAll = async () => {
-    const pending = uploads.filter((item) => item.status === "pending");
+    const pending = uploads.filter((item) => item.status === "pending" || item.status === "error");
     if (!pending.length) return;
     setIsUploading(true);
 
@@ -336,7 +354,8 @@ export default function AlbumPage() {
         const compMb = (fileToUpload.size / 1024 / 1024).toFixed(1);
         console.info(`[upload] ${item.file.name}: ${origMb} MB -> ${compMb} MB (${compressionFormat.toUpperCase()} @ ${compressionQuality}%)`);
 
-        const metaRes = await fetch("/api/upload", {
+        // Fetch presigned upload URL with automatic exponential backoff retries (3 attempts)
+        const metaRes = await fetchWithRetry("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -347,14 +366,15 @@ export default function AlbumPage() {
           }),
         });
 
-        if (!metaRes.ok) throw new Error("Failed to get upload URL");
+        if (!metaRes.ok) throw new Error(`Server returned HTTP ${metaRes.status}`);
         const { uploadUrl } = await metaRes.json();
 
         await xhrUploadWithProgress(uploadUrl, fileToUpload, (progress) => {
           setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, progress } : entry)));
         });
 
-        setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "done", progress: 100 } : entry)));
+        // Instantly prune completed item from UI queue to keep list 100% clean
+        setUploads((prev) => prev.filter((entry) => !(entry.file === item.file && entry.ceremonyId === item.ceremonyId)));
       } catch (error) {
         setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "error", error: String(error) } : entry)));
       }
@@ -362,7 +382,16 @@ export default function AlbumPage() {
 
     setIsUploading(false);
     await fetchAlbum();
-    window.setTimeout(() => setUploads((prev) => prev.filter((entry) => entry.status !== "done")), 2000);
+  };
+
+  const retrySingleUpload = (item: UploadItem) => {
+    setUploads((prev) =>
+      prev.map((entry) =>
+        entry.file === item.file && entry.ceremonyId === item.ceremonyId
+          ? { ...entry, status: "pending", error: undefined }
+          : entry
+      )
+    );
   };
 
   const copyShareLink = async () => {
@@ -879,7 +908,8 @@ export default function AlbumPage() {
                   uploads={uploads} 
                   isUploading={isUploading} 
                   onUploadAll={uploadAll} 
-                  onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))} 
+                  onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))}
+                  onRetry={retrySingleUpload}
                 />
               )}
 
@@ -954,13 +984,15 @@ function UploadQueue({
   isUploading,
   onUploadAll,
   onClear,
+  onRetry,
 }: {
   uploads: UploadItem[];
   isUploading: boolean;
   onUploadAll: () => void;
   onClear: (index: number) => void;
+  onRetry: (item: UploadItem) => void;
 }) {
-  const pendingCount = uploads.filter((i) => i.status === "pending").length;
+  const pendingCount = uploads.filter((i) => i.status === "pending" || i.status === "error").length;
   const doneCount = uploads.filter((i) => i.status === "done").length;
   const totalSizeMb = (uploads.reduce((sum, item) => sum + item.file.size, 0) / 1024 / 1024).toFixed(1);
 
@@ -979,7 +1011,7 @@ function UploadQueue({
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso)" }}>
-              Upload Queue ({doneCount}/{uploads.length} complete)
+              Upload Queue ({pendingCount} items remaining)
             </p>
             <span style={{ fontSize: 11, background: "var(--sand)", color: "var(--brown)", padding: "2px 8px", borderRadius: 100, fontWeight: 500 }}>
               {totalSizeMb} MB total
@@ -1046,6 +1078,25 @@ function UploadQueue({
                 <span style={{ fontSize: 12, color: "var(--gold)", fontWeight: 600, minWidth: 40, textAlign: "right" }}>
                   {item.progress}%
                 </span>
+              )}
+
+              {item.status === "error" && (
+                <button
+                  onClick={() => onRetry(item)}
+                  title="Retry upload"
+                  style={{
+                    fontSize: 11,
+                    background: "rgba(201,150,58,0.15)",
+                    color: "var(--gold)",
+                    border: "1px solid var(--gold)",
+                    padding: "3px 10px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  ↺ Retry
+                </button>
               )}
 
               {item.status !== "uploading" && (
