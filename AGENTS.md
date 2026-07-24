@@ -1865,3 +1865,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Thumbnail-Only Duplicate Scanning & File Server Extension Fallback
+
+**Status:** Completed
+**Scope:** Revert duplicate scanning to use thumbnails (`photo.url`) exclusively, add automatic file extension fallback (`.webp` / `.jpg` / `.png`) in the local file server API, and suppress 404 console warnings during duplicate scans.
+
+### Modified / New Files
+- `src/app/albums/[albumId]/page.tsx` -- Reverted `scanDuplicates` to hash `photo.url` (thumbnails) only and suppressed missing item 404 warnings silently.
+- `src/app/api/files/[...key]/route.ts` -- Added file extension fallback logic when `statSync` fails on disk lookups.
+
+### Acceptance criteria
+- [x] Duplicate scanning uses thumbnails (`photo.url`) exclusively for maximum speed and data savings
+- [x] File server route `/api/files/[...key]` automatically resolves alternate file extensions on disk if requested key extension differs
+- [x] Missing thumbnail 404 warnings are caught silently without outputting unhandled error stack traces in console
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

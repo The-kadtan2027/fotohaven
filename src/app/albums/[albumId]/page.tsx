@@ -510,16 +510,11 @@ export default function AlbumPage() {
           continue;
         }
         try {
-          const primaryUrl = photo.originalUrl || photo.url;
-          const fallbackUrl = photo.originalUrl ? photo.url : undefined;
-          const imageHash = await computeDHashFromUrl(primaryUrl, {
-            fallbackUrl,
-            cacheBust: forceRescan,
-          });
+          const imageHash = await computeDHashFromUrl(photo.url, { cacheBust: forceRescan });
           hashedPhotos.push({ ...photo, imageHash });
           newHashes.push({ photoId: photo.id, imageHash });
-        } catch (err) {
-          console.warn(`[scanDuplicates] Failed to compute hash for photo ${photo.id}:`, err);
+        } catch {
+          /* skip photo silently if thumbnail is missing or non-200 */
         }
       }
       setDuplicateSourcePhotos(hashedPhotos);
