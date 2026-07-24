@@ -14,6 +14,8 @@ import {
   LayoutGrid,
   Columns,
   Square,
+  RotateCw,
+  Upload,
 } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
@@ -68,6 +70,8 @@ export default function GuestFaceDiscoveryPage() {
   const [guestName, setGuestName] = useState("");
   const [isReturningGuest, setIsReturningGuest] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [isFlashing, setIsFlashing] = useState(false);
   const [confirmedPhotoIds, setConfirmedPhotoIds] = useState<string[]>([]);
   const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -210,11 +214,13 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
-  async function startCamera() {
+  async function startCamera(mode?: "user" | "environment") {
+    const targetMode = mode || facingMode;
     setError("");
+    stopCamera();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: targetMode, width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -225,6 +231,12 @@ export default function GuestFaceDiscoveryPage() {
     } catch {
       setError("Camera access is blocked or unavailable. Try uploading a face photo instead.");
     }
+  }
+
+  function toggleFacingMode() {
+    const nextMode = facingMode === "user" ? "environment" : "user";
+    setFacingMode(nextMode);
+    void startCamera(nextMode);
   }
 
   async function getFaceApi() {
@@ -243,6 +255,8 @@ export default function GuestFaceDiscoveryPage() {
 
   async function scanAndMatch() {
     if (!videoRef.current || !cameraReady) return;
+    setIsFlashing(true);
+    setTimeout(() => setIsFlashing(false), 150);
     setBusy(true);
     setError("");
     setStatus("Analyzing face...");
@@ -719,33 +733,47 @@ export default function GuestFaceDiscoveryPage() {
         )}
 
         {step === "scan" && (
-          <div style={{ marginTop: 20, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
             <div
               style={{
                 width: "100%",
-                maxWidth: 420,
+                maxWidth: 480,
+                height: "clamp(480px, 72vh, 640px)",
                 position: "relative",
                 borderRadius: 24,
                 overflow: "hidden",
-                background: "#0c0a09",
-                boxShadow: "0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(212, 175, 55, 0.25)",
+                background: "#09090b",
+                boxShadow: "0 24px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(212, 175, 55, 0.3)",
               }}
             >
-              {/* Live Mirrored Front Camera Feed */}
+              {/* Camera Flash Visual Feedback Overlay */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "#ffffff",
+                  opacity: isFlashing ? 0.85 : 0,
+                  transition: isFlashing ? "none" : "opacity 0.25s ease-out",
+                  pointerEvents: "none",
+                  zIndex: 20,
+                }}
+              />
+
+              {/* Live Mirrored or Rear Camera Feed */}
               <video
                 ref={videoRef}
                 muted
                 playsInline
                 style={{
                   width: "100%",
-                  height: 460,
+                  height: "100%",
                   objectFit: "cover",
-                  transform: "scaleX(-1)",
+                  transform: facingMode === "user" ? "scaleX(-1)" : "none",
                   display: "block",
                 }}
               />
 
-              {/* Centered SVG Face Oval Viewfinder Overlay */}
+              {/* Centered SVG Face Viewfinder: Solid Gold Oval + 4 Corner Tracking Brackets */}
               <svg
                 viewBox="0 0 100 100"
                 style={{
@@ -754,12 +782,13 @@ export default function GuestFaceDiscoveryPage() {
                   width: "100%",
                   height: "100%",
                   pointerEvents: "none",
+                  zIndex: 1,
                 }}
               >
                 <defs>
                   <mask id="faceOvalMask">
                     <rect width="100" height="100" fill="white" />
-                    <ellipse cx="50" cy="44" rx="28" ry="36" fill="black" />
+                    <ellipse cx="50" cy="45" rx="27" ry="35" fill="black" />
                   </mask>
                   <linearGradient id="goldRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" stopColor="#f59e0b" />
@@ -767,30 +796,35 @@ export default function GuestFaceDiscoveryPage() {
                     <stop offset="100%" stopColor="#d97706" />
                   </linearGradient>
                 </defs>
-                <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#faceOvalMask)" />
+                <rect width="100" height="100" fill="rgba(0,0,0,0.52)" mask="url(#faceOvalMask)" />
                 <ellipse
                   cx="50"
-                  cy="44"
-                  rx="28"
-                  ry="36"
+                  cy="45"
+                  rx="27"
+                  ry="35"
                   fill="none"
                   stroke="url(#goldRingGrad)"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 2"
-                  style={{ filter: "drop-shadow(0 0 6px rgba(245, 158, 11, 0.7))" }}
+                  strokeWidth="1.8"
+                  style={{ filter: "drop-shadow(0 0 8px rgba(245, 158, 11, 0.6))" }}
                 />
+
+                {/* 4 Corner AF Tracking Brackets */}
+                <path d="M 18 20 L 18 13 L 25 13" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path d="M 82 20 L 82 13 L 75 13" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path d="M 18 70 L 18 77 L 25 77" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path d="M 82 70 L 82 77 L 75 77" stroke="#fbbf24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
 
-              {/* Status Header Badge */}
+              {/* Status Header Badge with Live Indicator Dot */}
               <div
                 style={{
                   position: "absolute",
                   top: 16,
                   left: "50%",
                   transform: "translateX(-50%)",
-                  background: "rgba(0, 0, 0, 0.65)",
+                  background: "rgba(0, 0, 0, 0.7)",
                   backdropFilter: "blur(12px)",
-                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  border: "1px solid rgba(255, 255, 255, 0.18)",
                   padding: "6px 16px",
                   borderRadius: 20,
                   color: "#f3f4f6",
@@ -798,35 +832,77 @@ export default function GuestFaceDiscoveryPage() {
                   fontWeight: 500,
                   letterSpacing: "0.02em",
                   pointerEvents: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  zIndex: 2,
                 }}
               >
-                {busy ? status || "Analyzing face..." : "Align face inside oval"}
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: busy ? "#f59e0b" : cameraReady ? "#22c55e" : "#9ca3af",
+                    boxShadow: cameraReady && !busy ? "0 0 8px #22c55e" : "none",
+                  }}
+                />
+                {busy ? status || "Analyzing face..." : "Align face inside guide"}
               </div>
 
-              {/* Bottom Glassmorphism Control Deck */}
+              {/* Camera Switcher Button (Top Right) */}
+              <button
+                type="button"
+                onClick={toggleFacingMode}
+                disabled={busy}
+                title="Switch Camera (Front/Rear)"
+                style={{
+                  position: "absolute",
+                  top: 14,
+                  right: 14,
+                  background: "rgba(0, 0, 0, 0.55)",
+                  backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  width: 38,
+                  height: 38,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  zIndex: 2,
+                  transition: "transform 0.2s ease",
+                }}
+              >
+                <RotateCw size={18} />
+              </button>
+
+              {/* Bottom Control Deck (iOS Dual-Ring Shutter) */}
               <div
                 style={{
                   position: "absolute",
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  padding: "20px 24px 24px",
-                  background: "linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 75%, transparent 100%)",
+                  padding: "16px 24px 20px",
+                  background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.45) 75%, transparent 100%)",
                   backdropFilter: "blur(8px)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
+                  zIndex: 2,
                 }}
               >
-                {/* Upload File Fallback Button */}
+                {/* Upload Photo Option Button */}
                 <button
                   type="button"
                   onClick={() => uploadInputRef.current?.click()}
                   disabled={busy}
-                  title="Upload photo instead"
+                  title="Upload face photo instead"
                   style={{
-                    background: "rgba(255, 255, 255, 0.12)",
-                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    background: "rgba(255, 255, 255, 0.14)",
+                    border: "1px solid rgba(255, 255, 255, 0.22)",
                     color: "#fff",
                     borderRadius: "50%",
                     width: 44,
@@ -838,22 +914,21 @@ export default function GuestFaceDiscoveryPage() {
                     transition: "all 0.2s ease",
                   }}
                 >
-                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
+                  <Upload size={20} />
                 </button>
 
-                {/* Tactical 1-Click Shutter Button */}
+                {/* Tactical iOS Dual-Ring Shutter Button */}
                 <button
                   onClick={scanAndMatch}
                   disabled={busy || !cameraReady}
+                  title="Capture snapshot"
                   style={{
-                    width: 68,
-                    height: 68,
+                    width: 72,
+                    height: 72,
                     borderRadius: "50%",
-                    border: "3px solid #f59e0b",
-                    background: "rgba(245, 158, 11, 0.2)",
-                    boxShadow: "0 0 20px rgba(245, 158, 11, 0.4)",
+                    border: "4px solid rgba(255, 255, 255, 0.95)",
+                    background: "transparent",
+                    boxShadow: "0 0 24px rgba(0, 0, 0, 0.6)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -864,22 +939,23 @@ export default function GuestFaceDiscoveryPage() {
                 >
                   <div
                     style={{
-                      width: 52,
-                      height: 52,
+                      width: 54,
+                      height: 54,
                       borderRadius: "50%",
                       background: busy ? "#9ca3af" : "#f59e0b",
-                      transition: "background 0.2s ease",
+                      boxShadow: "0 0 16px rgba(245, 158, 11, 0.6)",
+                      transition: "background 0.2s ease, transform 0.15s ease",
                     }}
                   />
                 </button>
 
-                {/* Cancel / Browse All Button */}
+                {/* Close / Browse All Button */}
                 <Link
                   href={`/share/${token}`}
                   title="Browse all photos"
                   style={{
-                    background: "rgba(255, 255, 255, 0.12)",
-                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    background: "rgba(255, 255, 255, 0.14)",
+                    border: "1px solid rgba(255, 255, 255, 0.22)",
                     color: "#fff",
                     borderRadius: "50%",
                     width: 44,
@@ -890,9 +966,7 @@ export default function GuestFaceDiscoveryPage() {
                     textDecoration: "none",
                   }}
                 >
-                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <X size={20} />
                 </Link>
               </div>
             </div>
@@ -904,8 +978,8 @@ export default function GuestFaceDiscoveryPage() {
               onChange={handleUploadSelection}
               style={{ display: "none" }}
             />
-            <p style={{ marginTop: 14, fontSize: 13, color: "var(--brown)", textAlign: "center" }}>
-              Tap the shutter button or upload a photo to find your photos instantly.
+            <p style={{ marginTop: 10, fontSize: 13, color: "var(--brown)", textAlign: "center" }}>
+              Tap shutter or upload a photo to find your photos instantly.
             </p>
           </div>
         )}
