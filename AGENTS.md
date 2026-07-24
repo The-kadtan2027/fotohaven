@@ -1970,3 +1970,19 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: 1-Click Shutter Capture & Glassmorphism Camera Viewfinder
+
+**Status:** Completed
+**Scope:** Replace 5-frame sample loop delay with instant 1-click shutter capture, live front-camera mirror feed, SVG face oval guide overlay, and premium dark glassmorphism styling.
+
+### Modified / New Files
+- `src/app/share/[token]/guest/page.tsx` -- Upgraded camera UI to a glassmorphism viewport with centered SVG face oval stencil, mirrored live video (`scaleX(-1)`), tactical 1-click shutter button, and instant capture pipeline.
+
+### Acceptance criteria
+- [x] Camera preview displays natural mirrored front video feed (`transform: scaleX(-1)`)
+- [x] Centered SVG face alignment oval overlay guides guest face position
+- [x] 1-Click shutter button triggers instant snapshot and face match without 5-frame delays
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

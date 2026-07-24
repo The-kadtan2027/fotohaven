@@ -245,59 +245,22 @@ export default function GuestFaceDiscoveryPage() {
     if (!videoRef.current || !cameraReady) return;
     setBusy(true);
     setError("");
+    setStatus("Analyzing face...");
 
     try {
-      setStatus("Loading face detection models...");
-      const faceapi = await getFaceApi();
-
-      const samplesNeeded = FACE_CONFIG.enrollmentSamples;
-      const minSuccess = FACE_CONFIG.enrollmentMinSuccess;
-      const descriptors: Float32Array[] = [];
-
-      for (let i = 0; i < samplesNeeded; i++) {
-        setStatus(`Capturing frame ${i + 1} of ${samplesNeeded} - hold still...`);
-
-        const detection = await faceapi
-          .detectSingleFace(
-            videoRef.current,
-            new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
-          )
-          .withFaceLandmarks()
-          .withFaceDescriptor();
-
-        if (detection) {
-          descriptors.push(detection.descriptor);
-        }
-
-        if (i < samplesNeeded - 1) {
-          await new Promise((r) => setTimeout(r, 400));
-        }
+      // 1. Capture instant video frame Base64
+      const canvas = document.createElement("canvas");
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       }
-
-      if (descriptors.length < minSuccess) {
-        throw new Error(
-          `Could not detect a clear face (${descriptors.length}/${minSuccess} frames captured). Please position your face in good lighting and try again.`
-        );
-      }
-
-      setStatus("Processing face profile...");
-      const avgDescriptor = averageDescriptors(descriptors);
-
-      // Extract video frame Base64 for Native Python Face Service if active
-      let imageB64: string | null = null;
-      if (videoRef.current) {
-        const canvas = document.createElement("canvas");
-        canvas.width = videoRef.current.videoWidth || 640;
-        canvas.height = videoRef.current.videoHeight || 480;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(videoRef.current, 0, 0);
-        imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
-      }
+      const imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
 
       stopCamera();
 
-      setStatus("Enrolling face profile...");
-
+      // 2. Native Python Face Recognition backend (Instant 1-Click Search)
       if (FACE_CONFIG.enrollmentBackend !== "browser" && imageB64) {
         try {
           const recogRes = await fetch("/api/recognize", {
@@ -319,14 +282,28 @@ export default function GuestFaceDiscoveryPage() {
             return;
           }
         } catch {
-          /* Fallback to descriptor */
+          /* Fallback to browser face-api */
         }
+      }
+
+      // 3. Browser face-api backend (Single-frame detection)
+      const faceapi = await getFaceApi();
+      const detection = await faceapi
+        .detectSingleFace(
+          canvas as any,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
+        )
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        throw new Error("No face was detected. Please center your face inside the oval guide and try again.");
       }
 
       const enrollRes = await fetch("/api/guest/enroll-face", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descriptor: Array.from(avgDescriptor) }),
+        body: JSON.stringify({ descriptor: Array.from(detection.descriptor) }),
       });
 
       if (!enrollRes.ok) {
@@ -740,41 +717,184 @@ export default function GuestFaceDiscoveryPage() {
         )}
 
         {step === "scan" && (
-          <div style={{ marginTop: 24 }}>
-            <p style={{ fontSize: 14, color: "var(--brown)", marginBottom: 12 }}>
-              Position your face in frame, then run scan.
-            </p>
-            <p style={{ fontSize: 13, color: "var(--taupe)", marginBottom: 16, maxWidth: 620, lineHeight: 1.6 }}>
-              If your current selfie looks quite different from the wedding or event photos, you can upload a face photo instead. FotoHaven will analyze it privately in your browser and use it only to build the same face profile used for matching.
-            </p>
-            <video
-              ref={videoRef}
-              muted
-              playsInline
+          <div style={{ marginTop: 20, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div
               style={{
                 width: "100%",
-                maxWidth: 500,
-                borderRadius: 12,
-                background: "#111",
-                border: "1px solid var(--sand)",
+                maxWidth: 420,
+                position: "relative",
+                borderRadius: 24,
+                overflow: "hidden",
+                background: "#0c0a09",
+                boxShadow: "0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(212, 175, 55, 0.25)",
               }}
-            />
-            <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn-gold" onClick={scanAndMatch} disabled={busy || !cameraReady}>
-                {busy ? "Scanning..." : "Scan and find my photos"}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => uploadInputRef.current?.click()}
-                disabled={busy}
+            >
+              {/* Live Mirrored Front Camera Feed */}
+              <video
+                ref={videoRef}
+                muted
+                playsInline
+                style={{
+                  width: "100%",
+                  height: 460,
+                  objectFit: "cover",
+                  transform: "scaleX(-1)",
+                  display: "block",
+                }}
+              />
+
+              {/* Centered SVG Face Oval Viewfinder Overlay */}
+              <svg
+                viewBox="0 0 100 100"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                }}
               >
-                Upload a face photo instead
-              </button>
-              <Link href={`/share/${token}`} className="btn-ghost">
-                Browse all photos instead
-              </Link>
+                <defs>
+                  <mask id="faceOvalMask">
+                    <rect width="100" height="100" fill="white" />
+                    <ellipse cx="50" cy="44" rx="28" ry="36" fill="black" />
+                  </mask>
+                  <linearGradient id="goldRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#f59e0b" />
+                    <stop offset="50%" stopColor="#fbbf24" />
+                    <stop offset="100%" stopColor="#d97706" />
+                  </linearGradient>
+                </defs>
+                <rect width="100" height="100" fill="rgba(0,0,0,0.55)" mask="url(#faceOvalMask)" />
+                <ellipse
+                  cx="50"
+                  cy="44"
+                  rx="28"
+                  ry="36"
+                  fill="none"
+                  stroke="url(#goldRingGrad)"
+                  strokeWidth="1.5"
+                  strokeDasharray="4 2"
+                  style={{ filter: "drop-shadow(0 0 6px rgba(245, 158, 11, 0.7))" }}
+                />
+              </svg>
+
+              {/* Status Header Badge */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  background: "rgba(0, 0, 0, 0.65)",
+                  backdropFilter: "blur(12px)",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  padding: "6px 16px",
+                  borderRadius: 20,
+                  color: "#f3f4f6",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  letterSpacing: "0.02em",
+                  pointerEvents: "none",
+                }}
+              >
+                {busy ? status || "Analyzing face..." : "Align face inside oval"}
+              </div>
+
+              {/* Bottom Glassmorphism Control Deck */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  padding: "20px 24px 24px",
+                  background: "linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 75%, transparent 100%)",
+                  backdropFilter: "blur(8px)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                {/* Upload File Fallback Button */}
+                <button
+                  type="button"
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={busy}
+                  title="Upload photo instead"
+                  style={{
+                    background: "rgba(255, 255, 255, 0.12)",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    color: "#fff",
+                    borderRadius: "50%",
+                    width: 44,
+                    height: 44,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                </button>
+
+                {/* Tactical 1-Click Shutter Button */}
+                <button
+                  onClick={scanAndMatch}
+                  disabled={busy || !cameraReady}
+                  style={{
+                    width: 68,
+                    height: 68,
+                    borderRadius: "50%",
+                    border: "3px solid #f59e0b",
+                    background: "rgba(245, 158, 11, 0.2)",
+                    boxShadow: "0 0 20px rgba(245, 158, 11, 0.4)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: busy || !cameraReady ? "not-allowed" : "pointer",
+                    padding: 0,
+                    transition: "transform 0.15s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: "50%",
+                      background: busy ? "#9ca3af" : "#f59e0b",
+                      transition: "background 0.2s ease",
+                    }}
+                  />
+                </button>
+
+                {/* Cancel / Browse All Button */}
+                <Link
+                  href={`/share/${token}`}
+                  title="Browse all photos"
+                  style={{
+                    background: "rgba(255, 255, 255, 0.12)",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    color: "#fff",
+                    borderRadius: "50%",
+                    width: 44,
+                    height: 44,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textDecoration: "none",
+                  }}
+                >
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </Link>
+              </div>
             </div>
+
             <input
               ref={uploadInputRef}
               type="file"
@@ -782,8 +902,8 @@ export default function GuestFaceDiscoveryPage() {
               onChange={handleUploadSelection}
               style={{ display: "none" }}
             />
-            <p style={{ marginTop: 12, fontSize: 12, color: "var(--taupe)" }}>
-              Choose a clear photo with only one visible face for the best results.
+            <p style={{ marginTop: 14, fontSize: 13, color: "var(--brown)", textAlign: "center" }}>
+              Tap the shutter button or upload a photo to find your photos instantly.
             </p>
           </div>
         )}
