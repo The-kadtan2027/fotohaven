@@ -54,18 +54,9 @@ export async function POST(request: NextRequest) {
     }
 
     const serviceUrl =
-      FACE_CONFIG.enrollmentBackend === "remote_python"
-        ? FACE_CONFIG.remoteServiceUrl
-        : FACE_CONFIG.enrollmentBackend === "local_native_http"
-          ? FACE_CONFIG.localNativeServiceUrl
-          : null;
-
-    if (!serviceUrl) {
-      return NextResponse.json(
-        { error: "Configured face extraction service is not available." },
-        { status: 501 }
-      );
-    }
+      FACE_CONFIG.remoteServiceUrl ||
+      FACE_CONFIG.localNativeServiceUrl ||
+      "http://127.0.0.1:8000";
 
     const response = await fetch(`${serviceUrl}/search`, {
       method: "POST",

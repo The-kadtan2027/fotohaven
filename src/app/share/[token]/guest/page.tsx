@@ -261,7 +261,7 @@ export default function GuestFaceDiscoveryPage() {
       stopCamera();
 
       // 2. Native Python Face Recognition backend (Instant 1-Click Search)
-      if (FACE_CONFIG.enrollmentBackend !== "browser" && imageB64) {
+      if (imageB64) {
         try {
           const recogRes = await fetch("/api/recognize", {
             method: "POST",
@@ -328,14 +328,14 @@ export default function GuestFaceDiscoveryPage() {
     setStatus("Analyzing face photo...");
 
     try {
-      if (FACE_CONFIG.enrollmentBackend !== "browser") {
-        const base64String = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(",")[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+      const base64String = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
+      try {
         const recogRes = await fetch("/api/recognize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -356,6 +356,8 @@ export default function GuestFaceDiscoveryPage() {
           await loadMatchedPhotos({ source: "selfie" });
           return;
         }
+      } catch {
+        /* Fallback to browser face-api */
       }
 
       const faceapi = await getFaceApi();

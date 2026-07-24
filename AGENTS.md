@@ -1986,3 +1986,19 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Automatic Python Face Recognition Fallback
+
+**Status:** Completed
+**Scope:** Default `serviceUrl` in `/api/recognize` to `http://127.0.0.1:8000` and always attempt native Python face search first on guest selfie capture/upload regardless of environment variable settings.
+
+### Modified / New Files
+- `src/app/api/recognize/route.ts` -- Set default `serviceUrl` fallback to `http://127.0.0.1:8000` so `/api/recognize` automatically connects to local `native-face-service`.
+- `src/app/share/[token]/guest/page.tsx` -- Always attempt `POST /api/recognize` first on selfie scan and upload.
+
+### Acceptance criteria
+- [x] `/api/recognize` defaults to `http://127.0.0.1:8000` when environment variables are unconfigured
+- [x] Guest selfie scan and upload automatically try `POST /api/recognize` first
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
