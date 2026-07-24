@@ -261,8 +261,9 @@ npm run db:push && npm run build && pm2 restart ecosystem.config.js
   - **Refined Discovery (Active)**: After the selfie scan, guests are presented with a "Quick Review" carousel of their top 5 highest-confidence single-face matches. Confirming any of these photos re-runs the discovery algorithm using the verified `PhotoFace.descriptor` values as anchors. This offline approach drastically improves results for kids, makeup-heavy subjects, and crowded albums.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
+  - **Identifier Resolution Rule**: Client-facing guest endpoints (`/api/recognize`, `/api/guest/*`) receive `event_id` / `token` as either `shareToken` or database `albums.id` UUID. API routes MUST resolve `event_id` to database `albums.id` UUID before validating guest JWT sessions (which store UUID `albums.id`) and before proxying to Python `native-face-service` (which queries DB using `albums.id`).
   - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
-  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` â€” kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
+  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
 

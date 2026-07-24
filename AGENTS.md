@@ -2016,3 +2016,19 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Album ID Resolution & Guest Discovery Safety
+
+**Status:** Completed
+**Scope:** Resolve client-provided `event_id` / `token` (whether `shareToken` or UUID `id`) to database `albums.id` UUID in `/api/recognize`, preventing 401 Unauthorized errors during session verification and ensuring python `native-face-service` searches against database UUIDs. Safely handle empty `nativePhotoIds: []` match responses in `/api/guest/my-photos`.
+
+### Modified / New Files
+- `src/app/api/recognize/route.ts` -- Resolve `event_id` to database `albums.id` UUID before validating guest session and proxying payload to `native-face-service`.
+- `src/app/api/guest/my-photos/route.ts` -- Safely return empty match array when `nativePhotoIds` is `[]` instead of throwing `parseDescriptor` exception.
+
+### Acceptance criteria
+- [x] `/api/recognize` resolves `shareToken` to database `albums.id` UUID before guest session validation
+- [x] Proxy payload to `native-face-service` uses database `albums.id` UUID for accurate embedding queries
+- [x] `GET /api/guest/my-photos` safely handles empty `nativePhotoIds: []` responses without throwing exceptions
+- [x] `npx tsc --noEmit` passes with zero errors
+
