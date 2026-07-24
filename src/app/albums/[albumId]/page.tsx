@@ -86,6 +86,7 @@ interface Album {
 type UploadStatus = "pending" | "uploading" | "done" | "error";
 
 interface UploadItem {
+  id: string;
   file: File;
   ceremonyId: string;
   folderName?: string;
@@ -250,6 +251,7 @@ export default function AlbumPage() {
           (folderName && ceremonyMap[folderName]) || activeCeremony || album.ceremonies[0]?.id || "";
 
         return {
+          id: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
           file,
           ceremonyId,
           folderName: folderName || undefined,
@@ -338,10 +340,7 @@ export default function AlbumPage() {
     setIsUploading(true);
 
     for (const item of pending) {
-      const index = uploads.findIndex((entry) => entry.file === item.file && entry.ceremonyId === item.ceremonyId);
-      if (index === -1) continue;
-
-      setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "uploading", progress: 0 } : entry)));
+      setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "uploading", progress: 0 } : entry)));
 
       try {
         // Streamed 1-by-1 compression right before upload transmit
@@ -370,13 +369,13 @@ export default function AlbumPage() {
         const { uploadUrl } = await metaRes.json();
 
         await xhrUploadWithProgress(uploadUrl, fileToUpload, (progress) => {
-          setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, progress } : entry)));
+          setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, progress } : entry)));
         });
 
-        // Instantly prune completed item from UI queue to keep list 100% clean
-        setUploads((prev) => prev.filter((entry) => !(entry.file === item.file && entry.ceremonyId === item.ceremonyId)));
+        // Instantly prune completed item by unique ID from UI queue
+        setUploads((prev) => prev.filter((entry) => entry.id !== item.id));
       } catch (error) {
-        setUploads((prev) => prev.map((entry, i) => (i === index ? { ...entry, status: "error", error: String(error) } : entry)));
+        setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "error", error: String(error) } : entry)));
       }
     }
 
@@ -387,7 +386,7 @@ export default function AlbumPage() {
   const retrySingleUpload = (item: UploadItem) => {
     setUploads((prev) =>
       prev.map((entry) =>
-        entry.file === item.file && entry.ceremonyId === item.ceremonyId
+        entry.id === item.id
           ? { ...entry, status: "pending", error: undefined }
           : entry
       )
@@ -908,7 +907,7 @@ export default function AlbumPage() {
                   uploads={uploads} 
                   isUploading={isUploading} 
                   onUploadAll={uploadAll} 
-                  onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))}
+                  onClear={(id) => setUploads((prev) => prev.filter((entry) => entry.id !== id))}
                   onRetry={retrySingleUpload}
                 />
               )}
@@ -989,7 +988,7 @@ function UploadQueue({
   uploads: UploadItem[];
   isUploading: boolean;
   onUploadAll: () => void;
-  onClear: (index: number) => void;
+  onClear: (id: string) => void;
   onRetry: (item: UploadItem) => void;
 }) {
   const pendingCount = uploads.filter((i) => i.status === "pending" || i.status === "error").length;
@@ -1046,8 +1045,10 @@ function UploadQueue({
 
       {/* Queue items list with Live Thumbnails */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {uploads.map((item, index) => (
-          <div key={`${item.file.name}-${index}`} style={{ background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)", overflow: "hidden" }}>
+        {uploads
+          .filter((item) => item.status !== "done")
+          .map((item) => (
+            <div key={item.id} style={{ background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
               {/* Live Thumbnail Preview */}
               {item.previewUrl ? (
@@ -1101,7 +1102,7 @@ function UploadQueue({
 
               {item.status !== "uploading" && (
                 <button
-                  onClick={() => onClear(index)}
+                  onClick={() => onClear(item.id)}
                   title="Remove from queue"
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", padding: 4, display: "flex", alignItems: "center" }}
                 >

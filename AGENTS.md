@@ -1900,3 +1900,19 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Unique Upload Item ID & Guaranteed Done-Item Pruning
+
+**Status:** Completed
+**Scope:** Fix issue where completed (`status: "done"`) upload cards remained visible in the UI queue by assigning unique string IDs to each `UploadItem`, matching items by ID rather than object reference, and filtering out `status === "done"` items during rendering.
+
+### Modified / New Files
+- `src/app/albums/[albumId]/page.tsx` -- Added `id: string` to `UploadItem`, updated `onDrop` to generate unique item IDs, updated `uploadAll` and `onClear` to filter/match by ID (`entry.id !== item.id`), and filtered out `status === "done"` in `UploadQueue` UI rendering.
+
+### Acceptance criteria
+- [x] Each item in upload queue has a unique string ID assigned at drop time
+- [x] Queue array operations (`uploadAll`, `onClear`, `retrySingleUpload`) match items by ID rather than JavaScript object reference
+- [x] Completed upload cards (`status: "done"`) disappear instantly from the UI as soon as they finish
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
