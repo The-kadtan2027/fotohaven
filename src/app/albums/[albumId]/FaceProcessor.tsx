@@ -127,7 +127,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
           ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
           const detections = await faceapi.detectAllFaces(
-            canvas as any,
+            img as any,
             new faceapi.SsdMobilenetv1Options({
               minConfidence: FACE_CONFIG.detectionMinConfidence,
               inputSize: 416,

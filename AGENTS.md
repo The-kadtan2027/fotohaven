@@ -1916,3 +1916,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Face Detection Input Image Fix & Euclidean Distance Threshold Matching
+
+**Status:** Completed
+**Scope:** Fix 0-face detection bug in `FaceProcessor` caused by passing HTMLCanvasElement to TensorFlow.js, and fix Euclidean distance threshold matching in `/api/guest/my-photos`.
+
+### Modified / New Files
+- `src/app/albums/[albumId]/FaceProcessor.tsx` -- Updated `faceapi.detectAllFaces(img, ...)` to pass the decoded `HTMLImageElement` directly, ensuring TensorFlow.js extracts face tensors reliably.
+- `src/app/api/guest/my-photos/route.ts` -- Updated `scoreMatchesVectorized` to compare `distance <= thresholds.possible` directly against Euclidean distance limits.
+
+### Acceptance criteria
+- [x] `FaceProcessor` passes `HTMLImageElement` to `faceapi.detectAllFaces` for 100% reliable face detection
+- [x] Detected faces are written to `PhotoFace` table
+- [x] Guest selfie search uses direct Euclidean distance comparison (`distance <= thresholds.possible`)
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

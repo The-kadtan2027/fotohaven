@@ -90,13 +90,9 @@ function getAlbumThresholds(albumId: string): MatchThresholds {
     .where(eq(albums.id, albumId))
     .get();
 
-  // Convert distance config to similarity score if fallback is used
-  const defaultStrong = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.strongMatchThreshold));
-  const defaultPossible = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.possibleMatchThreshold));
-
   return {
-    strong: album?.highThreshold ?? defaultStrong,
-    possible: album?.lowThreshold ?? defaultPossible,
+    strong: album?.highThreshold ?? FACE_CONFIG.strongMatchThreshold,
+    possible: album?.lowThreshold ?? FACE_CONFIG.possibleMatchThreshold,
   };
 }
 
@@ -127,8 +123,8 @@ function scoreMatchesVectorized(
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
 
     const distance = distances[i];
-    const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
-    if (similarity >= thresholds.possible) {
+    if (distance <= thresholds.possible) {
+      const similarity = Math.max(0, Math.min(1, 1 - distance));
       const current = bestSimilarityByPhoto.get(face.photoId);
       if (current === undefined || similarity > current) {
         bestSimilarityByPhoto.set(face.photoId, similarity);
