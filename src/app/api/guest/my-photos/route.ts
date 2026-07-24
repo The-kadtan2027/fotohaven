@@ -203,17 +203,20 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
   // Handle native Python face recognition matches
   try {
     const parsed = JSON.parse(guest.faceDescriptor);
-    if (parsed && Array.isArray(parsed.nativePhotoIds) && parsed.nativePhotoIds.length > 0) {
-      const nativeMatchedPhotos = db
-        .select({
-          id: photos.id,
-          storageKey: photos.storageKey,
-          thumbnailKey: photos.thumbnailKey,
-          originalName: photos.originalName,
-        })
-        .from(photos)
-        .where(inArray(photos.id, parsed.nativePhotoIds))
-        .all();
+    if (parsed && Array.isArray(parsed.nativePhotoIds)) {
+      const nativeMatchedPhotos =
+        parsed.nativePhotoIds.length > 0
+          ? db
+              .select({
+                id: photos.id,
+                storageKey: photos.storageKey,
+                thumbnailKey: photos.thumbnailKey,
+                originalName: photos.originalName,
+              })
+              .from(photos)
+              .where(inArray(photos.id, parsed.nativePhotoIds))
+              .all()
+          : [];
 
       const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
         photoId: p.id,

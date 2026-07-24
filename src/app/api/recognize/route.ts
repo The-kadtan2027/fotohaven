@@ -1,8 +1,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { guests } from "@/lib/schema";
+import { albums, guests } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 import { FACE_CONFIG } from "@/lib/face-config";
 
@@ -48,7 +48,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const authed = await hasValidGuestSession(body.event_id);
+    const album = db
+      .select({ id: albums.id })
+      .from(albums)
+      .where(or(eq(albums.id, body.event_id), eq(albums.shareToken, body.event_id)))
+      .get();
+
+    if (!album) {
+      return NextResponse.json({ error: "Album not found" }, { status: 404 });
+    }
+
+    const authed = await hasValidGuestSession(album.id);
     if (!authed) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -58,10 +68,15 @@ export async function POST(request: NextRequest) {
       FACE_CONFIG.localNativeServiceUrl ||
       "http://127.0.0.1:5080";
 
+    const payload = {
+      ...body,
+      event_id: album.id,
+    };
+
     const response = await fetch(`${serviceUrl}/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),
       cache: "no-store",
     });
