@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { albums, ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
@@ -198,6 +198,44 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
 
   if (!guest.faceDescriptor) {
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
+  }
+
+  // Handle native Python face recognition matches
+  try {
+    const parsed = JSON.parse(guest.faceDescriptor);
+    if (parsed && Array.isArray(parsed.nativePhotoIds) && parsed.nativePhotoIds.length > 0) {
+      const nativeMatchedPhotos = db
+        .select({
+          id: photos.id,
+          storageKey: photos.storageKey,
+          thumbnailKey: photos.thumbnailKey,
+          originalName: photos.originalName,
+        })
+        .from(photos)
+        .where(inArray(photos.id, parsed.nativePhotoIds))
+        .all();
+
+      const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+        photoId: p.id,
+        score: 1.0,
+        faceCount: 1,
+        id: p.id,
+        originalName: p.originalName,
+        url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+        originalUrl: await getPresignedUrl(p.storageKey),
+      }));
+
+      const matched = await Promise.all(mappedPromises);
+      return noStoreJson({
+        photos: matched,
+        guest: { name: guest.name },
+        source,
+        thresholds: getAlbumThresholds(guest.albumId),
+        metric: "native_python_insightface",
+      });
+    }
+  } catch {
+    /* Not JSON object, proceed to vector parse */
   }
 
   const guestDescriptor = parseDescriptor(guest.faceDescriptor);

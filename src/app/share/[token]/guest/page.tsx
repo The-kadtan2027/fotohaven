@@ -283,9 +283,46 @@ export default function GuestFaceDiscoveryPage() {
       setStatus("Processing face profile...");
       const avgDescriptor = averageDescriptors(descriptors);
 
+      // Extract video frame Base64 for Native Python Face Service if active
+      let imageB64: string | null = null;
+      if (videoRef.current) {
+        const canvas = document.createElement("canvas");
+        canvas.width = videoRef.current.videoWidth || 640;
+        canvas.height = videoRef.current.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(videoRef.current, 0, 0);
+        imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+      }
+
       stopCamera();
 
       setStatus("Enrolling face profile...");
+
+      if (FACE_CONFIG.enrollmentBackend !== "browser" && imageB64) {
+        try {
+          const recogRes = await fetch("/api/recognize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+          });
+          if (recogRes.ok) {
+            const recogData = await recogRes.json();
+            const nativePhotoIds = Array.from(
+              new Set([...(recogData.definite || []), ...(recogData.possible || [])])
+            );
+            await fetch("/api/guest/enroll-face", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ nativePhotoIds }),
+            });
+            await loadMatchedPhotos({ source: "selfie" });
+            return;
+          }
+        } catch {
+          /* Fallback to descriptor */
+        }
+      }
+
       const enrollRes = await fetch("/api/guest/enroll-face", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -314,6 +351,36 @@ export default function GuestFaceDiscoveryPage() {
     setStatus("Analyzing face photo...");
 
     try {
+      if (FACE_CONFIG.enrollmentBackend !== "browser") {
+        const base64String = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const recogRes = await fetch("/api/recognize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event_id: token, image_b64: base64String }),
+        });
+
+        if (recogRes.ok) {
+          const recogData = await recogRes.json();
+          const nativePhotoIds = Array.from(
+            new Set([...(recogData.definite || []), ...(recogData.possible || [])])
+          );
+          await fetch("/api/guest/enroll-face", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nativePhotoIds }),
+          });
+          stopCamera();
+          await loadMatchedPhotos({ source: "selfie" });
+          return;
+        }
+      }
+
       const faceapi = await getFaceApi();
       const img = await faceapi.bufferToImage(file);
 

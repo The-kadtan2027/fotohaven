@@ -1951,3 +1951,22 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Native Python Face Recognition Integration
+
+**Status:** Completed
+**Scope:** Integrate Native Python Face Service (`native-face-service` / `/api/recognize`) into the guest selfie enrollment and discovery pipeline.
+
+### Modified / New Files
+- `src/lib/vector-cache.ts` -- Prevent stale 0-count cache entries so new face enrollments from `native-face-service` are immediately queried from SQLite.
+- `src/app/share/[token]/guest/page.tsx` -- Update camera scan and photo upload to send Base64 image payload to `/api/recognize` when native python backend is active.
+- `src/app/api/guest/enroll-face/route.ts` -- Support saving `nativePhotoIds` into `guests.faceDescriptor`.
+- `src/app/api/guest/my-photos/route.ts` -- Support returning native matched photos for returning guests.
+
+### Acceptance criteria
+- [x] Guest selfie scan and upload call `/api/recognize` when Native Python Face Service is enabled
+- [x] Matched photo IDs returned from InsightFace `/search` are rendered in guest gallery
+- [x] Returning guest session restores native matched photos upon page reload
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

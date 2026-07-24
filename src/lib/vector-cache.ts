@@ -54,7 +54,7 @@ export function invalidateAlbumVectorCache(albumId: string): void {
 export function getAlbumVectorMatrix(albumId: string): AlbumVectorMatrix {
   ensureCleanupTimer();
   const cached = cache.get(albumId);
-  if (cached) {
+  if (cached && cached.count > 0) {
     cached.lastAccessed = Date.now();
     return cached;
   }
