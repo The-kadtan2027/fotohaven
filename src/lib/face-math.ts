@@ -82,25 +82,23 @@ export function vectorizedEuclideanDistances(
   matrix: Float32Array,
   norms: Float32Array,
   target: Float32Array,
-  count: number
+  count: number,
+  dim = 128
 ): Float32Array {
-  if (target.length !== 128) {
-    throw new Error("Target descriptor must be length 128");
-  }
+  const targetDim = target.length;
+  const effectiveDim = Math.min(dim, targetDim);
 
-  // Precalculate target norm ||b||^2
   let targetNormSq = 0;
-  for (let k = 0; k < 128; k++) {
+  for (let k = 0; k < effectiveDim; k++) {
     targetNormSq += target[k] * target[k];
   }
 
   const distances = new Float32Array(count);
 
   for (let i = 0; i < count; i++) {
-    const offset = i * 128;
+    const offset = i * dim;
     let dot = 0;
-    // Unrolled dot product loop for V8 autovectorization
-    for (let k = 0; k < 128; k++) {
+    for (let k = 0; k < effectiveDim; k++) {
       dot += matrix[offset + k] * target[k];
     }
     const distSq = Math.max(0, norms[i] + targetNormSq - 2 * dot);

@@ -109,7 +109,7 @@ function scoreMatchesVectorized(
   if (count === 0) return [];
 
   // Compute all N Euclidean distances simultaneously using vectorized SIMD dot products
-  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count);
+  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count, vectorData.vectorDim);
 
   for (let i = 0; i < count; i++) {
     const face = faces[i];

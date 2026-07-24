@@ -1933,3 +1933,21 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Dual-Table Vector Cache & Native Python Face Embeddings Support
+
+**Status:** Completed
+**Scope:** Support loading face vector embeddings from both `face_embeddings` (Python Native Face Service, 512-float InsightFace embeddings) and `photoFaces` (Browser face-api.js 128-float descriptors) in vector cache and guest photo discovery.
+
+### Modified / New Files
+- `src/lib/face-math.ts` -- Updated `vectorizedEuclideanDistances` to handle dynamic vector dimensions (`dim: number`, 128 or 512).
+- `src/lib/vector-cache.ts` -- Updated `getAlbumVectorMatrix` to query `face_embeddings` table when `photoFaces` is empty, parsing 512-float binary Buffer embeddings.
+- `src/app/api/guest/my-photos/route.ts` -- Passed `vectorData.vectorDim` to `vectorizedEuclideanDistances` and applied direct Euclidean distance threshold matching (`distance <= thresholds.possible`).
+
+### Acceptance criteria
+- [x] Vector cache queries `face_embeddings` table when `photoFaces` is empty, loading Python native face embeddings (512-float)
+- [x] `vectorizedEuclideanDistances` supports dynamic vector dimensions (128 and 512)
+- [x] Guest selfie search returns matching photos when enrolled via Python Native Face Service
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---

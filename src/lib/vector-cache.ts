@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { photoFaces, photos, ceremonies } from "@/lib/schema";
+import { photoFaces, faceEmbeddings, photos, ceremonies } from "@/lib/schema";
 import { and, eq } from "drizzle-orm";
 import { parseDescriptor } from "@/lib/face-math";
 
@@ -12,10 +12,11 @@ export type AlbumFaceMeta = {
 };
 
 export type AlbumVectorMatrix = {
-  matrix: Float32Array; // Flattened N x 128 Float32Array
+  matrix: Float32Array; // Flattened N x vectorDim Float32Array
   norms: Float32Array;  // Precalculated vector norms ||a_i||^2 of size N
   faces: AlbumFaceMeta[];
   count: number;
+  vectorDim: number;
   lastAccessed: number;
 };
 
@@ -58,8 +59,8 @@ export function getAlbumVectorMatrix(albumId: string): AlbumVectorMatrix {
     return cached;
   }
 
-  // Fetch all face rows for original (non-return) photos in this album
-  const rows = db
+  // 1. Fetch browser face_api descriptors (128-float)
+  const photoFaceRows = db
     .select({
       id: photoFaces.id,
       photoId: photoFaces.photoId,
@@ -74,29 +75,125 @@ export function getAlbumVectorMatrix(albumId: string): AlbumVectorMatrix {
     .where(and(eq(ceremonies.albumId, albumId), eq(photos.isReturn, false)))
     .all();
 
-  const count = rows.length;
-  const matrix = new Float32Array(count * 128);
-  const norms = new Float32Array(count);
-  const faces: AlbumFaceMeta[] = new Array(count);
+  if (photoFaceRows.length > 0) {
+    const count = photoFaceRows.length;
+    const vectorDim = 128;
+    const matrix = new Float32Array(count * vectorDim);
+    const norms = new Float32Array(count);
+    const faces: AlbumFaceMeta[] = new Array(count);
+    let validCount = 0;
 
+    for (let i = 0; i < count; i++) {
+      const row = photoFaceRows[i];
+      try {
+        const vec = parseDescriptor(row.descriptor);
+        if (vec.length !== vectorDim) continue;
+
+        const offset = validCount * vectorDim;
+        let normSq = 0;
+        for (let k = 0; k < vectorDim; k++) {
+          const val = vec[k];
+          matrix[offset + k] = val;
+          normSq += val * val;
+        }
+        norms[validCount] = normSq;
+        faces[validCount] = {
+          id: row.id,
+          photoId: row.photoId,
+          storageKey: row.storageKey,
+          thumbnailKey: row.thumbnailKey,
+          originalName: row.originalName,
+        };
+        validCount++;
+      } catch {
+        /* Ignore malformed descriptors */
+      }
+    }
+
+    const entry: AlbumVectorMatrix = {
+      matrix: validCount === count ? matrix : matrix.subarray(0, validCount * vectorDim),
+      norms: validCount === count ? norms : norms.subarray(0, validCount),
+      faces: validCount === count ? faces : faces.slice(0, validCount),
+      count: validCount,
+      vectorDim,
+      lastAccessed: Date.now(),
+    };
+
+    cache.set(albumId, entry);
+    return entry;
+  }
+
+  // 2. Fallback to native Python face_embeddings table (512-float vectors)
+  const nativeRows = db
+    .select({
+      id: faceEmbeddings.id,
+      photoId: faceEmbeddings.photoId,
+      embedding: faceEmbeddings.embedding,
+      storageKey: photos.storageKey,
+      thumbnailKey: photos.thumbnailKey,
+      originalName: photos.originalName,
+    })
+    .from(faceEmbeddings)
+    .innerJoin(photos, eq(faceEmbeddings.photoId, photos.id))
+    .innerJoin(ceremonies, eq(photos.ceremonyId, ceremonies.id))
+    .where(and(eq(ceremonies.albumId, albumId), eq(photos.isReturn, false)))
+    .all();
+
+  const nativeCount = nativeRows.length;
+  if (nativeCount === 0) {
+    const emptyEntry: AlbumVectorMatrix = {
+      matrix: new Float32Array(0),
+      norms: new Float32Array(0),
+      faces: [],
+      count: 0,
+      vectorDim: 512,
+      lastAccessed: Date.now(),
+    };
+    cache.set(albumId, emptyEntry);
+    return emptyEntry;
+  }
+
+  // Determine vector dimension from first valid embedding
+  let detectedDim = 512;
+  for (const row of nativeRows) {
+    const raw = row.embedding as any;
+    if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) {
+      detectedDim = raw.byteLength / 4;
+      break;
+    }
+  }
+
+  const matrix = new Float32Array(nativeCount * detectedDim);
+  const norms = new Float32Array(nativeCount);
+  const faces: AlbumFaceMeta[] = new Array(nativeCount);
   let validCount = 0;
 
-  for (let i = 0; i < count; i++) {
-    const row = rows[i];
+  for (let i = 0; i < nativeCount; i++) {
+    const row = nativeRows[i];
     try {
-      const vec = parseDescriptor(row.descriptor);
-      if (vec.length !== 128) continue;
+      let vec: Float32Array;
+      const raw = row.embedding as any;
+      if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) {
+        const buf = Buffer.from(raw);
+        vec = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+      } else if (typeof raw === "string") {
+        vec = parseDescriptor(raw);
+      } else {
+        continue;
+      }
 
-      const offset = validCount * 128;
+      if (vec.length !== detectedDim) continue;
+
+      const offset = validCount * detectedDim;
       let normSq = 0;
-      for (let k = 0; k < 128; k++) {
+      for (let k = 0; k < detectedDim; k++) {
         const val = vec[k];
         matrix[offset + k] = val;
         normSq += val * val;
       }
       norms[validCount] = normSq;
       faces[validCount] = {
-        id: row.id,
+        id: String(row.id),
         photoId: row.photoId,
         storageKey: row.storageKey,
         thumbnailKey: row.thumbnailKey,
@@ -104,20 +201,16 @@ export function getAlbumVectorMatrix(albumId: string): AlbumVectorMatrix {
       };
       validCount++;
     } catch {
-      // Ignore malformed descriptors
+      /* Ignore malformed embeddings */
     }
   }
 
-  // Slice matrix/norms if any invalid rows were skipped
-  const finalMatrix = validCount === count ? matrix : matrix.subarray(0, validCount * 128);
-  const finalNorms = validCount === count ? norms : norms.subarray(0, validCount);
-  const finalFaces = validCount === count ? faces : faces.slice(0, validCount);
-
   const entry: AlbumVectorMatrix = {
-    matrix: finalMatrix,
-    norms: finalNorms,
-    faces: finalFaces,
+    matrix: validCount === nativeCount ? matrix : matrix.subarray(0, validCount * detectedDim),
+    norms: validCount === nativeCount ? norms : norms.subarray(0, validCount),
+    faces: validCount === nativeCount ? faces : faces.slice(0, validCount),
     count: validCount,
+    vectorDim: detectedDim,
     lastAccessed: Date.now(),
   };
 
