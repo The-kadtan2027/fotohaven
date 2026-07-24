@@ -509,9 +509,18 @@ export default function AlbumPage() {
           hashedPhotos.push(photo);
           continue;
         }
-        const imageHash = await computeDHashFromUrl(photo.url, { cacheBust: forceRescan });
-        hashedPhotos.push({ ...photo, imageHash });
-        newHashes.push({ photoId: photo.id, imageHash });
+        try {
+          const primaryUrl = photo.originalUrl || photo.url;
+          const fallbackUrl = photo.originalUrl ? photo.url : undefined;
+          const imageHash = await computeDHashFromUrl(primaryUrl, {
+            fallbackUrl,
+            cacheBust: forceRescan,
+          });
+          hashedPhotos.push({ ...photo, imageHash });
+          newHashes.push({ photoId: photo.id, imageHash });
+        } catch (err) {
+          console.warn(`[scanDuplicates] Failed to compute hash for photo ${photo.id}:`, err);
+        }
       }
       setDuplicateSourcePhotos(hashedPhotos);
       setShowDuplicateModal(true);

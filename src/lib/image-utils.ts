@@ -108,37 +108,54 @@ export async function compressImageFile(
   }
 }
 
-export async function computeDHashFromUrl(url: string, options?: { cacheBust?: boolean }): Promise<string> {
-  const requestUrl = options?.cacheBust ? `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}` : url;
-  const response = await fetch(requestUrl, { cache: options?.cacheBust ? "no-store" : "default" });
-  if (!response.ok) {
+export async function computeDHashFromUrl(
+  url: string,
+  options?: { fallbackUrl?: string; cacheBust?: boolean }
+): Promise<string> {
+  const getUrl = (u: string) => (options?.cacheBust ? `${u}${u.includes("?") ? "&" : "?"}t=${Date.now()}` : u);
+
+  let response = await fetch(getUrl(url), { cache: options?.cacheBust ? "no-store" : "default" }).catch(() => null);
+
+  if ((!response || !response.ok) && options?.fallbackUrl && options.fallbackUrl !== url) {
+    response = await fetch(getUrl(options.fallbackUrl), { cache: options?.cacheBust ? "no-store" : "default" }).catch(() => null);
+  }
+
+  if (!response || !response.ok) {
     throw new Error("Failed to fetch image for hashing");
   }
 
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
-  const canvas = createCanvas(9, 8);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  let canvas: HTMLCanvasElement | null = null;
+  try {
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    canvas = createCanvas(9, 8);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-  if (!ctx) {
-    throw new Error("Canvas context unavailable");
-  }
+    if (!ctx) {
+      throw new Error("Canvas context unavailable");
+    }
 
-  ctx.drawImage(bitmap, 0, 0, 9, 8);
-  bitmap.close();
+    ctx.drawImage(bitmap, 0, 0, 9, 8);
+    bitmap.close();
 
-  const { data } = ctx.getImageData(0, 0, 9, 8);
-  let hash = BigInt(0);
+    const { data } = ctx.getImageData(0, 0, 9, 8);
+    let hash = BigInt(0);
 
-  for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      const left = grayscaleAt(data, x, y, 9);
-      const right = grayscaleAt(data, x + 1, y, 9);
-      hash = (hash << BigInt(1)) | BigInt(left > right ? 1 : 0);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const left = grayscaleAt(data, x, y, 9);
+        const right = grayscaleAt(data, x + 1, y, 9);
+        hash = (hash << BigInt(1)) | BigInt(left > right ? 1 : 0);
+      }
+    }
+
+    return hash.toString(16).padStart(16, "0");
+  } finally {
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
     }
   }
-
-  return hash.toString(16).padStart(16, "0");
 }
 
 function grayscaleAt(data: Uint8ClampedArray, x: number, y: number, width: number) {

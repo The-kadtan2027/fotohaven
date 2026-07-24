@@ -1848,3 +1848,20 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Duplicate Scanner 404 Fallback & Fault Tolerance
+
+**Status:** Completed
+**Scope:** Fix `404 (Not Found)` duplicate scan failures by using full-resolution image URLs for hashing, adding automatic fallback fetching in `computeDHashFromUrl`, and isolating per-photo hashing in `scanDuplicates` so missing thumbnails do not abort ceremony scanning.
+
+### Modified / New Files
+- `src/lib/image-utils.ts` -- Added `fallbackUrl` auto-retry support and canvas memory cleanup to `computeDHashFromUrl`.
+- `src/app/albums/[albumId]/page.tsx` -- Updated `scanDuplicates` to pass `photo.originalUrl || photo.url` and isolated per-photo hashing in `try/catch` to gracefully skip missing files.
+
+### Acceptance criteria
+- [x] Duplicate scanning hashes full-resolution original URLs (`photo.originalUrl || photo.url`) to bypass missing thumbnails
+- [x] `computeDHashFromUrl` auto-retries `fallbackUrl` if initial URL returns 404
+- [x] Missing or corrupted single photo files are skipped gracefully without failing the entire ceremony scan
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
