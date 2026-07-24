@@ -253,6 +253,39 @@ export default function GuestFaceDiscoveryPage() {
     return faceApiPromiseRef.current;
   }
 
+function parseNativeMatches(recogData: any): Array<{ photoId: string; score: number }> {
+  const parseList = (list: any[], fallbackScore: number) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item) => {
+        if (typeof item === "string") return { photoId: item, score: fallbackScore };
+        if (typeof item === "object" && item !== null) {
+          const photoId = item.photo_id || item.photoId || item.id;
+          const score = typeof item.score === "number" ? item.score : fallbackScore;
+          return { photoId, score };
+        }
+        return null;
+      })
+      .filter((m): m is { photoId: string; score: number } => Boolean(m && m.photoId));
+  };
+
+  const definite = parseList(recogData.definite, 0.75);
+  const possible = parseList(recogData.possible, 0.55);
+
+  // Definite matches (high threshold >= 0.65) are primary. Only fall back to possible if definite is empty.
+  const selected = definite.length > 0 ? definite : possible;
+
+  const scoreMap = new Map<string, number>();
+  for (const m of selected) {
+    const existing = scoreMap.get(m.photoId);
+    if (existing === undefined || m.score > existing) {
+      scoreMap.set(m.photoId, m.score);
+    }
+  }
+
+  return Array.from(scoreMap.entries()).map(([photoId, score]) => ({ photoId, score }));
+}
+
   async function scanAndMatch() {
     if (!videoRef.current || !cameraReady) return;
     setIsFlashing(true);
@@ -284,13 +317,11 @@ export default function GuestFaceDiscoveryPage() {
           });
           if (recogRes.ok) {
             const recogData = await recogRes.json();
-            const nativePhotoIds = Array.from(
-              new Set([...(recogData.definite || []), ...(recogData.possible || [])])
-            );
+            const nativeMatches = parseNativeMatches(recogData);
             await fetch("/api/guest/enroll-face", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ nativePhotoIds }),
+              body: JSON.stringify({ nativeMatches }),
             });
             await loadMatchedPhotos({ source: "selfie" });
             return;
@@ -358,13 +389,11 @@ export default function GuestFaceDiscoveryPage() {
 
         if (recogRes.ok) {
           const recogData = await recogRes.json();
-          const nativePhotoIds = Array.from(
-            new Set([...(recogData.definite || []), ...(recogData.possible || [])])
-          );
+          const nativeMatches = parseNativeMatches(recogData);
           await fetch("/api/guest/enroll-face", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nativePhotoIds }),
+            body: JSON.stringify({ nativeMatches }),
           });
           stopCamera();
           await loadMatchedPhotos({ source: "selfie" });

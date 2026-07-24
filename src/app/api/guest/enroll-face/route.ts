@@ -38,7 +38,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const body = (await request.json()) as EnrollFaceBody;
+    const body = (await request.json()) as EnrollFaceBody & {
+      nativeMatches?: Array<{ photoId: string; score: number }>;
+    };
+
+    if (Array.isArray(body.nativeMatches)) {
+      db.update(guests)
+        .set({
+          faceDescriptor: JSON.stringify({ nativeMatches: body.nativeMatches }),
+        })
+        .where(eq(guests.id, guest.id))
+        .run();
+
+      return NextResponse.json({ ok: true });
+    }
 
     if (Array.isArray(body.nativePhotoIds)) {
       db.update(guests)

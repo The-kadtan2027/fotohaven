@@ -51,9 +51,9 @@ def load_event(event_id: str, rows: List[Tuple[str, int, bytes]]) -> int:
 def search(
     event_id: str,
     query_embedding: np.ndarray,
-    high_threshold: float = 0.70,
+    high_threshold: float = 0.65,
     low_threshold: float = 0.55,
-) -> Dict[str, List[str]]:
+) -> Dict[str, List[dict]]:
     with _lock:
         index = _store.get(event_id)
 
@@ -63,8 +63,8 @@ def search(
     similarities = index.matrix @ query_embedding
     order = np.argsort(similarities)[::-1]
 
-    definite_ids: List[str] = []
-    possible_ids: List[str] = []
+    definite: List[dict] = []
+    possible: List[dict] = []
     seen = set()
 
     for i in order:
@@ -73,14 +73,15 @@ def search(
         if photo_id in seen:
             continue
 
+        item = {"photo_id": photo_id, "score": round(score, 4)}
         if score >= high_threshold:
-            definite_ids.append(photo_id)
+            definite.append(item)
             seen.add(photo_id)
         elif score >= low_threshold:
-            possible_ids.append(photo_id)
+            possible.append(item)
             seen.add(photo_id)
 
-    return {"definite": definite_ids, "possible": possible_ids}
+    return {"definite": definite, "possible": possible}
 
 
 def unload_event(event_id: str) -> None:

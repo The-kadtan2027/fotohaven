@@ -203,6 +203,47 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
   // Handle native Python face recognition matches
   try {
     const parsed = JSON.parse(guest.faceDescriptor);
+
+    if (parsed && Array.isArray(parsed.nativeMatches)) {
+      const matches = parsed.nativeMatches as Array<{ photoId: string; score: number }>;
+      const matchMap = new Map(matches.map((m) => [m.photoId, m.score]));
+      const photoIds = Array.from(matchMap.keys());
+
+      const nativeMatchedPhotos = photoIds.length > 0
+        ? db
+            .select({
+              id: photos.id,
+              storageKey: photos.storageKey,
+              thumbnailKey: photos.thumbnailKey,
+              originalName: photos.originalName,
+            })
+            .from(photos)
+            .where(inArray(photos.id, photoIds))
+            .all()
+        : [];
+
+      const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+        photoId: p.id,
+        score: Math.round((matchMap.get(p.id) ?? 0.75) * 1000) / 1000,
+        faceCount: 1,
+        id: p.id,
+        originalName: p.originalName,
+        url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+        originalUrl: await getPresignedUrl(p.storageKey),
+      }));
+
+      const matched = await Promise.all(mappedPromises);
+      matched.sort((a, b) => b.score - a.score);
+
+      return noStoreJson({
+        photos: matched,
+        guest: { name: guest.name },
+        source,
+        thresholds: getAlbumThresholds(guest.albumId),
+        metric: "native_python_insightface",
+      });
+    }
+
     if (parsed && Array.isArray(parsed.nativePhotoIds)) {
       const nativeMatchedPhotos =
         parsed.nativePhotoIds.length > 0
@@ -220,7 +261,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
 
       const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
         photoId: p.id,
-        score: 1.0,
+        score: 0.85,
         faceCount: 1,
         id: p.id,
         originalName: p.originalName,

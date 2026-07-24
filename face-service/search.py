@@ -85,11 +85,10 @@ def search(
     if index is None or index.size() == 0:
         return {"definite": [], "possible": []}
 
-    # Vectorized matrix-vector multiplication via BLAS/SIMD — O(N)
     similarities = index.matrix @ query_embedding  # (N,)
 
-    definite_ids: List[str] = []
-    possible_ids: List[str] = []
+    definite: List[dict] = []
+    possible: List[dict] = []
     seen = set()
 
     # Sort by similarity descending so best match per photo wins dedup
@@ -99,16 +98,17 @@ def search(
         sim = float(similarities[i])
         pid = index.photo_ids[i]
 
+        item = {"photo_id": pid, "score": round(sim, 4)}
         if sim >= high_threshold:
             if pid not in seen:
-                definite_ids.append(pid)
+                definite.append(item)
                 seen.add(pid)
         elif sim >= low_threshold:
             if pid not in seen:
-                possible_ids.append(pid)
+                possible.append(item)
                 seen.add(pid)
 
-    return {"definite": definite_ids, "possible": possible_ids}
+    return {"definite": definite, "possible": possible}
 
 
 def unload_event(event_id: str):
