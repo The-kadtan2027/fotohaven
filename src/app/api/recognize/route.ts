@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     const serviceUrl =
       FACE_CONFIG.remoteServiceUrl ||
       FACE_CONFIG.localNativeServiceUrl ||
-      "http://127.0.0.1:8000";
+      "http://127.0.0.1:5080";
 
     const response = await fetch(`${serviceUrl}/search`, {
       method: "POST",

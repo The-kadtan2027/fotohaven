@@ -2002,3 +2002,17 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `npx tsc --noEmit` passes with zero errors
 
 ---
+
+## Task: Update Native Python Face Service Port to 5080
+
+**Status:** Completed
+**Scope:** Update default `serviceUrl` in `/api/recognize` from port 8000 to port 5080 (`http://127.0.0.1:5080`) matching Uvicorn `native-face-service` binding.
+
+### Modified / New Files
+- `src/app/api/recognize/route.ts` -- Set default `serviceUrl` fallback to `http://127.0.0.1:5080`.
+
+### Acceptance criteria
+- [x] `/api/recognize` connects to `http://127.0.0.1:5080` (Uvicorn `native-face-service`)
+- [x] `npx tsc --noEmit` passes with zero errors
+
+---
