@@ -14,7 +14,15 @@ from config import (
     FACE_LOCAL_SERVICE_PORT,
     FACE_QUERY_FALLBACK_SIZE,
 )
-from db import get_all_event_embeddings, get_event_thresholds
+from db import (
+    delete_event_embeddings,
+    get_all_event_embeddings,
+    get_all_photo_paths,
+    get_event_thresholds,
+    get_photo_embeddings,
+    mark_photo_processed,
+    save_embedding,
+)
 from enrollment import enroll_event
 from opencv_backend import (
     cv2,
@@ -43,6 +51,13 @@ _enrollment_status: dict[str, dict] = {}
 class SearchRequest(BaseModel):
     event_id: str
     image_b64: str
+    high_threshold: Optional[float] = None
+    low_threshold: Optional[float] = None
+
+
+class SearchByPhotosRequest(BaseModel):
+    event_id: str
+    photo_ids: List[str]
     high_threshold: Optional[float] = None
     low_threshold: Optional[float] = None
 
@@ -107,6 +122,42 @@ async def search_faces(req: SearchRequest):
         "high_threshold": high_threshold,
         "low_threshold": low_threshold,
         "embedding_dim": int(embedding.shape[0]),
+    }
+
+
+@app.post("/search-by-photos")
+async def search_by_photos(req: SearchByPhotosRequest):
+    if not models_ready():
+        raise HTTPException(status_code=503, detail="Face models are not installed")
+
+    if not req.photo_ids:
+        return {"definite": [], "possible": []}
+
+    emb_bytes_list = get_photo_embeddings(req.photo_ids)
+    if not emb_bytes_list:
+        return {"definite": [], "possible": []}
+
+    embeddings = [np.frombuffer(b, dtype=np.float32) for b in emb_bytes_list]
+    avg_emb = np.mean(embeddings, axis=0)
+    norm = np.linalg.norm(avg_emb)
+    if norm > 0:
+        avg_emb = avg_emb / norm
+
+    if req.event_id not in index_stats():
+        rows = get_all_event_embeddings(req.event_id)
+        load_event(req.event_id, rows)
+
+    db_high, db_low = get_event_thresholds(req.event_id)
+    high_threshold = req.high_threshold if req.high_threshold is not None else max(db_high, 0.68)
+    low_threshold = req.low_threshold if req.low_threshold is not None else db_low
+
+    result = search(req.event_id, avg_emb, high_threshold, low_threshold)
+
+    return {
+        "definite": result["definite"],
+        "possible": result["possible"],
+        "high_threshold": high_threshold,
+        "low_threshold": low_threshold,
     }
 
 

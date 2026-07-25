@@ -20,6 +20,18 @@ def get_all_event_embeddings(event_id: str) -> List[Tuple[str, int, bytes]]:
         ).fetchall()
 
 
+def get_photo_embeddings(photo_ids: List[str]) -> List[bytes]:
+    if not photo_ids:
+        return []
+    placeholders = ",".join("?" for _ in photo_ids)
+    with _conn() as con:
+        rows = con.execute(
+            f"SELECT embedding FROM face_embeddings WHERE photo_id IN ({placeholders})",
+            photo_ids,
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
 def save_embedding(
     event_id: str,
     photo_id: str,

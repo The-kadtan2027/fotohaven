@@ -51,7 +51,7 @@ def load_event(event_id: str, rows: List[Tuple[str, int, bytes]]) -> int:
 def search(
     event_id: str,
     query_embedding: np.ndarray,
-    high_threshold: float = 0.65,
+    high_threshold: float = 0.68,
     low_threshold: float = 0.55,
 ) -> Dict[str, List[dict]]:
     with _lock:

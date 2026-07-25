@@ -200,6 +200,104 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
   }
 
+  // Handle native Python face recognition refinement via confirmed photos
+  if (Array.isArray(confirmedPhotoIds) && confirmedPhotoIds.length > 0) {
+    try {
+      const album = db
+        .select({ id: albums.id })
+        .from(albums)
+        .where(eq(albums.id, guest.albumId))
+        .get();
+
+      if (album) {
+        const serviceUrl =
+          FACE_CONFIG.remoteServiceUrl ||
+          FACE_CONFIG.localNativeServiceUrl ||
+          "http://127.0.0.1:5080";
+
+        const recogRes = await fetch(`${serviceUrl}/search-by-photos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_id: album.id,
+            photo_ids: confirmedPhotoIds,
+            high_threshold: 0.68,
+          }),
+          signal: AbortSignal.timeout(10_000),
+          cache: "no-store",
+        });
+
+        if (recogRes.ok) {
+          const recogData = await recogRes.json();
+          const parseList = (list: any[], fallbackScore: number) => {
+            if (!Array.isArray(list)) return [];
+            return list
+              .map((item) => {
+                if (typeof item === "string") return { photoId: item, score: fallbackScore };
+                if (typeof item === "object" && item !== null) {
+                  const photoId = item.photo_id || item.photoId || item.id;
+                  const score = typeof item.score === "number" ? item.score : fallbackScore;
+                  return { photoId, score };
+                }
+                return null;
+              })
+              .filter((m): m is { photoId: string; score: number } => Boolean(m && m.photoId));
+          };
+
+          const definite = parseList(recogData.definite, 0.85);
+          const possible = parseList(recogData.possible, 0.60);
+          const selected = definite.length > 0 ? definite : possible;
+
+          const matchMap = new Map(selected.map((m) => [m.photoId, m.score]));
+          const photoIds = Array.from(matchMap.keys());
+
+          db.update(guests)
+            .set({
+              faceDescriptor: JSON.stringify({ nativeMatches: selected }),
+            })
+            .where(eq(guests.id, guest.id))
+            .run();
+
+          const nativeMatchedPhotos = photoIds.length > 0
+            ? db
+                .select({
+                  id: photos.id,
+                  storageKey: photos.storageKey,
+                  thumbnailKey: photos.thumbnailKey,
+                  originalName: photos.originalName,
+                })
+                .from(photos)
+                .where(inArray(photos.id, photoIds))
+                .all()
+            : [];
+
+          const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+            photoId: p.id,
+            score: Math.round((matchMap.get(p.id) ?? 0.85) * 1000) / 1000,
+            faceCount: 1,
+            id: p.id,
+            originalName: p.originalName,
+            url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+            originalUrl: await getPresignedUrl(p.storageKey),
+          }));
+
+          const matched = await Promise.all(mappedPromises);
+          matched.sort((a, b) => b.score - a.score);
+
+          return noStoreJson({
+            photos: matched,
+            guest: { name: guest.name },
+            source: "refined",
+            thresholds: getAlbumThresholds(guest.albumId),
+            metric: "native_python_insightface",
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[runDiscovery Refined Native]", err);
+    }
+  }
+
   // Handle native Python face recognition matches
   try {
     const parsed = JSON.parse(guest.faceDescriptor);
