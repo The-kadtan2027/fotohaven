@@ -2032,3 +2032,24 @@ Guarded by session cookie via existing middleware (add /api/admin/* to protected
 - [x] `GET /api/guest/my-photos` safely handles empty `nativePhotoIds: []` responses without throwing exceptions
 - [x] `npx tsc --noEmit` passes with zero errors
 
+---
+
+## Task: Native Python Face Recognition Precision & Score Preservation
+
+**Status:** Completed  
+**Scope:** Preserve exact cosine similarity scores from `native-face-service`, prioritize high-confidence `definite` matches ($\ge 0.65$) to eliminate false positives in large albums, and return scored match arrays sorted by confidence descending.
+
+### Modified Files
+- `native-face-service/search.py` — Return match objects containing `photo_id` and `score` for `definite` and `possible` tiers.
+- `face-service/search.py` — Update secondary Python face service to return match objects with `photo_id` and `score`.
+- `src/app/api/guest/enroll-face/route.ts` — Support `nativeMatches` array with scores in request body and store in `guest.faceDescriptor`.
+- `src/app/api/guest/my-photos/route.ts` — Map `nativeMatches` with real similarity scores (`score`) and sort matches descending.
+- `src/app/share/[token]/guest/page.tsx` — Add `parseNativeMatches()` helper to extract score objects and prioritize `definite` matches over loose `possible` candidates.
+
+### Acceptance Criteria
+- [x] `native-face-service` returns exact cosine similarity scores for every matched photo
+- [x] Client face discovery prioritizes `definite` ($\ge 0.65$) matches, excluding loose $0.50 - 0.58$ false positives
+- [x] `GET /api/guest/my-photos` exposes real `score` values and sorts results by confidence descending
+- [x] `npx tsc --noEmit` passes with zero errors
+
+
