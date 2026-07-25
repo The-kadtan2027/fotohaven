@@ -4,6 +4,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+import numpy as np
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -57,7 +59,7 @@ class SearchRequest(BaseModel):
 
 class SearchByPhotosRequest(BaseModel):
     event_id: str
-    photo_ids: List[str]
+    photo_ids: list[str]
     high_threshold: Optional[float] = None
     low_threshold: Optional[float] = None
 
