@@ -8,7 +8,7 @@ from typing import Callable, Optional
 import cv2
 
 from config import ENROLL_WORKERS, LOCAL_UPLOAD_PATH
-from db import delete_event_embeddings, get_all_photo_paths, save_embedding, mark_photo_processed
+from db import get_all_photo_paths, save_photo_faces
 from opencv_backend import extract_photo_embeddings
 
 
@@ -31,22 +31,7 @@ def _process_single_photo(
         raise ValueError(f"Could not load image: {photo_path}")
 
     embeddings = extract_photo_embeddings(image)
-    for item in embeddings:
-        bbox = item["bounding_box"]
-        save_embedding(
-            event_id,
-            photo_id,
-            int(item["face_index"]),
-            item["embedding"],
-            (
-                float(bbox["x"]),
-                float(bbox["y"]),
-                float(bbox["width"]),
-                float(bbox["height"]),
-            ),
-        )
-
-    mark_photo_processed(photo_id)
+    save_photo_faces(event_id, photo_id, embeddings)
     return len(embeddings)
 
 

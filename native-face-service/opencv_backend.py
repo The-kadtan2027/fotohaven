@@ -9,13 +9,18 @@ import cv2
 import numpy as np
 
 from config import (
+    FACE_DETECTION_MAX_SIDE,
     FACE_DETECTION_NMS_THRESHOLD,
     FACE_DETECTION_SCORE_THRESHOLD,
     FACE_DETECTION_TOP_K,
     FACE_DETECTOR_MODEL,
     FACE_QUERY_FALLBACK_SIZE,
     FACE_RECOGNIZER_MODEL,
+    OPENCV_NUM_THREADS,
 )
+
+# Avoid each enrollment worker spawning a full set of OpenCV threads.
+cv2.setNumThreads(OPENCV_NUM_THREADS)
 
 
 _tls = threading.local()  # per-thread model instances
@@ -80,13 +85,31 @@ def _normalize_feature(feature: np.ndarray) -> np.ndarray:
 
 
 def detect_faces(image: np.ndarray) -> np.ndarray:
+    """Detect faces on a bounded-size copy, returning original-image coordinates."""
     detector, _ = get_models()
     height, width = image.shape[:2]
-    detector.setInputSize((width, height))
-    _, faces = detector.detect(image)
+    scale = min(1.0, FACE_DETECTION_MAX_SIDE / max(height, width))
+
+    if scale < 1.0:
+        detect_image = cv2.resize(
+            image,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        detect_image = image
+
+    detect_h, detect_w = detect_image.shape[:2]
+    detector.setInputSize((detect_w, detect_h))
+    _, faces = detector.detect(detect_image)
     if faces is None:
         return np.zeros((0, 15), dtype=np.float32)
-    return np.asarray(faces, dtype=np.float32)
+
+    faces = np.asarray(faces, dtype=np.float32)
+    if scale < 1.0:
+        # Columns 0..13 are bbox x/y/w/h plus 5 landmark points; column 14 is score.
+        faces[:, 0:14] /= scale
+    return faces
 
 
 def extract_query_embedding(image: np.ndarray) -> np.ndarray:
