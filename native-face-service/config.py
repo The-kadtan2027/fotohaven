@@ -66,10 +66,11 @@ FACE_DETECTION_NMS_THRESHOLD = _read_float("FACE_DETECTION_NMS_THRESHOLD", 0.3)
 FACE_DETECTION_TOP_K = _read_int("FACE_DETECTION_TOP_K", 5000)
 FACE_QUERY_FALLBACK_SIZE = _read_int("FACE_QUERY_FALLBACK_SIZE", 112)
 
-# Detection runs on a downscaled copy; face boxes and landmarks are scaled back
-# before alignment. 1600 px keeps small group faces while cutting inference time.
+# Detection runs on a downscaled copy only when the source is larger than this.
+# 2048 preserves existing 2048px thumbnails/embeddings exactly; lowering to
+# 1600 is ~30% faster but drifts old-vs-new embeddings (avg cosine 0.92).
 FACE_DETECTION_MAX_SIDE = max(
-    640, min(4096, _read_int("FACE_DETECTION_MAX_SIDE", 1600))
+    640, min(4096, _read_int("FACE_DETECTION_MAX_SIDE", 2048))
 )
 
 # Benchmarked on the 8-core phone: one worker with 8 OpenCV threads is faster

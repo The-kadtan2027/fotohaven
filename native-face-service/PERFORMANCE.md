@@ -18,10 +18,11 @@ expensive part was image decode + YuNet detection at full resolution.
 
 ## Changes
 
-- Detection/alignment runs on a bounded copy (`FACE_DETECTION_MAX_SIDE=1600`);
-  bbox + landmark columns are scaled back before `alignCrop`. At 1600 px the
-  embedding cosine similarity versus 2048 px is **0.9968**; at 1280 it drops to
-  0.965, so 1600 is the safer default.
+- Detection/alignment runs on a bounded copy only when the source is larger than
+  `FACE_DETECTION_MAX_SIDE=2048`; bbox + landmark columns are scaled back before
+  `alignCrop`. 2048 reproduces the existing 2048px embeddings exactly. Lowering
+  to 1600 is ~30% faster but drifts old-vs-new embeddings (10 single-face
+  samples: avg cosine 0.92, min 0.74), so 1600 is opt-in for speed.
 - One enrollment worker with `OPENCV_NUM_THREADS=8`. Two competing workers were
   slower on this device (two photos in ~1.0 s vs 2 × 335 ms), and each worker
   loads another ~50 MB of models.
@@ -40,7 +41,7 @@ expensive part was image decode + YuNet detection at full resolution.
 
 | Operation | Time |
 |---|---|
-| One-photo detection + embedding | **335–410 ms** warm (≈2.5× faster) |
+| One-photo detection + embedding | **480 ms** warm at 2048; **335–410 ms** at 1600 (opt-in) |
 | `/search-by-photos`, cold | **166 ms** |
 | `/search-by-photos`, warm | **51 ms** |
 | Enrollment DB writes | one transaction per photo |
@@ -51,7 +52,7 @@ worst case), versus multiple per-thread model copies previously.
 
 ## Why not Rust (yet)
 
-- 17,886 × 512 dot products already take ~51 ms including JSON/SQLite overhead.
+- 17,886 × 128 dot products already take ~51 ms including JSON/SQLite overhead.
   A Rust rewrite of the search loop would save single-digit milliseconds.
 - The measured bottleneck is OpenCV image decode/detection, which is already C++
   running under Python. A Rust service would need ONNX Runtime, model asset
