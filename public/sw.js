@@ -1,21 +1,28 @@
-const CACHE_NAME = "fotohaven-v2";
-const FILE_CACHE = "fotohaven-photos-v2";
+const CACHE_NAME = "fotohaven-v3";
+const FILE_CACHE = "fotohaven-photos-v3";
 
 const STATIC_ASSETS = [
   "/",
   "/login",
-  "/globals.css",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
 ];
 
-// Install Event — Pre-cache core shell
+// API responses safe to persist on the device. Never cache auth/admin/guest.
+const CACHEABLE_API_PREFIXES = ["/api/share/", "/api/comments/"];
+
+function isCacheableApi(pathname) {
+  return CACHEABLE_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+// Install Event — Pre-cache core shell.
+// Each URL is added independently: one 404 must not empty the whole cache.
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch(() => {
-        // Ignore single pre-cache failures
-      });
+      return Promise.all(
+        STATIC_ASSETS.map((url) => cache.add(url).catch(() => undefined))
+      );
     })
   );
   self.skipWaiting();
@@ -68,12 +75,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Strategy 2: Network-First for API routes (/api/*)
-  if (url.pathname.startsWith("/api/")) {
+  // Strategy 2: Network-First for the small set of public API reads.
+  // Guest/auth/admin responses are never written to Cache Storage.
+  if (url.pathname.startsWith("/api/") && isCacheableApi(url.pathname)) {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse.ok && networkResponse.status === 200) {
+          const cacheControl = networkResponse.headers.get("Cache-Control") || "";
+          const cacheableRequest = !event.request.headers.has("Authorization");
+          if (
+            cacheableRequest &&
+            networkResponse.ok &&
+            networkResponse.status === 200 &&
+            !cacheControl.includes("no-store")
+          ) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, responseToCache).catch(() => {});
@@ -90,6 +105,11 @@ self.addEventListener("fetch", (event) => {
           });
         })
     );
+    return;
+  }
+
+  // Other API requests go straight to the network (no caching).
+  if (url.pathname.startsWith("/api/")) {
     return;
   }
 

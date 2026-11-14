@@ -4,7 +4,7 @@ import { albums } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import archiver from "archiver";
 import { Readable } from "stream";
-import { getFileStream } from "@/lib/storage";
+import { getFileStream, fileExists } from "@/lib/storage";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ albumId: string }> }) {
   const albumId = (await params).albumId;
@@ -43,20 +43,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ alb
   const archive = archiver("zip", {
     zlib: { level: 0 }, 
   });
+  archive.on("error", (err) => {
+    console.error("[ZIP Stream] archive error:", err);
+  });
 
   const readableStream = Readable.toWeb(archive) as ReadableStream<Uint8Array>;
 
   // Background appending
-  (async () => {
+  void (async () => {
     for (const photo of requestedPhotos) {
       try {
+        if (!(await fileExists(photo.storageKey))) {
+          console.warn(`[ZIP Stream] Missing file for ${photo.id}; skipping`);
+          continue;
+        }
         const stream = await getFileStream(photo.storageKey);
-        archive.append(stream as any, { name: photo.originalName });
+        stream.on("error", (err) => {
+          console.error(`[ZIP Stream] Read error for ${photo.id}:`, err);
+        });
+        archive.append(stream, { name: photo.originalName });
       } catch (err) {
         console.error(`[ZIP Stream] Failed to append ${photo.id}:`, err);
       }
     }
-    archive.finalize();
+    await archive.finalize().catch((err) => {
+      console.error("[ZIP Stream] finalize failed:", err);
+    });
   })();
 
   const formattedName = encodeURIComponent((bundleName as string).replace(/[^a-zA-Z0-9.\-_\s]/g, "").trim());

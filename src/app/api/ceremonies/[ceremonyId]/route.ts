@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ceremonies } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
 
 // DELETE /api/ceremonies/[ceremonyId]
 // Deletes a ceremony, purges its files from storage, and cascades deletion in the DB
@@ -33,6 +34,7 @@ export async function DELETE(
 
     // Delete the ceremony row. Drizzle Cascade explicitly deletes the photos and comments.
     await db.delete(ceremonies).where(eq(ceremonies.id, ceremonyId)).run();
+    invalidateAlbumVectorCache(ceremony.albumId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

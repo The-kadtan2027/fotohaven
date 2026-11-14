@@ -20,13 +20,18 @@ const MAX_DETECTION_SIDE = 2048;
 
 async function ensureModelsLoaded() {
   if (!modelLoadPromise) {
-    modelLoadPromise = (async () => {
+    const attempt = (async () => {
       console.log("[FaceProcessor] Loading models from /models...");
       await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
       await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
       await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
       console.log("[FaceProcessor] Models loaded.");
     })();
+    modelLoadPromise = attempt.catch((error) => {
+      // Do not poison the session: a transient failure must be retryable.
+      modelLoadPromise = null;
+      throw error;
+    });
   }
   await modelLoadPromise;
 }
@@ -61,6 +66,9 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
   const [running, setRunning] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [completeCount, setCompleteCount] = useState<number | null>(null);
+  const [failedCount, setFailedCount] = useState(0);
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   const shouldStopRef = useRef(false);
 
@@ -69,6 +77,8 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
     setDismissed(false);
     setProcessed(0);
     setCompleteCount(null);
+    setFailedCount(0);
+    setLoadError("");
 
     if (queue.length === 0) {
       setRunning(false);
@@ -82,6 +92,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
       await ensureModelsLoaded();
 
       let successCount = 0;
+      let failureCount = 0;
       for (const photo of queue) {
         if (cancelled || shouldStopRef.current) break;
 
@@ -127,11 +138,10 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
           ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
           const detections = await faceapi.detectAllFaces(
-            img as any,
+            img,
             new faceapi.SsdMobilenetv1Options({
               minConfidence: FACE_CONFIG.detectionMinConfidence,
-              inputSize: 416,
-            } as any)
+            })
           )
             .withFaceLandmarks()
             .withFaceDescriptors();
@@ -183,6 +193,7 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
             `[FaceProcessor] Processed ${photo.id} (source: ${photo.scanSource || "unknown"}): ${faces.length} face(s)`
           );
         } catch (error) {
+          failureCount += 1;
           console.error(`[FaceProcessor] Failed photo ${photo.id}`, error);
         } finally {
           if (currentObjectUrl) {
@@ -197,12 +208,20 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
 
       if (!cancelled && !shouldStopRef.current) {
         setCompleteCount(successCount);
+        setFailedCount(failureCount);
       }
       setRunning(false);
     }
 
     run().catch((error) => {
       console.error("[FaceProcessor] Fatal processing error", error);
+      if (!cancelled) {
+        setLoadError(
+          error instanceof Error
+            ? `Face processing stopped: ${error.message}`
+            : "Face processing stopped. Retry."
+        );
+      }
       setRunning(false);
     });
 
@@ -210,9 +229,15 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
       cancelled = true;
       shouldStopRef.current = true;
     };
-  }, [queue]);
+  }, [queue, attempt]);
 
   if (queue.length === 0 || dismissed) return null;
+
+  const dismiss = () => {
+    shouldStopRef.current = true;
+    setRunning(false);
+    setDismissed(true);
+  };
 
   return (
     <div
@@ -231,22 +256,53 @@ export default function FaceProcessor({ photos }: FaceProcessorProps) {
         alignItems: "center",
         justifyContent: "space-between",
         gap: 12,
+        maxWidth: 420,
       }}
     >
-      <span style={{ fontSize: 12 }}>
-        {running
-          ? `Processing faces (${processed}/${queue.length})`
-          : completeCount !== null
-            ? `Face processing complete (${completeCount} photos)`
-            : `Processing faces (${processed}/${queue.length})`}
+      <span role="status" aria-live="polite" style={{ fontSize: 12 }}>
+        {loadError
+          ? loadError
+          : running
+            ? `Processing faces (${processed}/${queue.length})`
+            : completeCount !== null
+              ? `Face processing complete (${completeCount} photos${failedCount ? `, ${failedCount} failed` : ""})`
+              : `Processing faces (${processed}/${queue.length})`}
       </span>
-      {running && (
+      {loadError ? (
         <button
-          onClick={() => {
-            shouldStopRef.current = true;
-            setRunning(false);
-            setDismissed(true);
+          onClick={() => setAttempt((value) => value + 1)}
+          style={{
+            border: "1px solid rgba(255,255,255,0.3)",
+            background: "transparent",
+            color: "#fff",
+            borderRadius: 6,
+            padding: "4px 8px",
+            fontSize: 11,
+            cursor: "pointer",
+            flexShrink: 0,
           }}
+        >
+          Retry
+        </button>
+      ) : null}
+      {!running ? (
+        <button
+          onClick={dismiss}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "rgba(255,255,255,0.6)",
+            fontSize: 11,
+            cursor: "pointer",
+            flexShrink: 0,
+            padding: 0,
+          }}
+        >
+          Dismiss
+        </button>
+      ) : (
+        <button
+          onClick={dismiss}
           style={{
             border: "1px solid rgba(255,255,255,0.3)",
             background: "transparent",

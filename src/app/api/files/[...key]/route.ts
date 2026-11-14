@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { createReadStream, statSync } from "fs";
 import { Readable } from "stream";
+import { resolveWithinRoot } from "@/lib/storage-path";
 
 // GET /api/files/[...key]
 // Serves locally-stored photos from UPLOAD_BASE.
@@ -43,17 +44,16 @@ export async function GET(
       decodedKey = key.map(decodeURIComponent).join("/");
     }
 
-    const filePath = path.join(UPLOAD_BASE, decodedKey);
+    const filePath = resolveWithinRoot(UPLOAD_BASE, decodedKey);
 
-    // Security: prevent path traversal
-    const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(UPLOAD_BASE))) {
+    // Security: prevent path traversal (including sibling roots with a shared prefix)
+    if (!filePath) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Check file exists + get stats (with extension fallback)
     let stat;
-    let finalPath = resolved;
+    let finalPath = filePath;
     try {
       stat = statSync(finalPath);
     } catch {
@@ -114,7 +114,7 @@ export async function GET(
         }
 
         const chunkSize = end - start + 1;
-        const stream = createReadStream(resolved, { start, end });
+        const stream = createReadStream(finalPath, { start, end });
         const readableStream = Readable.toWeb(stream) as ReadableStream;
 
         return new NextResponse(readableStream, {
@@ -129,7 +129,7 @@ export async function GET(
     }
 
     // ── Full file response ──
-    const stream = createReadStream(resolved);
+    const stream = createReadStream(finalPath);
     const readableStream = Readable.toWeb(stream) as ReadableStream;
 
     return new NextResponse(readableStream, {

@@ -10,6 +10,17 @@ import {
 } from "@/lib/guest-auth";
 import { logger } from "@/lib/logger";
 import { withHandler, apiSuccess, apiBadRequest, apiUnauthorized, apiNotFound, apiError } from "@/lib/api-response";
+import { clearRateLimit } from "@/lib/rate-limit";
+import {
+  clientIp,
+  consumeRateLimit,
+  isRateLimited,
+  OTP_VERIFY_IDENTITY,
+  OTP_VERIFY_IP,
+  otpIdentityKey,
+  otpIpKey,
+  tooManyRequests,
+} from "@/lib/auth-limits";
 
 type VerifyOtpBody = {
   token?: string;
@@ -58,6 +69,25 @@ export const POST = withHandler("POST /api/guest/verify-otp", async (request: Re
     return apiError("This link has expired", { status: 410, code: "LINK_EXPIRED" });
   }
 
+  const ip = clientIp(request);
+  const identityKey = otpIdentityKey(email, album.id);
+  const ipKey = otpIpKey(ip);
+  const identityLimit = isRateLimited(identityKey, OTP_VERIFY_IDENTITY);
+  const ipLimit = isRateLimited(ipKey, OTP_VERIFY_IP);
+
+  if (!bypass && (!identityLimit.allowed || !ipLimit.allowed)) {
+    return tooManyRequests(
+      !identityLimit.allowed ? identityLimit : ipLimit,
+      "Too many incorrect passcodes. Please try again later."
+    );
+  }
+
+  const recordFailedAttempt = () => {
+    if (bypass) return;
+    consumeRateLimit(identityKey, OTP_VERIFY_IDENTITY);
+    consumeRateLimit(ipKey, OTP_VERIFY_IP);
+  };
+
   if (!bypass) {
     const otpRow = db
       .select()
@@ -74,22 +104,27 @@ export const POST = withHandler("POST /api/guest/verify-otp", async (request: Re
 
     if (!otpRow) {
       logger.warn("AUTH", `OTP verification failed (no active OTP) for ${email}`);
+      recordFailedAttempt();
       return apiUnauthorized("Invalid passcode");
     }
 
     const now = new Date();
     if (new Date(otpRow.expiresAt) < now) {
       logger.warn("AUTH", `OTP verification failed (expired) for ${email}`);
+      recordFailedAttempt();
       return apiUnauthorized("Passcode expired");
     }
 
     const expected = buildOtpHash(otp!, album.id, email);
     if (expected !== otpRow.codeHash) {
       logger.warn("AUTH", `OTP verification failed (code mismatch) for ${email}`);
+      recordFailedAttempt();
       return apiUnauthorized("Invalid passcode");
     }
 
     db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
+    // A verified identity starts with a clean failure window.
+    clearRateLimit(identityKey);
   } else {
     logger.warn("AUTH", `Bypass enabled. OTP validation skipped for ${email} (album=${album.id})`);
   }

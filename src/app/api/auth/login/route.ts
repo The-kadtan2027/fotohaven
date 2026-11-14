@@ -5,6 +5,15 @@ import { db } from '@/lib/db';
 import { photographers } from '@/lib/schema';
 import { logger } from '@/lib/logger';
 import { withHandler, apiSuccess, apiBadRequest, apiUnauthorized, apiError } from '@/lib/api-response';
+import {
+  clientIp,
+  consumeRateLimit,
+  isRateLimited,
+  LOGIN_IDENTITY,
+  loginIdentityKey,
+  tooManyRequests,
+} from '@/lib/auth-limits';
+import { clearRateLimit } from '@/lib/rate-limit';
 
 export const POST = withHandler('POST /api/auth/login', async (request: Request) => {
   const body = await request.json();
@@ -13,6 +22,12 @@ export const POST = withHandler('POST /api/auth/login', async (request: Request)
 
   if (!username || !password) {
     return apiBadRequest('Username and password are required');
+  }
+
+  const limitKey = loginIdentityKey(clientIp(request), username);
+  const blocked = isRateLimited(limitKey, LOGIN_IDENTITY);
+  if (!blocked.allowed) {
+    return tooManyRequests(blocked, 'Too many sign-in attempts. Please try again later.');
   }
 
   // Look up photographer by username
@@ -24,6 +39,7 @@ export const POST = withHandler('POST /api/auth/login', async (request: Request)
 
   if (!photographer) {
     logger.warn('AUTH', `Failed login attempt for unknown user: ${username}`);
+    consumeRateLimit(limitKey, LOGIN_IDENTITY);
     return apiUnauthorized('Invalid credentials');
   }
 
@@ -31,8 +47,11 @@ export const POST = withHandler('POST /api/auth/login', async (request: Request)
   const valid = await bcrypt.compare(password, photographer.passwordHash);
   if (!valid) {
     logger.warn('AUTH', `Failed login attempt (invalid password) for user: ${username}`);
+    consumeRateLimit(limitKey, LOGIN_IDENTITY);
     return apiUnauthorized('Invalid credentials');
   }
+
+  clearRateLimit(limitKey);
 
   // Create JWT
   const secret = process.env.JWT_SECRET;

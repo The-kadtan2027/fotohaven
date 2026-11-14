@@ -1,6 +1,6 @@
 "use client";
 // src/app/share/[token]/page.tsx
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useDropzone } from "react-dropzone";
@@ -11,6 +11,12 @@ import {
   LayoutGrid, Columns, Square, Search, Filter, CheckCircle2,
 } from "lucide-react";
 import { Comment } from "@/types";
+import { useToast } from "@/components/ToastProvider";
+import {
+  initialSelection,
+  selectionReducer,
+  selectionVersion,
+} from "@/lib/selection-machine";
 
 interface Photo {
   id: string;
@@ -20,7 +26,7 @@ interface Photo {
   originalUrl?: string;
   storageKey: string;
   mimeType: string;
-  comments?: any[];
+  comments?: Comment[];
   isReturn?: boolean;
   returnOf?: string | null;
   isSelected?: boolean;
@@ -28,11 +34,14 @@ interface Photo {
 
 type ReturnUploadStatus = "pending" | "uploading" | "done" | "error";
 interface ReturnUploadItem {
+  id: string;
   file: File;
   ceremonyId: string;
   status: ReturnUploadStatus;
   progress: number;
   error?: string;
+  uploadUrl?: string;
+  remotePhotoId?: string;
 }
 
 interface Ceremony {
@@ -57,23 +66,30 @@ interface Album {
 
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
+  const { toast } = useToast();
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
   const [galleryTab, setGalleryTab] = useState<"originals" | "finals">("originals");
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null);
-  const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [selection, dispatchSelection] = useReducer(selectionReducer, undefined, () =>
+    initialSelection()
+  );
+  const selectedPhotos = selection.selected;
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [returnUploads, setReturnUploads] = useState<ReturnUploadItem[]>([]);
   const [isReturning, setIsReturning] = useState(false);
   const [ceremonyPhotos, setCeremonyPhotos] = useState<Record<string, Photo[]>>({});
+  const [ceremonyErrors, setCeremonyErrors] = useState<Record<string, string>>({});
   const [loadingPhotos, setLoadingPhotos] = useState<Record<string, boolean>>({});
+  const [photosEpoch, setPhotosEpoch] = useState(0);
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
 
@@ -81,22 +97,75 @@ export default function SharePage() {
   const [viewMode, setViewMode] = useState<"grid" | "masonry" | "single">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMode, setFilterMode] = useState<"all" | "selected" | "comments">("all");
-
   // Touch gesture refs for Lightbox swipe
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchDeltaRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [dragY, setDragY] = useState(0);
 
-  const persistSelection = useCallback((photoId: string, isSelected: boolean) => {
-    fetch(`/api/photos/${photoId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isSelected }),
-    }).catch((err) => console.error("[selection] PATCH failed:", err));
-  }, []);
+  const persistSelection = useCallback(
+    async (
+      photoId: string,
+      isSelected: boolean,
+      version: number,
+      previous: boolean
+    ) => {
+      try {
+        const res = await fetch(`/api/photos/${photoId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isSelected }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        dispatchSelection({ type: "patch_ok", id: photoId, version });
+      } catch (err) {
+        console.error("[selection] PATCH failed:", err);
+        dispatchSelection({ type: "patch_fail", id: photoId, version, previous });
+        toast("Couldn’t save your selection. Please try again.", "error");
+      }
+    },
+    [toast]
+  );
+
+  const persistSelectionBatch = useCallback(
+    async (
+      photoIds: string[],
+      isSelected: boolean,
+      versions: Map<string, number>,
+      previous: Map<string, boolean>
+    ) => {
+      try {
+        const res = await fetch(`/api/share/${token}/select`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            photoIds,
+            isSelected,
+            password: password || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        for (const id of photoIds) {
+          dispatchSelection({ type: "patch_ok", id, version: versions.get(id) ?? 0 });
+        }
+      } catch (err) {
+        console.error("[selection] batch PATCH failed:", err);
+        for (const id of photoIds) {
+          dispatchSelection({
+            type: "patch_fail",
+            id,
+            version: versions.get(id) ?? 0,
+            previous: previous.get(id) ?? false,
+          });
+        }
+        toast("Couldn’t save your selection. Please try again.", "error");
+      }
+    },
+    [toast, token, password]
+  );
 
   const fetchAlbum = async (providedPassword?: string) => {
     setLoading(true);
+    setError("");
     setAuthError("");
     const headers: Record<string, string> = {};
     if (providedPassword) {
@@ -118,28 +187,36 @@ export default function SharePage() {
       }
 
       setAlbum(data);
-      setActiveCeremony(data.ceremonies[0]?.id ?? null);
-      setPasswordRequired(false);
-      // Pre-populate from persisted DB selections
-      const preSelected = new Set<string>();
-      for (const ceremony of data.ceremonies ?? []) {
-        for (const photo of ceremony.photos ?? []) {
-          if (photo.isSelected) preSelected.add(photo.id);
+      setActiveCeremony((current) => {
+        if (current && data.ceremonies?.some((c: Ceremony) => c.id === current)) {
+          return current;
         }
-      }
-      setSelectedPhotos(preSelected);
-    } catch (err: any) {
-      setError(err.message || "This link is invalid or has expired.");
+        return data.ceremonies?.[0]?.id ?? null;
+      });
+      setPasswordRequired(false);
+      // The share payload strips photo rows; selections are merged when each
+      // ceremony's photos are fetched. Keep any in-flight local intent.
+      setCeremonyPhotos({});
+      setCeremonyErrors({});
+      setPhotosEpoch((epoch) => epoch + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "This link is invalid or has expired.");
       if (providedPassword) setAuthError("Incorrect password. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchCeremonyPhotos = async (ceremonyId: string) => {
-    if (ceremonyPhotos[ceremonyId] || loadingPhotos[ceremonyId]) return;
+  const fetchCeremonyPhotos = async (ceremonyId: string, force = false) => {
+    if (!force && (ceremonyPhotos[ceremonyId] || loadingPhotos[ceremonyId])) return;
 
     setLoadingPhotos((prev) => ({ ...prev, [ceremonyId]: true }));
+    setCeremonyErrors((prev) => {
+      if (!prev[ceremonyId]) return prev;
+      const next = { ...prev };
+      delete next[ceremonyId];
+      return next;
+    });
     const headers: Record<string, string> = {};
     if (password) {
       headers["Authorization"] = `Bearer ${password}`;
@@ -148,10 +225,22 @@ export default function SharePage() {
     try {
       const resp = await fetch(`/api/share/${token}/ceremonies/${ceremonyId}/photos`, { headers });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error);
+      if (!resp.ok) throw new Error(data.error || "Couldn’t load this ceremony.");
       setCeremonyPhotos((prev) => ({ ...prev, [ceremonyId]: data }));
+
+      // Merge server-persisted selections from this ceremony.
+      const persisted = (data as Photo[])
+        .filter((photo) => photo.isSelected)
+        .map((photo) => photo.id);
+      if (persisted.length > 0) {
+        dispatchSelection({ type: "merge", ids: persisted });
+      }
     } catch (err) {
       console.error("[FETCH_PHOTOS_ERROR]", err);
+      setCeremonyErrors((prev) => ({
+        ...prev,
+        [ceremonyId]: err instanceof Error ? err.message : "Couldn’t load this ceremony.",
+      }));
     } finally {
       setLoadingPhotos((prev) => ({ ...prev, [ceremonyId]: false }));
     }
@@ -165,39 +254,45 @@ export default function SharePage() {
     if (activeCeremony) {
       fetchCeremonyPhotos(activeCeremony);
     }
-  }, [activeCeremony, password]); // retry if password changes
+  }, [activeCeremony, password, photosEpoch]); // retry if password changes or the album was refreshed
 
   const toggleSelect = (photoId: string) => {
-    setSelectedPhotos((prev) => {
-      const next = new Set(prev);
-      const nowSelected = !next.has(photoId);
-      if (nowSelected) next.add(photoId);
-      else next.delete(photoId);
-      // Persist to DB (fire-and-forget, optimistic)
-      persistSelection(photoId, nowSelected);
-      return next;
-    });
+    const previous = selectedPhotos.has(photoId);
+    const version = selectionVersion(selection, photoId);
+    dispatchSelection({ type: "toggle", id: photoId });
+    void persistSelection(photoId, !previous, version, previous);
   };
 
   const selectAllInCeremony = (ceremony: Ceremony) => {
     const photos = ceremonyPhotos[ceremony.id] || [];
     const allIds = photos.map((p) => p.id);
-    const allSelected = allIds.length > 0 && allIds.every((id) => selectedPhotos.has(id));
-    setSelectedPhotos((prev) => {
-      const next = new Set(prev);
-      if (allSelected) {
-        allIds.forEach((id) => {
-          next.delete(id);
-          persistSelection(id, false);
-        });
-      } else {
-        allIds.forEach((id) => {
-          next.add(id);
-          persistSelection(id, true);
-        });
-      }
-      return next;
-    });
+    if (allIds.length === 0) return;
+    const allSelected = allIds.every((id) => selectedPhotos.has(id));
+    const versions = new Map<string, number>();
+    const previous = new Map<string, boolean>();
+
+    for (const id of allIds) {
+      versions.set(id, selectionVersion(selection, id));
+      previous.set(id, selectedPhotos.has(id));
+      dispatchSelection({ type: "set", id, selected: !allSelected, version: versions.get(id)! });
+    }
+
+    void persistSelectionBatch(allIds, !allSelected, versions, previous);
+  };
+
+  const clearSelection = () => {
+    const ids = Array.from(selectedPhotos);
+    if (ids.length === 0) return;
+    const versions = new Map<string, number>();
+    const previous = new Map<string, boolean>();
+
+    for (const id of ids) {
+      versions.set(id, selectionVersion(selection, id));
+      previous.set(id, true);
+      dispatchSelection({ type: "set", id, selected: false, version: versions.get(id)! });
+    }
+
+    void persistSelectionBatch(ids, false, versions, previous);
   };
 
   // Trigger download via native browser form submission (streaming)
@@ -236,6 +331,14 @@ export default function SharePage() {
     inputName.value = bundleName;
     form.appendChild(inputName);
 
+    if (password) {
+      const inputPassword = document.createElement("input");
+      inputPassword.type = "hidden";
+      inputPassword.name = "password";
+      inputPassword.value = password;
+      form.appendChild(inputPassword);
+    }
+
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
@@ -270,6 +373,7 @@ export default function SharePage() {
     (acceptedFiles: File[]) => {
       if (!activeCeremony) return;
       const items: ReturnUploadItem[] = acceptedFiles.map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
         file,
         ceremonyId: activeCeremony,
         status: "pending",
@@ -310,24 +414,28 @@ export default function SharePage() {
           }
         };
 
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            onProgress(100);
-            resolve();
-          } else {
-            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
-          }
-        };
-
-        xhr.onerror = () => {
+        const retryOrFail = (error: Error) => {
           if (attempt < retries) {
             const delay = Math.pow(2, attempt - 1) * 1000;
             console.warn(`[Upload] Retry ${attempt}/${retries} after ${delay}ms`);
             setTimeout(tryUpload, delay);
           } else {
-            reject(new Error(`Upload failed after ${retries} retries`));
+            reject(error);
           }
         };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            onProgress(100);
+            resolve();
+          } else if (xhr.status >= 500) {
+            retryOrFail(new Error(`Upload failed (HTTP ${xhr.status})`));
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => retryOrFail(new Error(`Upload failed after ${retries} retries`));
 
         xhr.send(file);
       };
@@ -336,22 +444,21 @@ export default function SharePage() {
     });
   };
 
-  const uploadReturns = async () => {
-    const pending = returnUploads.filter((u) => u.status === "pending");
-    if (!pending.length) return;
-    setIsReturning(true);
+  const returnUploadingRef = useRef(false);
 
-    // Strict sequential: one file at a time (concurrency = 1)
-    for (const item of pending) {
-      const idx = returnUploads.findIndex((u) => u.file === item.file && u.ceremonyId === item.ceremonyId);
+  const updateReturnItem = (id: string, patch: Partial<ReturnUploadItem>) => {
+    setReturnUploads((prev) =>
+      prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry))
+    );
+  };
 
-      setReturnUploads((prev) => {
-        const next = [...prev];
-        next[idx] = { ...next[idx], status: "uploading", progress: 0 };
-        return next;
-      });
+  const uploadOneReturn = async (item: ReturnUploadItem): Promise<boolean> => {
+    updateReturnItem(item.id, { status: "uploading", progress: 0, error: undefined });
 
-      try {
+    try {
+      let uploadUrl = item.uploadUrl;
+
+      if (!uploadUrl) {
         const metaRes = await fetch(`/api/share/${token}/upload`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -360,49 +467,84 @@ export default function SharePage() {
             filename: item.file.name,
             contentType: item.file.type,
             size: item.file.size,
+            password: password || undefined,
           }),
         });
-        if (!metaRes.ok) throw new Error("Failed to get upload URL");
-        const { uploadUrl } = await metaRes.json();
-
-        // Upload via XHR with real progress + retry
-        await xhrUploadWithProgress(
-          uploadUrl,
-          item.file,
-          (pct) => {
-            setReturnUploads((prev) => {
-              const next = [...prev];
-              next[idx] = { ...next[idx], progress: pct };
-              return next;
-            });
-          }
-        );
-
-        setReturnUploads((prev) => {
-          const next = [...prev];
-          next[idx] = { ...next[idx], status: "done", progress: 100 };
-          return next;
-        });
-      } catch (err) {
-        setReturnUploads((prev) => {
-          const next = [...prev];
-          next[idx] = { ...next[idx], status: "error", error: String(err) };
-          return next;
-        });
+        const metaData = (await metaRes.json().catch(() => ({}))) as {
+          uploadUrl?: string;
+          error?: string;
+          passwordRequired?: boolean;
+        };
+        if (!metaRes.ok || !metaData.uploadUrl) {
+          throw new Error(
+            metaData.passwordRequired
+              ? "This album needs its password before uploading."
+              : metaData.error || `Upload failed (HTTP ${metaRes.status})`
+          );
+        }
+        uploadUrl = metaData.uploadUrl;
+        updateReturnItem(item.id, { uploadUrl });
       }
-    }
 
-    setIsReturning(false);
+      await xhrUploadWithProgress(uploadUrl, item.file, (pct) => {
+        updateReturnItem(item.id, { progress: pct });
+      });
+
+      updateReturnItem(item.id, { status: "done", progress: 100, error: undefined });
+      return true;
+    } catch (err) {
+      updateReturnItem(item.id, {
+        status: "error",
+        error: err instanceof Error ? err.message : "Upload failed",
+      });
+      return false;
+    }
+  };
+
+  const refreshAfterReturns = async (hadSuccess: boolean) => {
     await fetchAlbum();
-    setGalleryTab("finals");
+    if (hadSuccess) setGalleryTab("finals");
     setTimeout(() => setReturnUploads((prev) => prev.filter((u) => u.status !== "done")), 2000);
   };
 
+  const uploadReturns = async () => {
+    if (returnUploadingRef.current) return;
+    const pending = returnUploads.filter((u) => u.status === "pending");
+    if (!pending.length) return;
+
+    returnUploadingRef.current = true;
+    setIsReturning(true);
+    let hadSuccess = false;
+
+    try {
+      // Strict sequential: one file at a time (concurrency = 1)
+      for (const item of pending) {
+        if (await uploadOneReturn(item)) hadSuccess = true;
+      }
+    } finally {
+      returnUploadingRef.current = false;
+      setIsReturning(false);
+    }
+
+    await refreshAfterReturns(hadSuccess);
+  };
+
+  const retryReturnUpload = async (item: ReturnUploadItem) => {
+    if (returnUploadingRef.current) return;
+    returnUploadingRef.current = true;
+    setIsReturning(true);
+    try {
+      const ok = await uploadOneReturn({ ...item, status: "pending", error: undefined });
+      await refreshAfterReturns(ok);
+    } finally {
+      returnUploadingRef.current = false;
+      setIsReturning(false);
+    }
+  };
+
   const downloadFinals = () => {
-    if (!album) return;
-    const photoIds = album.ceremonies.flatMap(c => (ceremonyPhotos[c.id] || []).filter(p => p.isReturn).map(p => p.id));
-    if (photoIds.length === 0) return;
-    requestDownload(photoIds, `${album.title} — Delivered Finals`);
+    if (!album || album.totalFinals === 0) return;
+    requestDownload([], `${album.title} — Delivered Finals`, "finals");
   };
 
   // Pre-fetch adjacent images in memory for 0ms Lightbox transitions
@@ -496,43 +638,78 @@ export default function SharePage() {
     setCommentsOpen(false);
   }, [lightbox?.index, lightbox?.photos]);
 
-  // Fetch comments when lightbox photo changes
+  // Fetch comments when the lightbox photo changes. Abort protects against
+  // out-of-order responses when the client navigates quickly.
   useEffect(() => {
     if (!lightbox) {
       setComments([]);
+      setCommentError("");
       return;
     }
+    const controller = new AbortController();
     const photoId = lightbox.photos[lightbox.index].id;
-    fetch(`/api/comments?photoId=${photoId}`)
-      .then(r => r.json())
-      .then(setComments)
-      .catch(console.error);
-  }, [lightbox?.index, !!lightbox]);
+    setCommentError("");
 
-  const submitComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newComment.trim() || !lightbox || isSubmitting) return;
+    fetch(`/api/comments?photoId=${photoId}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Couldn’t load notes.");
+        return response.json();
+      })
+      .then((data) => {
+        if (!controller.signal.aborted) setComments(data);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.error("[comments]", err);
+        setCommentError("Couldn’t load notes.");
+      });
+
+    return () => controller.abort();
+  }, [lightbox?.index, lightbox?.photos]);
+
+  const commentSubmittingRef = useRef(false);
+
+  const submitComment = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const draft = newComment.trim();
+    if (!draft || !lightbox || commentSubmittingRef.current) return;
 
     const photoId = lightbox.photos[lightbox.index].id;
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimistic: Comment = {
+      id: tempId,
+      body: draft,
+      author: "client",
+      photoId,
+      createdAt: new Date().toISOString(),
+    };
+
+    commentSubmittingRef.current = true;
     setIsSubmitting(true);
+    setNewComment("");
+    setCommentError("");
+    setComments((prev) => [optimistic, ...prev]);
 
     try {
       const res = await fetch("/api/comments", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           photoId,
-          body: newComment,
-          author: "client", // defaulting to client for share page
+          body: draft,
+          author: "client", // honour-system author for the public share page
         }),
       });
-      if (res.ok) {
-        const added = await res.json();
-        setComments(prev => [added, ...prev]);
-        setNewComment("");
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const added = (await res.json()) as Comment;
+      setComments((prev) => prev.map((comment) => (comment.id === tempId ? added : comment)));
     } catch (err) {
-      console.error(err);
+      console.error("[comments]", err);
+      setComments((prev) => prev.filter((comment) => comment.id !== tempId));
+      setNewComment(draft);
+      setCommentError("Your note wasn’t saved. Please try again.");
     } finally {
+      commentSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -606,6 +783,7 @@ export default function SharePage() {
   const activeTabPhotos = galleryTab === "originals" ? activeCeremonyOriginals : activeCeremonyFinals;
   
   const isPhotosLoading = activeCeremony ? loadingPhotos[activeCeremony] : false;
+  const activeCeremonyError = activeCeremony ? ceremonyErrors[activeCeremony] : undefined;
   
   const { totalPhotos, totalFinals } = album;
 
@@ -693,7 +871,7 @@ export default function SharePage() {
             )}
             {selectedPhotos.size > 0 && (
               <button
-                onClick={() => setSelectedPhotos(new Set())}
+                onClick={clearSelection}
                 style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 16px", background: "transparent", color: "rgba(250,247,242,0.5)", border: "1px solid rgba(250,247,242,0.15)", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "var(--font-body)" }}
               >
                 <X size={13} /> Clear selection
@@ -817,14 +995,14 @@ export default function SharePage() {
 
                 {/* Filter Pills */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {[
+                  {([
                     { id: "all", label: `All (${activeTabPhotos.length})` },
                     { id: "selected", label: `Selected (${selectedPhotos.size})` },
                     { id: "comments", label: "With Notes" },
-                  ].map((f) => (
+                  ] satisfies Array<{ id: "all" | "selected" | "comments"; label: string }>).map((f) => (
                     <button
                       key={f.id}
-                      onClick={() => setFilterMode(f.id as any)}
+                      onClick={() => setFilterMode(f.id)}
                       style={{
                         padding: "5px 12px", fontSize: 12, borderRadius: 20, border: "1px solid",
                         borderColor: filterMode === f.id ? "var(--gold)" : "var(--sand)",
@@ -865,7 +1043,23 @@ export default function SharePage() {
                 </div>
               </div>
 
-              {isPhotosLoading ? (
+              {activeCeremonyError ? (
+                <div
+                  role="alert"
+                  style={{ padding: "28px 20px", textAlign: "center", border: "1px solid var(--sand)", borderRadius: 12, background: "var(--warm-white)", marginBottom: 20 }}
+                >
+                  <p style={{ fontSize: 14, color: "var(--blush)", marginBottom: 12 }}>
+                    {activeCeremonyError}
+                  </p>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => { if (activeCeremony) void fetchCeremonyPhotos(activeCeremony, true); }}
+                    style={{ fontSize: 13 }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : isPhotosLoading ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px", gap: 12 }}>
                   <Loader2 size={24} color="var(--gold)" style={{ animation: "spin 1s linear infinite" }} />
                   <p style={{ fontSize: 13, color: "var(--taupe)" }}>Loading photos…</p>
@@ -998,8 +1192,8 @@ export default function SharePage() {
                       </button>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {returnUploads.map((u, i) => (
-                        <div key={i} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
+                      {returnUploads.map((u) => (
+                        <div key={u.id} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px" }}>
                             {u.status === "uploading" && <Loader2 size={13} color="var(--gold)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />}
                             {u.status === "done" && <Check size={13} color="var(--sage)" style={{ flexShrink: 0 }} />}
@@ -1012,15 +1206,31 @@ export default function SharePage() {
                               </span>
                             )}
                             <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(u.file.size / 1024 / 1024).toFixed(1)} MB</span>
+                            {u.status === "error" && (
+                              <button
+                                onClick={() => void retryReturnUpload(u)}
+                                disabled={isReturning}
+                                title="Retry upload"
+                                style={{ fontSize: 11, background: "rgba(201,150,58,0.15)", color: "var(--gold)", border: "1px solid var(--gold)", padding: "2px 8px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}
+                              >
+                                Retry
+                              </button>
+                            )}
                             {u.status !== "uploading" && (
                               <button
-                                onClick={() => setReturnUploads((prev) => prev.filter((_, j) => j !== i))}
+                                onClick={() => setReturnUploads((prev) => prev.filter((entry) => entry.id !== u.id))}
                                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}
+                                aria-label={`Remove ${u.file.name}`}
                               >
                                 <X size={11} />
                               </button>
                             )}
                           </div>
+                          {u.status === "error" && u.error ? (
+                            <p role="alert" style={{ padding: "0 10px 8px", fontSize: 11, color: "var(--blush)" }}>
+                              {u.error}
+                            </p>
+                          ) : null}
                           {u.status === "uploading" && (
                             <div style={{ height: 3, background: "var(--sand)", borderRadius: "0 0 8px 8px" }}>
                               <div style={{ height: "100%", width: `${u.progress}%`, background: "var(--gold)", borderRadius: "0 0 8px 8px", transition: "width 0.3s ease" }} />
@@ -1165,6 +1375,11 @@ export default function SharePage() {
 
             {/* Comments List */}
             <div style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {commentError ? (
+                <p role="alert" style={{ fontSize: 12, color: "#fca5a5", textAlign: "center" }}>
+                  {commentError}
+                </p>
+              ) : null}
               {comments.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "40px 0", color: "rgba(255,255,255,0.3)" }}>
                   <p style={{ fontSize: 13 }}>No notes yet.</p>
@@ -1206,7 +1421,7 @@ export default function SharePage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      submitComment(e as any);
+                      void submitComment();
                     }
                   }}
                 />

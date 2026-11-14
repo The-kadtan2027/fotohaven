@@ -34,7 +34,24 @@ export async function PATCH(
 
     const nextHigh = high;
     const nextLow = low;
-    if (nextHigh !== undefined && nextLow !== undefined && nextLow >= nextHigh) {
+
+    const current = db
+      .select({
+        highThreshold: albums.highThreshold,
+        lowThreshold: albums.lowThreshold,
+      })
+      .from(albums)
+      .where(eq(albums.id, id))
+      .get();
+
+    if (!current) {
+      return NextResponse.json({ error: "Album not found" }, { status: 404 });
+    }
+
+    // Validate the merged pair: a partial update must not invert the bands (F-28).
+    const mergedHigh = nextHigh ?? current.highThreshold ?? 0.7;
+    const mergedLow = nextLow ?? current.lowThreshold ?? 0.55;
+    if (mergedLow >= mergedHigh) {
       return NextResponse.json(
         { error: "low_threshold must be less than high_threshold" },
         { status: 400 }

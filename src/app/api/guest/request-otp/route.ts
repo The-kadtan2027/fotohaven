@@ -6,6 +6,15 @@ import { albums, guestOtps } from "@/lib/schema";
 import { sendGuestOtpEmail } from "@/lib/email";
 import { logger } from "@/lib/logger";
 import { withHandler, apiSuccess, apiBadRequest, apiNotFound, apiError } from "@/lib/api-response";
+import {
+  clientIp,
+  consumeRateLimit,
+  OTP_SEND_IDENTITY,
+  OTP_SEND_IP,
+  otpIdentityKey,
+  otpIpKey,
+  tooManyRequests,
+} from "@/lib/auth-limits";
 
 type RequestOtpBody = {
   token?: string;
@@ -50,6 +59,16 @@ export const POST = withHandler("POST /api/guest/request-otp", async (request: R
 
   if (album.expiresAt && new Date(album.expiresAt) < new Date()) {
     return apiError("This link has expired", { status: 410, code: "LINK_EXPIRED" });
+  }
+
+  // Bounded OTP issuance: prevents email-spam amplification (F-12).
+  const identity = consumeRateLimit(otpIdentityKey(email, album.id), OTP_SEND_IDENTITY);
+  const byIp = consumeRateLimit(otpIpKey(clientIp(request)), OTP_SEND_IP);
+  if (!identity.allowed || !byIp.allowed) {
+    return tooManyRequests(
+      !identity.allowed ? identity : byIp,
+      "Too many passcode requests. Please try again later."
+    );
   }
 
   const existingActive = db

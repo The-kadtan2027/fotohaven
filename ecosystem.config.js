@@ -45,9 +45,10 @@ module.exports = {
       // Restart policy
       autorestart: true,
       watch: false,           // don't watch files in production
-      max_memory_restart: "1024M",  // restart if it exceeds 300MB (safe for most phones)
-      node_args: '--max-old-space-size=768 --expose-gc --optimize-for-size',  // Set heap to 768MB (was default ~512MB)
+      max_memory_restart: "1280M",  // restart before Android's low-memory killer acts
+      node_args: '--max-old-space-size=1024 --expose-gc',  // 1 GB heap for large albums; no --optimize-for-size
       restart_delay: 5000,         // wait 5s before restarting on crash
+      kill_timeout: 10000,         // allow in-flight uploads/zip streams to close
 
       // Environment
       env: {
@@ -99,6 +100,7 @@ module.exports = {
         restart_delay: 3000,
         max_restarts: 10,
         min_uptime: "10s",
+        max_memory_restart: "768M",
         watch: false,
         env: {
           DB_PATH: "../local.db",

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPresignedUrl } from "@/lib/storage";
-import { albums, photos as photosSchema } from "@/lib/schema";
+import { albums, ceremonies as ceremoniesSchema, photos as photosSchema } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
@@ -37,6 +37,22 @@ export async function GET(
     // Check expiry
     if (album.expiresAt && new Date(album.expiresAt) < new Date()) {
       return NextResponse.json({ error: "This link has expired" }, { status: 410 });
+    }
+
+    // A token only grants access to its own album's ceremonies (F-08).
+    const ceremony = db
+      .select({ id: ceremoniesSchema.id })
+      .from(ceremoniesSchema)
+      .where(
+        and(
+          eq(ceremoniesSchema.id, ceremonyId),
+          eq(ceremoniesSchema.albumId, album.id)
+        )
+      )
+      .get();
+
+    if (!ceremony) {
+      return NextResponse.json({ error: "Ceremony not found" }, { status: 404 });
     }
 
     const photos = await db.query.photos.findMany({
