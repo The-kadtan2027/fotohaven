@@ -123,7 +123,8 @@ sv up server-guard
 
 Face-service performance is tracked in
 [`native-face-service/PERFORMANCE.md`](../../native-face-service/PERFORMANCE.md):
-one-photo extraction improved from ~723–1073 ms to ~323–410 ms, warm
+one-photo extraction improved from ~723–1073 ms to ~477 ms at the safe 2048
+default (~335–410 ms with opt-in `FACE_DETECTION_MAX_SIDE=1600`), warm
 `/search-by-photos` from ~65 ms to ~50 ms, with one enrollment worker and
 `OPENCV_NUM_THREADS=8`.
 
@@ -200,7 +201,7 @@ Not touched: `com.google.android.gms`, phone/SMS, Telegram, KernelSU, Termux, la
 | Password share | no/wrong/right = `401/401/200` |
 | Batch select | `POST /api/share/:token/select` → `200 {updated:1}`, DB `isSelected=1` |
 | ZIP download | valid photo → `200`, 81,522-byte zip in 0.29 s |
-| Face service | extraction **323–410 ms** (was 723–1073), search-by-photos **50 ms** warm, selfie `/search` ~422 ms |
+| Face service | extraction **477 ms** at 2048 (was 723–1073); **335–410 ms** at opt-in 1600; search-by-photos **50 ms** warm; selfie `/search` ~422 ms |
 | Missing-file audit | 2 of 4,816 originals missing (`BCV06827.jpg`, `BCV06967.jpg`), 0 missing thumbnails; pre-existing rows, not deleted |
 
 ## Restore
