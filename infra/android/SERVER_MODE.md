@@ -90,6 +90,42 @@ disk, and the last charge/guard log lines.
 
 
 
+### Deployment state (2026-11-14)
+- Server checkout: `~/fotohaven`, branch `android-server-mode`, HEAD **`b93d8e6`**
+- Remote: `origin/android-server-mode` at the same commit (`git rev-parse HEAD` == `git ls-remote`)
+- Built: `.next/BUILD_ID` generated `2026-11-14 23:12`, app restarted at 23:13
+- Previous build saved at `~/fotohaven/.next.backup-20261114-231104/`
+- Pre-deploy local modifications preserved in `git stash@{0}` (branch `feat/python-face-recognition`)
+- Application data (`local.db`, uploads) was not touched by checkout/build
+
+Safe update procedure:
+
+```sh
+cd ~/fotohaven
+git fetch origin
+git checkout android-server-mode
+git pull --ff-only
+# stop the watchdog during the build so it cannot restart a mid-build .next
+export SVDIR=$PREFIX/var/service
+sv down server-guard
+pm2 stop fotohaven
+cp -a .next ".next.backup-$(date +%Y%m%d-%H%M%S)"
+npm run build                 # do NOT run npm install unless needed; see sharp note
+pm2 start ecosystem.config.js --only fotohaven --update-env
+pm2 save
+sv up server-guard
+~/bin/fotohaven-status.sh
+```
+
+Sharp/Android note: `@img/sharp-wasm32` is intentionally an optional dependency in
+`package.json`, while the installed copy in `node_modules` is what makes thumbnails
+work on bionic/ARM64. `npm install` may skip or prune it. If
+`node -e "require('sharp')"` fails after an install, restore it with:
+
+```sh
+npm install --no-save --force @img/sharp-wasm32@0.34.5
+```
+
 ### Resources / kernel
 - `vm.vfs_cache_pressure=50`, `vm.min_free_kbytes=65536`
 - `net.core.somaxconn=1024`, `net.ipv4.tcp_keepalive_time=300`, `tcp_slow_start_after_idle=0`
@@ -142,6 +178,12 @@ Not touched: `com.google.android.gms`, phone/SMS, Telegram, KernelSU, Termux, la
 | Watchdog | stopped `fotohaven`; guard logged 3 failed probes and restored `:3000` to `307` |
 | Daily backup `--once` | 31 MB DB, `PRAGMA integrity_check=ok` |
 | runit | `charge-limit`, `server-guard`, `daily-backup` all `run` |
+| Deployed branch | `android-server-mode` @ `b93d8e6` == `origin/android-server-mode` |
+| Build | `.next` rebuilt 2026-11-14 23:12; `/api/share/[token]/select` present |
+| App warm response | `/` → `307` in ~20 ms; 839-photo ceremony API 0.09–0.13 s |
+| Public API | `https://fotohaven.live/api/share/<token>/.../photos` → `200` |
+| Sharp on server | `sharp-ok`; `@img/sharp-wasm32` installed; thumbnails served |
+| Data after deploy | uploads `9630 / 1.2G`, DB integrity `ok` |
 
 ## Restore
 
