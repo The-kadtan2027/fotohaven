@@ -53,6 +53,7 @@ def search(
     query_embedding: np.ndarray,
     high_threshold: float = 0.68,
     low_threshold: float = 0.55,
+    max_results: int = 500,
 ) -> Dict[str, List[dict]]:
     with _lock:
         index = _store.get(event_id)
@@ -81,7 +82,13 @@ def search(
             possible.append(item)
             seen.add(photo_id)
 
-    return {"definite": definite, "possible": possible}
+        if len(definite) >= max_results and len(possible) >= max_results:
+            break
+
+    return {
+        "definite": definite[:max_results],
+        "possible": possible[:max_results],
+    }
 
 
 def unload_event(event_id: str) -> None:

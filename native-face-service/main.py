@@ -15,15 +15,12 @@ from config import (
     FACE_LOCAL_SERVICE_BIND,
     FACE_LOCAL_SERVICE_PORT,
     FACE_QUERY_FALLBACK_SIZE,
+    SEARCH_MAX_RESULTS,
 )
 from db import (
-    delete_event_embeddings,
     get_all_event_embeddings,
-    get_all_photo_paths,
     get_event_thresholds,
     get_photo_embeddings,
-    mark_photo_processed,
-    save_embedding,
 )
 from enrollment import enroll_event
 from opencv_backend import (
@@ -116,7 +113,7 @@ async def search_faces(req: SearchRequest):
     db_high, db_low = get_event_thresholds(req.event_id)
     high_threshold = req.high_threshold if req.high_threshold is not None else db_high
     low_threshold = req.low_threshold if req.low_threshold is not None else db_low
-    result = search(req.event_id, embedding, high_threshold, low_threshold)
+    result = search(req.event_id, embedding, high_threshold, low_threshold, SEARCH_MAX_RESULTS)
 
     return {
         "definite": result["definite"],
@@ -135,7 +132,7 @@ async def search_by_photos(req: SearchByPhotosRequest):
     if not req.photo_ids:
         return {"definite": [], "possible": []}
 
-    emb_bytes_list = get_photo_embeddings(req.photo_ids)
+    emb_bytes_list = get_photo_embeddings(req.event_id, req.photo_ids)
     if not emb_bytes_list:
         return {"definite": [], "possible": []}
 
@@ -153,7 +150,7 @@ async def search_by_photos(req: SearchByPhotosRequest):
     high_threshold = req.high_threshold if req.high_threshold is not None else max(db_high, 0.68)
     low_threshold = req.low_threshold if req.low_threshold is not None else db_low
 
-    result = search(req.event_id, avg_emb, high_threshold, low_threshold)
+    result = search(req.event_id, avg_emb, high_threshold, low_threshold, SEARCH_MAX_RESULTS)
 
     return {
         "definite": result["definite"],

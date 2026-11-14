@@ -66,6 +66,18 @@ FACE_DETECTION_NMS_THRESHOLD = _read_float("FACE_DETECTION_NMS_THRESHOLD", 0.3)
 FACE_DETECTION_TOP_K = _read_int("FACE_DETECTION_TOP_K", 5000)
 FACE_QUERY_FALLBACK_SIZE = _read_int("FACE_QUERY_FALLBACK_SIZE", 112)
 
+# Detection runs on a downscaled copy; face boxes and landmarks are scaled back
+# before alignment. 1600 px keeps small group faces while cutting inference time.
+FACE_DETECTION_MAX_SIDE = max(
+    640, min(4096, _read_int("FACE_DETECTION_MAX_SIDE", 1600))
+)
+
+# OpenCV thread count per worker. 2 enrollment workers x 4 threads fits the 8 cores.
+OPENCV_NUM_THREADS = max(1, min(8, _read_int("OPENCV_NUM_THREADS", 4)))
+
+# Cap the number of returned matches per tier to keep responses small on huge albums.
+SEARCH_MAX_RESULTS = max(1, min(5000, _read_int("SEARCH_MAX_RESULTS", 500)))
+
 # Number of parallel threads for face enrollment.
 # Each thread loads its own model (~50 MB), so keep this low on memory-constrained devices.
 # Set via env var ENROLL_WORKERS; defaults to 2.
