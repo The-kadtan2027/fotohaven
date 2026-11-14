@@ -602,6 +602,10 @@ pm2 restart ecosystem.config.js
 pm2 status
 ```
 
+### Dedicated Android server mode
+
+The production phone is tuned as a dedicated server (wake lock, boot restore, PM2 heap/log limits, background-app restrictions, kernel/network tuning). See [`infra/android/SERVER_MODE.md`](infra/android/SERVER_MODE.md) for the applied settings, backup location, verification results and restore commands.
+
 ---
 
 ### Troubleshooting

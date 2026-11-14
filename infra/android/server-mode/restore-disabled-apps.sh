@@ -1,0 +1,18 @@
+# Restore apps disabled/restricted during server-mode setup
+# Run as the Termux user; KernelSU will prompt for root.
+su -c "/system/bin/pm enable-user --user 0 com.google.android.googlequicksearchbox"
+su -c "/system/bin/pm enable-user --user 0 com.google.android.apps.wellbeing"
+su -c "/system/bin/pm enable-user --user 0 com.google.ar.core"
+su -c "/system/bin/pm enable-user --user 0 android.autoinstalls.config.Xiaomi.model"
+su -c "/system/bin/cmd appops set com.android.vending RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set com.android.vending RUN_ANY_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set com.android.chrome RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set com.android.chrome RUN_ANY_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set app.morphe.android.youtube RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set app.morphe.android.youtube RUN_ANY_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set app.morphe.android.youtube.music RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set app.morphe.android.youtube.music RUN_ANY_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set idm.internet.download.manager.plus RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set idm.internet.download.manager.plus RUN_ANY_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set com.microsoft.office.onenote RUN_IN_BACKGROUND default"
+su -c "/system/bin/cmd appops set com.microsoft.office.onenote RUN_ANY_IN_BACKGROUND default"

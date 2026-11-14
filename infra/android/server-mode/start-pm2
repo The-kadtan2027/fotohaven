@@ -1,0 +1,6 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Restore the FotoHaven PM2 process list after boot.
+termux-wake-lock
+sleep 20
+cd "$HOME/fotohaven" || exit 0
+pm2 resurrect >> "$HOME/.pm2/boot.log" 2>&1
