@@ -37,9 +37,9 @@ stateDiagram-v2
     Loading --> LoadError: non-OK / network
     LoadError --> Loading: Retry
     Loading --> Login: 401
-    Ready --> Busy(action): delete/blur/reprocess/scan (per action)
-    Busy(action) --> Ready: ok (refresh)
-    Busy(action) --> Ready: error (toast, state unchanged)
+    Ready --> Busy: delete/blur/reprocess/scan (per action)
+    Busy --> Ready: ok (refresh)
+    Busy --> Ready: error (toast, state unchanged)
     Ready --> Scanning
     Scanning --> ScanResults: groups
     Scanning --> ScanError: error message + Retry
