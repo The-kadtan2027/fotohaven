@@ -14,6 +14,8 @@ import {
   LayoutGrid,
   Columns,
   Square,
+  RotateCw,
+  Upload,
 } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
@@ -68,6 +70,8 @@ export default function GuestFaceDiscoveryPage() {
   const [guestName, setGuestName] = useState("");
   const [isReturningGuest, setIsReturningGuest] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [isFlashing, setIsFlashing] = useState(false);
   const [confirmedPhotoIds, setConfirmedPhotoIds] = useState<string[]>([]);
   const [matchSource, setMatchSource] = useState<MatchSource>("selfie");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -210,11 +214,13 @@ export default function GuestFaceDiscoveryPage() {
     }
   }
 
-  async function startCamera() {
+  async function startCamera(mode?: "user" | "environment") {
+    const targetMode = mode || facingMode;
     setError("");
+    stopCamera();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: targetMode, width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -225,6 +231,12 @@ export default function GuestFaceDiscoveryPage() {
     } catch {
       setError("Camera access is blocked or unavailable. Try uploading a face photo instead.");
     }
+  }
+
+  function toggleFacingMode() {
+    const nextMode = facingMode === "user" ? "environment" : "user";
+    setFacingMode(nextMode);
+    void startCamera(nextMode);
   }
 
   async function getFaceApi() {
@@ -241,55 +253,102 @@ export default function GuestFaceDiscoveryPage() {
     return faceApiPromiseRef.current;
   }
 
+function parseNativeMatches(recogData: any): Array<{ photoId: string; score: number }> {
+  const parseList = (list: any[], fallbackScore: number) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item) => {
+        if (typeof item === "string") return { photoId: item, score: fallbackScore };
+        if (typeof item === "object" && item !== null) {
+          const photoId = item.photo_id || item.photoId || item.id;
+          const score = typeof item.score === "number" ? item.score : fallbackScore;
+          return { photoId, score };
+        }
+        return null;
+      })
+      .filter((m): m is { photoId: string; score: number } => Boolean(m && m.photoId));
+  };
+
+  const definite = parseList(recogData.definite, 0.75);
+  const possible = parseList(recogData.possible, 0.55);
+
+  // Definite matches (high threshold >= 0.65) are primary. Only fall back to possible if definite is empty.
+  const selected = definite.length > 0 ? definite : possible;
+
+  const scoreMap = new Map<string, number>();
+  for (const m of selected) {
+    const existing = scoreMap.get(m.photoId);
+    if (existing === undefined || m.score > existing) {
+      scoreMap.set(m.photoId, m.score);
+    }
+  }
+
+  return Array.from(scoreMap.entries()).map(([photoId, score]) => ({ photoId, score }));
+}
+
   async function scanAndMatch() {
     if (!videoRef.current || !cameraReady) return;
+    setIsFlashing(true);
+    setTimeout(() => setIsFlashing(false), 150);
     setBusy(true);
     setError("");
+    setStatus("Analyzing face...");
 
     try {
-      setStatus("Loading face detection models...");
-      const faceapi = await getFaceApi();
-
-      const samplesNeeded = FACE_CONFIG.enrollmentSamples;
-      const minSuccess = FACE_CONFIG.enrollmentMinSuccess;
-      const descriptors: Float32Array[] = [];
-
-      for (let i = 0; i < samplesNeeded; i++) {
-        setStatus(`Capturing frame ${i + 1} of ${samplesNeeded} - hold still...`);
-
-        const detection = await faceapi
-          .detectSingleFace(
-            videoRef.current,
-            new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
-          )
-          .withFaceLandmarks()
-          .withFaceDescriptor();
-
-        if (detection) {
-          descriptors.push(detection.descriptor);
-        }
-
-        if (i < samplesNeeded - 1) {
-          await new Promise((r) => setTimeout(r, 400));
-        }
+      // 1. Capture instant video frame Base64
+      const canvas = document.createElement("canvas");
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       }
-
-      if (descriptors.length < minSuccess) {
-        throw new Error(
-          `Could not detect a clear face (${descriptors.length}/${minSuccess} frames captured). Please position your face in good lighting and try again.`
-        );
-      }
-
-      setStatus("Processing face profile...");
-      const avgDescriptor = averageDescriptors(descriptors);
+      const imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
 
       stopCamera();
 
-      setStatus("Enrolling face profile...");
+      // 2. Native Python Face Recognition backend (Instant 1-Click Search)
+      if (imageB64) {
+        try {
+          const recogRes = await fetch("/api/recognize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+          });
+          if (recogRes.ok) {
+            const recogData = await recogRes.json();
+            const nativeMatches = parseNativeMatches(recogData);
+            await fetch("/api/guest/enroll-face", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ nativeMatches }),
+            });
+            await loadMatchedPhotos({ source: "selfie" });
+            return;
+          }
+        } catch {
+          /* Fallback to browser face-api */
+        }
+      }
+
+      // 3. Browser face-api backend (Single-frame detection)
+      const faceapi = await getFaceApi();
+      const detection = await faceapi
+        .detectSingleFace(
+          canvas as any,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
+        )
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        throw new Error("No face was detected. Please center your face inside the oval guide and try again.");
+      }
+
       const enrollRes = await fetch("/api/guest/enroll-face", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descriptor: Array.from(avgDescriptor) }),
+        body: JSON.stringify({ descriptor: Array.from(detection.descriptor) }),
       });
 
       if (!enrollRes.ok) {
@@ -314,6 +373,36 @@ export default function GuestFaceDiscoveryPage() {
     setStatus("Analyzing face photo...");
 
     try {
+      const base64String = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      try {
+        const recogRes = await fetch("/api/recognize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event_id: token, image_b64: base64String }),
+        });
+
+        if (recogRes.ok) {
+          const recogData = await recogRes.json();
+          const nativeMatches = parseNativeMatches(recogData);
+          await fetch("/api/guest/enroll-face", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nativeMatches }),
+          });
+          stopCamera();
+          await loadMatchedPhotos({ source: "selfie" });
+          return;
+        }
+      } catch {
+        /* Fallback to browser face-api */
+      }
+
       const faceapi = await getFaceApi();
       const img = await faceapi.bufferToImage(file);
 
@@ -673,41 +762,251 @@ export default function GuestFaceDiscoveryPage() {
         )}
 
         {step === "scan" && (
-          <div style={{ marginTop: 24 }}>
-            <p style={{ fontSize: 14, color: "var(--brown)", marginBottom: 12 }}>
-              Position your face in frame, then run scan.
-            </p>
-            <p style={{ fontSize: 13, color: "var(--taupe)", marginBottom: 16, maxWidth: 620, lineHeight: 1.6 }}>
-              If your current selfie looks quite different from the wedding or event photos, you can upload a face photo instead. FotoHaven will analyze it privately in your browser and use it only to build the same face profile used for matching.
-            </p>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              background: "#000000",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100vw",
+              height: "100vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* Camera Flash Visual Feedback Overlay */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "#ffffff",
+                opacity: isFlashing ? 0.85 : 0,
+                transition: isFlashing ? "none" : "opacity 0.25s ease-out",
+                pointerEvents: "none",
+                zIndex: 30,
+              }}
+            />
+
+            {/* Live Camera Video Stream */}
             <video
               ref={videoRef}
               muted
               playsInline
               style={{
                 width: "100%",
-                maxWidth: 500,
-                borderRadius: 12,
-                background: "#111",
-                border: "1px solid var(--sand)",
+                height: "100%",
+                objectFit: "cover",
+                transform: facingMode === "user" ? "scaleX(-1)" : "none",
+                display: "block",
               }}
             />
-            <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn-gold" onClick={scanAndMatch} disabled={busy || !cameraReady}>
-                {busy ? "Scanning..." : "Scan and find my photos"}
-              </button>
+
+            {/* SVG Viewfinder Overlay: Masked Backdrop + THIN ELEGANT GOLD OVAL (NO BRACKETS) */}
+            <svg
+              viewBox="0 0 100 100"
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
+                zIndex: 10,
+              }}
+            >
+              <defs>
+                <mask id="faceOvalMaskFull">
+                  <rect width="100" height="100" fill="white" />
+                  <ellipse cx="50" cy="45" rx="30" ry="38" fill="black" />
+                </mask>
+                <linearGradient id="goldRingGradThin" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#f59e0b" />
+                  <stop offset="50%" stopColor="#fbbf24" />
+                  <stop offset="100%" stopColor="#d97706" />
+                </linearGradient>
+              </defs>
+              
+              {/* Darkened Masking Backdrop */}
+              <rect width="100" height="100" fill="rgba(0, 0, 0, 0.58)" mask="url(#faceOvalMaskFull)" />
+
+              {/* THIN Elegant Gold Oval Border (NO BRACKETS) */}
+              <ellipse
+                cx="50"
+                cy="45"
+                rx="30"
+                ry="38"
+                fill="none"
+                stroke="url(#goldRingGradThin)"
+                strokeWidth="0.8"
+                style={{ filter: "drop-shadow(0 0 4px rgba(245, 158, 11, 0.5))" }}
+              />
+            </svg>
+
+            {/* Status Pill Badge (Top Center) */}
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(env(safe-area-inset-top, 0px) + 20px)",
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "rgba(0, 0, 0, 0.72)",
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+                border: "1px solid rgba(255, 255, 255, 0.18)",
+                padding: "8px 20px",
+                borderRadius: 30,
+                color: "#f9fafb",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.02em",
+                pointerEvents: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                zIndex: 20,
+                boxShadow: "0 4px 20px rgba(0, 0, 0, 0.4)",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: busy ? "#f59e0b" : cameraReady ? "#22c55e" : "#9ca3af",
+                  boxShadow: cameraReady && !busy ? "0 0 10px #22c55e" : "none",
+                }}
+              />
+              {busy ? status || "Analyzing face..." : "Align face inside oval"}
+            </div>
+
+            {/* Top-Right Camera Flip Button */}
+            <button
+              type="button"
+              onClick={toggleFacingMode}
+              disabled={busy}
+              title="Switch Camera (Front/Rear)"
+              style={{
+                position: "absolute",
+                top: "calc(env(safe-area-inset-top, 0px) + 16px)",
+                right: 16,
+                background: "rgba(0, 0, 0, 0.55)",
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                border: "1px solid rgba(255, 255, 255, 0.22)",
+                color: "#ffffff",
+                borderRadius: "50%",
+                width: 44,
+                height: 44,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                zIndex: 20,
+              }}
+            >
+              <RotateCw size={20} />
+            </button>
+
+            {/* Bottom Floating Deck (Full Width Immersive Control Bar) */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: "24px 36px calc(env(safe-area-inset-bottom, 0px) + 32px)",
+                background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 70%, transparent 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                maxWidth: 480,
+                margin: "0 auto",
+                zIndex: 20,
+              }}
+            >
+              {/* Upload Photo Button */}
               <button
                 type="button"
-                className="btn-ghost"
                 onClick={() => uploadInputRef.current?.click()}
                 disabled={busy}
+                title="Upload face photo instead"
+                style={{
+                  background: "rgba(255, 255, 255, 0.16)",
+                  border: "1px solid rgba(255, 255, 255, 0.25)",
+                  color: "#ffffff",
+                  borderRadius: "50%",
+                  width: 48,
+                  height: 48,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  backdropFilter: "blur(8px)",
+                }}
               >
-                Upload a face photo instead
+                <Upload size={22} />
               </button>
-              <Link href={`/share/${token}`} className="btn-ghost">
-                Browse all photos instead
-              </Link>
+
+              {/* Tactical iOS Dual-Ring Shutter Button */}
+              <button
+                onClick={scanAndMatch}
+                disabled={busy || !cameraReady}
+                title="Capture snapshot"
+                style={{
+                  width: 76,
+                  height: 76,
+                  borderRadius: "50%",
+                  border: "4px solid rgba(255, 255, 255, 0.95)",
+                  background: "transparent",
+                  boxShadow: "0 0 28px rgba(0, 0, 0, 0.7)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: busy || !cameraReady ? "not-allowed" : "pointer",
+                  padding: 0,
+                  transition: "transform 0.15s ease",
+                }}
+              >
+                <div
+                  style={{
+                    width: 58,
+                    height: 58,
+                    borderRadius: "50%",
+                    background: busy ? "#9ca3af" : "#f59e0b",
+                    boxShadow: "0 0 18px rgba(245, 158, 11, 0.7)",
+                    transition: "background 0.2s ease",
+                  }}
+                />
+              </button>
+
+              {/* Close / Exit Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  setStep("consent");
+                }}
+                title="Close camera"
+                style={{
+                  background: "rgba(255, 255, 255, 0.16)",
+                  border: "1px solid rgba(255, 255, 255, 0.25)",
+                  color: "#ffffff",
+                  borderRadius: "50%",
+                  width: 48,
+                  height: 48,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  backdropFilter: "blur(8px)",
+                }}
+              >
+                <X size={22} />
+              </button>
             </div>
+
             <input
               ref={uploadInputRef}
               type="file"
@@ -715,9 +1014,6 @@ export default function GuestFaceDiscoveryPage() {
               onChange={handleUploadSelection}
               style={{ display: "none" }}
             />
-            <p style={{ marginTop: 12, fontSize: 12, color: "var(--taupe)" }}>
-              Choose a clear photo with only one visible face for the best results.
-            </p>
           </div>
         )}
 

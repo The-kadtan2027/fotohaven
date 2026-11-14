@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { albums, ceremonies, guests, photoFaces, photos } from "@/lib/schema";
 import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
@@ -90,13 +90,9 @@ function getAlbumThresholds(albumId: string): MatchThresholds {
     .where(eq(albums.id, albumId))
     .get();
 
-  // Convert distance config to similarity score if fallback is used
-  const defaultStrong = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.strongMatchThreshold));
-  const defaultPossible = Math.max(0, Math.min(1, 2.05 - 3.75 * FACE_CONFIG.possibleMatchThreshold));
-
   return {
-    strong: album?.highThreshold ?? defaultStrong,
-    possible: album?.lowThreshold ?? defaultPossible,
+    strong: album?.highThreshold ?? FACE_CONFIG.strongMatchThreshold,
+    possible: album?.lowThreshold ?? FACE_CONFIG.possibleMatchThreshold,
   };
 }
 
@@ -113,7 +109,7 @@ function scoreMatchesVectorized(
   if (count === 0) return [];
 
   // Compute all N Euclidean distances simultaneously using vectorized SIMD dot products
-  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count);
+  const distances = vectorizedEuclideanDistances(matrix, norms, referenceDescriptor, count, vectorData.vectorDim);
 
   for (let i = 0; i < count; i++) {
     const face = faces[i];
@@ -127,8 +123,8 @@ function scoreMatchesVectorized(
     faceCountByPhoto.set(face.photoId, (faceCountByPhoto.get(face.photoId) || 0) + 1);
 
     const distance = distances[i];
-    const similarity = Math.max(0, Math.min(1, 2.05 - 3.75 * distance));
-    if (similarity >= thresholds.possible) {
+    if (distance <= thresholds.possible) {
+      const similarity = Math.max(0, Math.min(1, 1 - distance));
       const current = bestSimilarityByPhoto.get(face.photoId);
       if (current === undefined || similarity > current) {
         bestSimilarityByPhoto.set(face.photoId, similarity);
@@ -202,6 +198,186 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
 
   if (!guest.faceDescriptor) {
     return noStoreJson({ photos: [], guest: { name: guest.name }, source });
+  }
+
+  // Handle native Python face recognition refinement via confirmed photos
+  if (Array.isArray(confirmedPhotoIds) && confirmedPhotoIds.length > 0) {
+    try {
+      const album = db
+        .select({ id: albums.id })
+        .from(albums)
+        .where(eq(albums.id, guest.albumId))
+        .get();
+
+      if (album) {
+        const serviceUrl =
+          FACE_CONFIG.remoteServiceUrl ||
+          FACE_CONFIG.localNativeServiceUrl ||
+          "http://127.0.0.1:5080";
+
+        const recogRes = await fetch(`${serviceUrl}/search-by-photos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_id: album.id,
+            photo_ids: confirmedPhotoIds,
+            high_threshold: 0.68,
+          }),
+          signal: AbortSignal.timeout(10_000),
+          cache: "no-store",
+        });
+
+        if (recogRes.ok) {
+          const recogData = await recogRes.json();
+          const parseList = (list: any[], fallbackScore: number) => {
+            if (!Array.isArray(list)) return [];
+            return list
+              .map((item) => {
+                if (typeof item === "string") return { photoId: item, score: fallbackScore };
+                if (typeof item === "object" && item !== null) {
+                  const photoId = item.photo_id || item.photoId || item.id;
+                  const score = typeof item.score === "number" ? item.score : fallbackScore;
+                  return { photoId, score };
+                }
+                return null;
+              })
+              .filter((m): m is { photoId: string; score: number } => Boolean(m && m.photoId));
+          };
+
+          const definite = parseList(recogData.definite, 0.85);
+          const possible = parseList(recogData.possible, 0.60);
+          const selected = definite.length > 0 ? definite : possible;
+
+          const matchMap = new Map(selected.map((m) => [m.photoId, m.score]));
+          const photoIds = Array.from(matchMap.keys());
+
+          db.update(guests)
+            .set({
+              faceDescriptor: JSON.stringify({ nativeMatches: selected }),
+            })
+            .where(eq(guests.id, guest.id))
+            .run();
+
+          const nativeMatchedPhotos = photoIds.length > 0
+            ? db
+                .select({
+                  id: photos.id,
+                  storageKey: photos.storageKey,
+                  thumbnailKey: photos.thumbnailKey,
+                  originalName: photos.originalName,
+                })
+                .from(photos)
+                .where(inArray(photos.id, photoIds))
+                .all()
+            : [];
+
+          const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+            photoId: p.id,
+            score: Math.round((matchMap.get(p.id) ?? 0.85) * 1000) / 1000,
+            faceCount: 1,
+            id: p.id,
+            originalName: p.originalName,
+            url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+            originalUrl: await getPresignedUrl(p.storageKey),
+          }));
+
+          const matched = await Promise.all(mappedPromises);
+          matched.sort((a, b) => b.score - a.score);
+
+          return noStoreJson({
+            photos: matched,
+            guest: { name: guest.name },
+            source: "refined",
+            thresholds: getAlbumThresholds(guest.albumId),
+            metric: "native_python_insightface",
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[runDiscovery Refined Native]", err);
+    }
+  }
+
+  // Handle native Python face recognition matches
+  try {
+    const parsed = JSON.parse(guest.faceDescriptor);
+
+    if (parsed && Array.isArray(parsed.nativeMatches)) {
+      const matches = parsed.nativeMatches as Array<{ photoId: string; score: number }>;
+      const matchMap = new Map(matches.map((m) => [m.photoId, m.score]));
+      const photoIds = Array.from(matchMap.keys());
+
+      const nativeMatchedPhotos = photoIds.length > 0
+        ? db
+            .select({
+              id: photos.id,
+              storageKey: photos.storageKey,
+              thumbnailKey: photos.thumbnailKey,
+              originalName: photos.originalName,
+            })
+            .from(photos)
+            .where(inArray(photos.id, photoIds))
+            .all()
+        : [];
+
+      const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+        photoId: p.id,
+        score: Math.round((matchMap.get(p.id) ?? 0.75) * 1000) / 1000,
+        faceCount: 1,
+        id: p.id,
+        originalName: p.originalName,
+        url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+        originalUrl: await getPresignedUrl(p.storageKey),
+      }));
+
+      const matched = await Promise.all(mappedPromises);
+      matched.sort((a, b) => b.score - a.score);
+
+      return noStoreJson({
+        photos: matched,
+        guest: { name: guest.name },
+        source,
+        thresholds: getAlbumThresholds(guest.albumId),
+        metric: "native_python_insightface",
+      });
+    }
+
+    if (parsed && Array.isArray(parsed.nativePhotoIds)) {
+      const nativeMatchedPhotos =
+        parsed.nativePhotoIds.length > 0
+          ? db
+              .select({
+                id: photos.id,
+                storageKey: photos.storageKey,
+                thumbnailKey: photos.thumbnailKey,
+                originalName: photos.originalName,
+              })
+              .from(photos)
+              .where(inArray(photos.id, parsed.nativePhotoIds))
+              .all()
+          : [];
+
+      const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
+        photoId: p.id,
+        score: 0.85,
+        faceCount: 1,
+        id: p.id,
+        originalName: p.originalName,
+        url: await getPresignedUrl(p.thumbnailKey || p.storageKey),
+        originalUrl: await getPresignedUrl(p.storageKey),
+      }));
+
+      const matched = await Promise.all(mappedPromises);
+      return noStoreJson({
+        photos: matched,
+        guest: { name: guest.name },
+        source,
+        thresholds: getAlbumThresholds(guest.albumId),
+        metric: "native_python_insightface",
+      });
+    }
+  } catch {
+    /* Not JSON object, proceed to vector parse */
   }
 
   const guestDescriptor = parseDescriptor(guest.faceDescriptor);

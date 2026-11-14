@@ -8,6 +8,7 @@ import {
   Download, FolderOpen, Image as ImageIcon,
   Loader2, X, ZoomIn, ChevronLeft, ChevronRight, Check,
   MessageSquare, Send, Upload, PackageCheck, Sparkles,
+  LayoutGrid, Columns, Square, Search, Filter, CheckCircle2,
 } from "lucide-react";
 import { Comment } from "@/types";
 
@@ -75,6 +76,16 @@ export default function SharePage() {
   const [loadingPhotos, setLoadingPhotos] = useState<Record<string, boolean>>({});
   const [lightboxFullLoaded, setLightboxFullLoaded] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+
+  // ── View Modes & Search/Filter State ──
+  const [viewMode, setViewMode] = useState<"grid" | "masonry" | "single">("grid");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterMode, setFilterMode] = useState<"all" | "selected" | "comments">("all");
+
+  // Touch gesture refs for Lightbox swipe
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchDeltaRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragY, setDragY] = useState(0);
 
   const persistSelection = useCallback((photoId: string, isSelected: boolean) => {
     fetch(`/api/photos/${photoId}`, {
@@ -394,17 +405,88 @@ export default function SharePage() {
     requestDownload(photoIds, `${album.title} — Delivered Finals`);
   };
 
-  // Lightbox keyboard navigation
+  // Pre-fetch adjacent images in memory for 0ms Lightbox transitions
   useEffect(() => {
     if (!lightbox) return;
+    const { photos, index } = lightbox;
+    const nextPhoto = photos[index + 1];
+    const prevPhoto = photos[index - 1];
+
+    if (nextPhoto) {
+      const imgNext = new Image();
+      imgNext.src = nextPhoto.originalUrl || nextPhoto.url;
+    }
+    if (prevPhoto) {
+      const imgPrev = new Image();
+      imgPrev.src = prevPhoto.originalUrl || prevPhoto.url;
+    }
+  }, [lightbox?.index, lightbox?.photos]);
+
+  // Enhanced Lightbox keyboard shortcuts
+  useEffect(() => {
+    if (!lightbox) return;
+    const currentPhoto = lightbox.photos[lightbox.index];
+
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
-      if (e.key === "ArrowLeft")  setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
-      if (e.key === "Escape") setLightbox(null);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === "ArrowRight") {
+        setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
+      } else if (e.key === "ArrowLeft") {
+        setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
+      } else if (e.key === "Escape") {
+        setLightbox(null);
+      } else if (e.key === " " || e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (currentPhoto) toggleSelect(currentPhoto.id);
+      } else if (e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        if (currentPhoto) downloadPhoto(currentPhoto);
+      } else if (e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        setCommentsOpen((prev) => !prev);
+      }
     };
+
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [lightbox]);
+  }, [lightbox, selectedPhotos]);
+
+  // Touch gesture handlers for mobile Lightbox swipe
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+    touchDeltaRef.current = { x: 0, y: 0 };
+    setDragY(0);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartRef.current.x;
+    const dy = t.clientY - touchStartRef.current.y;
+    touchDeltaRef.current = { x: dx, y: dy };
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+      setDragY(dy);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStartRef.current || !lightbox) return;
+    const { x: dx, y: dy } = touchDeltaRef.current;
+    setDragY(0);
+    touchStartRef.current = null;
+
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0) {
+        setLightbox((lb) => lb && { ...lb, index: Math.min(lb.index + 1, lb.photos.length - 1) });
+      } else {
+        setLightbox((lb) => lb && { ...lb, index: Math.max(lb.index - 1, 0) });
+      }
+    } else if (dy > 120) {
+      setLightbox(null);
+    }
+  };
 
   useEffect(() => {
     setLightboxFullLoaded(false);
@@ -716,6 +798,73 @@ export default function SharePage() {
                 </div>
               )}
 
+              {/* ── Toolbar: Search, Filter & View Modes ── */}
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, background: "var(--warm-white)", padding: "10px 14px", borderRadius: 12, border: "1px solid var(--sand)" }}>
+                {/* Search input */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid var(--sand)", borderRadius: 8, padding: "6px 12px", minWidth: 200, flex: 1 }}>
+                  <Search size={14} color="var(--taupe)" />
+                  <input
+                    type="text"
+                    placeholder="Search photos..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ border: "none", outline: "none", background: "transparent", fontSize: 13, color: "var(--espresso)", width: "100%" }}
+                  />
+                  {searchQuery && (
+                    <X size={13} color="var(--taupe)" style={{ cursor: "pointer" }} onClick={() => setSearchQuery("")} />
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {[
+                    { id: "all", label: `All (${activeTabPhotos.length})` },
+                    { id: "selected", label: `Selected (${selectedPhotos.size})` },
+                    { id: "comments", label: "With Notes" },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setFilterMode(f.id as any)}
+                      style={{
+                        padding: "5px 12px", fontSize: 12, borderRadius: 20, border: "1px solid",
+                        borderColor: filterMode === f.id ? "var(--gold)" : "var(--sand)",
+                        background: filterMode === f.id ? "rgba(201,150,58,0.15)" : "#fff",
+                        color: filterMode === f.id ? "var(--gold)" : "var(--brown)",
+                        cursor: "pointer", fontWeight: filterMode === f.id ? 600 : 400,
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* View Mode Switcher */}
+                <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--sand)", padding: 3, borderRadius: 8 }}>
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    title="Grid View (1:1)"
+                    style={{ padding: "5px 8px", border: "none", borderRadius: 6, cursor: "pointer", background: viewMode === "grid" ? "#fff" : "transparent", color: viewMode === "grid" ? "var(--espresso)" : "var(--taupe)" }}
+                  >
+                    <LayoutGrid size={15} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("masonry")}
+                    title="Masonry View (Composition Preserving)"
+                    style={{ padding: "5px 8px", border: "none", borderRadius: 6, cursor: "pointer", background: viewMode === "masonry" ? "#fff" : "transparent", color: viewMode === "masonry" ? "var(--espresso)" : "var(--taupe)" }}
+                  >
+                    <Columns size={15} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("single")}
+                    title="Focus Feed View"
+                    style={{ padding: "5px 8px", border: "none", borderRadius: 6, cursor: "pointer", background: viewMode === "single" ? "#fff" : "transparent", color: viewMode === "single" ? "var(--espresso)" : "var(--taupe)" }}
+                  >
+                    <Square size={15} />
+                  </button>
+                </div>
+              </div>
+
               {isPhotosLoading ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px", gap: 12 }}>
                   <Loader2 size={24} color="var(--gold)" style={{ animation: "spin 1s linear infinite" }} />
@@ -728,19 +877,77 @@ export default function SharePage() {
                     {galleryTab === "finals" ? "No finals delivered yet." : "No photos in this ceremony yet."}
                   </p>
                 </div>
-              ) : (
-                <div className="photo-grid">
-                  {activeTabPhotos.map((photo, idx) => (
-                    <GalleryPhoto
-                      key={photo.id}
-                      photo={photo}
-                      selected={selectedPhotos.has(photo.id)}
-                      onSelect={() => toggleSelect(photo.id)}
-                      onZoom={() => setLightbox({ photos: activeTabPhotos, index: idx })}
-                    />
-                  ))}
-                </div>
-              )}
+              ) : (() => {
+                const displayedPhotos = activeTabPhotos.filter((photo) => {
+                  if (searchQuery.trim()) {
+                    const q = searchQuery.toLowerCase().trim();
+                    if (!photo.originalName.toLowerCase().includes(q)) return false;
+                  }
+                  if (filterMode === "selected" && !selectedPhotos.has(photo.id)) return false;
+                  if (filterMode === "comments" && (!photo.comments || photo.comments.length === 0)) return false;
+                  return true;
+                });
+
+                if (displayedPhotos.length === 0) {
+                  return (
+                    <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--taupe)" }}>
+                      <p style={{ fontSize: 14 }}>No photos match your search or filter.</p>
+                    </div>
+                  );
+                }
+
+                if (viewMode === "masonry") {
+                  return (
+                    <div style={{ columns: "3 220px", columnGap: 16 }}>
+                      {displayedPhotos.map((photo, idx) => (
+                        <div key={photo.id} style={{ marginBottom: 16, breakInside: "avoid" }}>
+                          <GalleryPhoto
+                            photo={photo}
+                            selected={selectedPhotos.has(photo.id)}
+                            onSelect={() => toggleSelect(photo.id)}
+                            onZoom={() => setLightbox({ photos: displayedPhotos, index: idx })}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                if (viewMode === "single") {
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 640, margin: "0 auto" }}>
+                      {displayedPhotos.map((photo, idx) => (
+                        <div key={photo.id} style={{ background: "#fff", border: "1px solid var(--sand)", borderRadius: 12, overflow: "hidden" }}>
+                          <GalleryPhoto
+                            photo={photo}
+                            selected={selectedPhotos.has(photo.id)}
+                            onSelect={() => toggleSelect(photo.id)}
+                            onZoom={() => setLightbox({ photos: displayedPhotos, index: idx })}
+                          />
+                          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--warm-white)" }}>
+                            <span style={{ fontSize: 12, color: "var(--brown)", fontWeight: 500 }}>{photo.originalName}</span>
+                            <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(photo.size / (1024 * 1024)).toFixed(1)} MB</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="photo-grid">
+                    {displayedPhotos.map((photo, idx) => (
+                      <GalleryPhoto
+                        key={photo.id}
+                        photo={photo}
+                        selected={selectedPhotos.has(photo.id)}
+                        onSelect={() => toggleSelect(photo.id)}
+                        onZoom={() => setLightbox({ photos: displayedPhotos, index: idx })}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* ── Upload Returns (Photographer dropzone) ── */}
               <div style={{ marginTop: 56, borderTop: "1px dashed var(--sand)", paddingTop: 40 }}>
@@ -833,8 +1040,15 @@ export default function SharePage() {
       {/* ── Lightbox ── */}
       {lightbox && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex" }}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(26,18,8,0.95)", zIndex: 1000, display: "flex",
+            transform: dragY > 0 ? `translateY(${dragY}px)` : "none",
+            transition: dragY > 0 ? "none" : "transform 0.2s ease",
+          }}
           onClick={() => setLightbox(null)}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
           {/* Main Content Area (Image + Nav) */}
           <div 

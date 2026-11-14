@@ -44,17 +44,27 @@ export async function POST(req: NextRequest) {
     const safeFilename = `${photoId}.${ext}`;
     const storageKey = buildPhotoKey(ceremony.albumId, ceremony.id, photoId, safeFilename);
 
-    // Create the DB record immediately (status can be tracked later)
-    db.insert(photos).values({
-      id: photoId,
-      filename: safeFilename,
-      originalName: body.filename,
-      size: body.size,
-      mimeType: body.contentType,
-      storageKey,
-      ceremonyId: body.ceremonyId,
-      createdAt: new Date(),
-    }).run();
+    // Create the DB record immediately with lock retry
+    let dbAttempts = 0;
+    while (dbAttempts < 3) {
+      try {
+        db.insert(photos).values({
+          id: photoId,
+          filename: safeFilename,
+          originalName: body.filename,
+          size: body.size,
+          mimeType: body.contentType,
+          storageKey,
+          ceremonyId: body.ceremonyId,
+          createdAt: new Date(),
+        }).run();
+        break;
+      } catch (dbErr: any) {
+        dbAttempts += 1;
+        if (dbAttempts >= 3) throw dbErr;
+        await new Promise((r) => setTimeout(r, 200 * dbAttempts));
+      }
+    }
 
     // Return a presigned PUT URL — client uploads directly to R2
     const uploadUrl = await getPresignedUploadUrl(storageKey, body.contentType);

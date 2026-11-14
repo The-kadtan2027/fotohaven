@@ -7,6 +7,7 @@ import { getGuestCookieName, verifyGuestSession } from "@/lib/guest-auth";
 
 type EnrollFaceBody = {
   descriptor?: number[];
+  nativePhotoIds?: string[];
 };
 
 function isDescriptor(value: unknown): value is number[] {
@@ -37,10 +38,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const body = (await request.json()) as EnrollFaceBody;
+    const body = (await request.json()) as EnrollFaceBody & {
+      nativeMatches?: Array<{ photoId: string; score: number }>;
+    };
+
+    if (Array.isArray(body.nativeMatches)) {
+      db.update(guests)
+        .set({
+          faceDescriptor: JSON.stringify({ nativeMatches: body.nativeMatches }),
+        })
+        .where(eq(guests.id, guest.id))
+        .run();
+
+      return NextResponse.json({ ok: true });
+    }
+
+    if (Array.isArray(body.nativePhotoIds)) {
+      db.update(guests)
+        .set({
+          faceDescriptor: JSON.stringify({ nativePhotoIds: body.nativePhotoIds }),
+        })
+        .where(eq(guests.id, guest.id))
+        .run();
+
+      return NextResponse.json({ ok: true });
+    }
+
     if (!isDescriptor(body.descriptor)) {
       return NextResponse.json(
-        { error: "descriptor must be an array of 64-2048 finite numbers" },
+        { error: "descriptor or nativePhotoIds required" },
         { status: 400 }
       );
     }

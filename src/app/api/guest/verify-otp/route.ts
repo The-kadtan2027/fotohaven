@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createHash } from "crypto";
@@ -9,6 +8,8 @@ import {
   getGuestSessionMaxAgeSeconds,
   signGuestSession,
 } from "@/lib/guest-auth";
+import { logger } from "@/lib/logger";
+import { withHandler, apiSuccess, apiBadRequest, apiUnauthorized, apiNotFound, apiError } from "@/lib/api-response";
 
 type VerifyOtpBody = {
   token?: string;
@@ -30,145 +31,140 @@ function buildOtpHash(code: string, albumId: string, email: string) {
     .digest("hex");
 }
 
-export async function POST(request: Request) {
-  try {
-    const body = (await request.json()) as VerifyOtpBody;
-    const token = body.token?.trim();
-    const email = body.email?.trim().toLowerCase();
-    const otp = (body.otp || body.code)?.trim();
-    let name = body.name?.trim();
-    const phone = body.phone?.trim() || null;
-    const bypass = isOtpBypassEnabled();
+export const POST = withHandler("POST /api/guest/verify-otp", async (request: Request) => {
+  const body = (await request.json()) as VerifyOtpBody;
+  const token = body.token?.trim();
+  const email = body.email?.trim().toLowerCase();
+  const otp = (body.otp || body.code)?.trim();
+  let name = body.name?.trim();
+  const phone = body.phone?.trim() || null;
+  const bypass = isOtpBypassEnabled();
 
-    if (!token || !email || (!bypass && !otp)) {
-      return NextResponse.json(
-        { error: "token, email, and passcode are required" },
-        { status: 400 }
-      );
-    }
-
-    const album = db
-      .select({ id: albums.id, expiresAt: albums.expiresAt })
-      .from(albums)
-      .where(eq(albums.shareToken, token))
-      .get();
-
-    if (!album) {
-      return NextResponse.json({ error: "Album not found" }, { status: 404 });
-    }
-
-    if (album.expiresAt && new Date(album.expiresAt) < new Date()) {
-      return NextResponse.json({ error: "This link has expired" }, { status: 410 });
-    }
-
-    if (!bypass) {
-      const otpRow = db
-        .select()
-        .from(guestOtps)
-        .where(
-          and(
-            eq(guestOtps.albumId, album.id),
-            eq(guestOtps.email, email),
-            isNull(guestOtps.consumedAt)
-          )
-        )
-        .orderBy(desc(guestOtps.createdAt))
-        .get();
-
-      if (!otpRow) {
-        return NextResponse.json({ error: "Invalid passcode" }, { status: 401 });
-      }
-
-      const now = new Date();
-      if (new Date(otpRow.expiresAt) < now) {
-        return NextResponse.json({ error: "Passcode expired" }, { status: 401 });
-      }
-
-      const expected = buildOtpHash(otp!, album.id, email);
-      if (expected !== otpRow.codeHash) {
-        return NextResponse.json({ error: "Invalid passcode" }, { status: 401 });
-      }
-
-      db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
-    } else {
-      console.warn(
-        `[GUEST OTP] Bypass enabled. OTP validation skipped for ${email} (album=${album.id}).`
-      );
-    }
-
-    const existingGuest = db
-      .select()
-      .from(guests)
-      .where(and(eq(guests.albumId, album.id), eq(guests.email, email)))
-      .get();
-
-    if (!name) {
-      name = existingGuest?.name || email.split("@")[0];
-    }
-
-    const sessionToken = uuidv4();
-    let guestId = existingGuest?.id;
-
-    if (!guestId) {
-      guestId = uuidv4();
-      db.insert(guests)
-        .values({
-          id: guestId,
-          albumId: album.id,
-          name,
-          email,
-          phone,
-          sessionToken,
-          createdAt: new Date(),
-        })
-        .run();
-    } else {
-      db.update(guests)
-        .set({
-          name,
-          phone: phone || existingGuest?.phone || null,
-          sessionToken,
-        })
-        .where(eq(guests.id, guestId))
-        .run();
-    }
-
-    const guestJwt = await signGuestSession({
-      sub: guestId,
-      albumId: album.id,
-      email,
-      st: sessionToken,
-    });
-
-    const response = NextResponse.json({
-      ok: true,
-      bypass,
-      name,
-      hasFaceDescriptor: Boolean(existingGuest?.faceDescriptor),
-    });
-    response.cookies.set(getGuestCookieName(), guestJwt, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: getGuestSessionMaxAgeSeconds(),
-    });
-
-    try {
-      db.insert(activityLogs).values({
-        id: uuidv4(),
-        albumId: album.id,
-        guestId,
-        eventType: "guest_login",
-        createdAt: new Date(),
-      }).run();
-    } catch (e) {
-      console.warn("Failed to log activity:", e);
-    }
-
-    return response;
-  } catch (error) {
-    console.error("[POST /api/guest/verify-otp]", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  if (!token || !email || (!bypass && !otp)) {
+    return apiBadRequest("token, email, and passcode are required");
   }
-}
+
+  const album = db
+    .select({ id: albums.id, expiresAt: albums.expiresAt })
+    .from(albums)
+    .where(eq(albums.shareToken, token))
+    .get();
+
+  if (!album) {
+    return apiNotFound("Album not found");
+  }
+
+  if (album.expiresAt && new Date(album.expiresAt) < new Date()) {
+    return apiError("This link has expired", { status: 410, code: "LINK_EXPIRED" });
+  }
+
+  if (!bypass) {
+    const otpRow = db
+      .select()
+      .from(guestOtps)
+      .where(
+        and(
+          eq(guestOtps.albumId, album.id),
+          eq(guestOtps.email, email),
+          isNull(guestOtps.consumedAt)
+        )
+      )
+      .orderBy(desc(guestOtps.createdAt))
+      .get();
+
+    if (!otpRow) {
+      logger.warn("AUTH", `OTP verification failed (no active OTP) for ${email}`);
+      return apiUnauthorized("Invalid passcode");
+    }
+
+    const now = new Date();
+    if (new Date(otpRow.expiresAt) < now) {
+      logger.warn("AUTH", `OTP verification failed (expired) for ${email}`);
+      return apiUnauthorized("Passcode expired");
+    }
+
+    const expected = buildOtpHash(otp!, album.id, email);
+    if (expected !== otpRow.codeHash) {
+      logger.warn("AUTH", `OTP verification failed (code mismatch) for ${email}`);
+      return apiUnauthorized("Invalid passcode");
+    }
+
+    db.update(guestOtps).set({ consumedAt: now }).where(eq(guestOtps.id, otpRow.id)).run();
+  } else {
+    logger.warn("AUTH", `Bypass enabled. OTP validation skipped for ${email} (album=${album.id})`);
+  }
+
+  const existingGuest = db
+    .select()
+    .from(guests)
+    .where(and(eq(guests.albumId, album.id), eq(guests.email, email)))
+    .get();
+
+  if (!name) {
+    name = existingGuest?.name || email.split("@")[0];
+  }
+
+  const sessionToken = uuidv4();
+  let guestId = existingGuest?.id;
+
+  if (!guestId) {
+    guestId = uuidv4();
+    db.insert(guests)
+      .values({
+        id: guestId,
+        albumId: album.id,
+        name,
+        email,
+        phone,
+        sessionToken,
+        createdAt: new Date(),
+      })
+      .run();
+  } else {
+    db.update(guests)
+      .set({
+        name,
+        phone: phone || existingGuest?.phone || null,
+        sessionToken,
+      })
+      .where(eq(guests.id, guestId))
+      .run();
+  }
+
+  const guestJwt = await signGuestSession({
+    sub: guestId,
+    albumId: album.id,
+    email,
+    st: sessionToken,
+  });
+
+  logger.info("AUTH", `Guest verified successfully: ${email} (guestId=${guestId})`);
+
+  const response = apiSuccess({
+    bypass,
+    name,
+    hasFaceDescriptor: Boolean(existingGuest?.faceDescriptor),
+  });
+
+  response.cookies.set(getGuestCookieName(), guestJwt, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: getGuestSessionMaxAgeSeconds(),
+  });
+
+  try {
+    db.insert(activityLogs).values({
+      id: uuidv4(),
+      albumId: album.id,
+      guestId,
+      eventType: "guest_login",
+      createdAt: new Date(),
+    }).run();
+  } catch (e) {
+    logger.warn("DB", "Failed to log activity:", e);
+  }
+
+  return response;
+});

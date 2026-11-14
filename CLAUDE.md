@@ -244,6 +244,7 @@ npm run db:push && npm run build && pm2 restart ecosystem.config.js
 - **ORM**: Drizzle + better-sqlite3 (No native Prisma binaries). `db.ts` uses WAL mode and custom timeouts for concurrency.
 - **Storage**: `LOCAL_UPLOAD_PATH` for offline/on-device hosting. Supports 206 Partial Content (Range requests).
 - **Uploads**: Hard limit of **100MB** per photo. Uses a streaming pipeline to save memory. Thumbnail generation requires `sharp` (Android/ARM needs Wasm fallback: `npm install --cpu=wasm32 sharp @img/sharp-wasm32`).
+- **Build-Phase Safety for Background Workers**: Top-level server singletons, background worker queues (`job-runner.ts`), and interval timers MUST check `process.env.NEXT_PHASE` (`phase-production-build` | `phase-export`) to prevent background DB execution during `npm run build`. Wrap top-level DB calls in `try/catch` blocks.
 - **Album manager extras**:
   - Uploads can be client-side compressed to JPEG or WebP before queueing.
   - Duplicate review uses browser-side dHash and persists `Photo.imageHash`.
@@ -260,8 +261,10 @@ npm run db:push && npm run build && pm2 restart ecosystem.config.js
   - **Refined Discovery (Active)**: After the selfie scan, guests are presented with a "Quick Review" carousel of their top 5 highest-confidence single-face matches. Confirming any of these photos re-runs the discovery algorithm using the verified `PhotoFace.descriptor` values as anchors. This offline approach drastically improves results for kids, makeup-heavy subjects, and crowded albums.
   - Detection input must be canvas/image/video/tensor. `ImageBitmap` must be drawn onto canvas before `detectAllFaces`.
   - Server only stores descriptors and runs Euclidean distance matching; heavy inference is offloaded from Android phone CPU.
+  - **Identifier Resolution Rule**: Client-facing guest endpoints (`/api/recognize`, `/api/guest/*`) receive `event_id` / `token` as either `shareToken` or database `albums.id` UUID. API routes MUST resolve `event_id` to database `albums.id` UUID before validating guest JWT sessions (which store UUID `albums.id`) and before proxying to Python `native-face-service` (which queries DB using `albums.id`).
+  - **Native Face Matching & Score Precision Rule**: Native Python face service returns `definite` ($\ge 0.65$) and `possible` ($0.50 - 0.64$) match tiers with exact cosine similarity scores. Client face enrollment (`parseNativeMatches`) MUST prioritize `definite` matches to eliminate false positives in large crowd albums ($3,000+$ photos). `GET /api/guest/my-photos` MUST preserve individual match scores (`score`) rather than flattening to `1.0`, ensuring candidates are sorted descending by confidence for the Quick Review wizard.
   - If matching quality changes materially, use `POST /api/albums/:albumId/reprocess-faces` or the album-page `Reprocess Faces` button so stored descriptors are regenerated.
-  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` â€” kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
+  - **Archived**: Server-side scripts (`process-faces.ts`, `process-faces-safe.sh`) moved to `scripts/archive/` — kept for reference but not active. Native deps (`@napi-rs/canvas`, `@tensorflow/tfjs`, `canvas`) are uninstalled. `face-api.js` is retained for browser use.
 
 ---
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDropzone } from "react-dropzone";
@@ -86,8 +86,11 @@ interface Album {
 type UploadStatus = "pending" | "uploading" | "done" | "error";
 
 interface UploadItem {
+  id: string;
   file: File;
   ceremonyId: string;
+  folderName?: string;
+  previewUrl?: string;
   status: UploadStatus;
   progress: number;
   error?: string;
@@ -176,33 +179,100 @@ export default function AlbumPage() {
     setDuplicateScanError("");
   }, [activeCeremony]);
 
+  const GENERIC_FOLDERS = new Set(["photos", "album", "export", "exports", "dcim", "new folder", "images", "pictures", "raw"]);
+
+  const resolveFolderCeremonyName = (relativePath: string): string | null => {
+    if (!relativePath || !relativePath.includes("/")) return null;
+    const parts = relativePath.split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+
+    let folderName = parts[0];
+    if (GENERIC_FOLDERS.has(folderName.toLowerCase()) && parts.length > 2) {
+      folderName = parts[1];
+    }
+    return folderName.trim() || null;
+  };
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!activeCeremony || activeCeremony === "ACTIVITY" || acceptedFiles.length === 0) return;
+    if (!album || acceptedFiles.length === 0) return;
     setIsPreparingUploads(true);
+
     try {
-      const preparedFiles = await mapWithConcurrency(
-        acceptedFiles,
-        compressionConcurrency,
-        async (file, index) => {
-          const startedAt = performance.now();
-          console.info(`[upload-prepare] start ${index + 1}/${acceptedFiles.length}: ${file.name} (${formatMb(file.size)} MB) using ${compressionFormat}`);
-          const preparedFile = await compressImageFile(file, compressionFormat, compressionQuality);
-          const elapsedMs = Math.round(performance.now() - startedAt);
-          console.info(`[upload-prepare] done ${index + 1}/${acceptedFiles.length}: ${file.name} -> ${preparedFile.name} (${formatMb(file.size)} MB -> ${formatMb(preparedFile.size)} MB) in ${elapsedMs}ms`);
-          return preparedFile;
+      // Map folderName -> ceremonyId
+      const ceremonyMap: Record<string, string> = {};
+
+      // Auto-resolve or create ceremonies for dropped folders
+      for (const file of acceptedFiles) {
+        const relativePath = (file as any).webkitRelativePath || "";
+        const folderName = resolveFolderCeremonyName(relativePath);
+
+        if (folderName && !ceremonyMap[folderName]) {
+          const existing = album.ceremonies.find(
+            (c) => c.name.toLowerCase() === folderName.toLowerCase()
+          );
+
+          if (existing) {
+            ceremonyMap[folderName] = existing.id;
+          } else {
+            // Auto-create ceremony via API
+            try {
+              const res = await fetch("/api/ceremonies", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: folderName, albumId: album.id }),
+              });
+              if (res.ok) {
+                const newCeremony = await res.json();
+                ceremonyMap[folderName] = newCeremony.id;
+                setAlbum((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        ceremonies: [
+                          ...prev.ceremonies,
+                          { id: newCeremony.id, name: folderName, order: prev.ceremonies.length, photos: [] },
+                        ],
+                      }
+                    : prev
+                );
+                toast(`Created new ceremony "${folderName}"`, "success");
+              }
+            } catch (err) {
+              console.error(`Failed to auto-create ceremony '${folderName}'`, err);
+            }
+          }
         }
-      );
-      const prepared: UploadItem[] = preparedFiles.map((file) => ({
-        file,
-        ceremonyId: activeCeremony,
-        status: "pending",
-        progress: 0,
-      }));
+      }
+
+      const prepared: UploadItem[] = acceptedFiles.map((file) => {
+        const relativePath = (file as any).webkitRelativePath || "";
+        const folderName = resolveFolderCeremonyName(relativePath);
+        const ceremonyId =
+          (folderName && ceremonyMap[folderName]) || activeCeremony || album.ceremonies[0]?.id || "";
+
+        return {
+          id: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
+          file,
+          ceremonyId,
+          folderName: folderName || undefined,
+          status: "pending",
+          progress: 0,
+        };
+      });
+
       setUploads((prev) => [...prev, ...prepared]);
     } finally {
       setIsPreparingUploads(false);
     }
-  }, [activeCeremony, compressionConcurrency, compressionFormat, compressionQuality]);
+  }, [album, activeCeremony]);
+
+  // Auto-start upload when new pending files enter queue
+  useEffect(() => {
+    const hasPending = uploads.some((item) => item.status === "pending");
+    if (hasPending && !isUploading && !isPreparingUploads) {
+      void uploadAll();
+    }
+  }, [uploads, isUploading, isPreparingUploads]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -210,15 +280,33 @@ export default function AlbumPage() {
     multiple: true,
   });
 
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      void onDrop(files);
+    }
+  };
+
   const xhrUploadWithProgress = (url: string, file: File, onProgress: (pct: number) => void, retries = 3) =>
     new Promise<void>((resolve, reject) => {
       let attempt = 0;
+      let lastProgressTime = 0;
       const tryUpload = () => {
         attempt += 1;
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", url, true);
         xhr.setRequestHeader("Content-Type", file.type);
-        xhr.upload.onprogress = (event) => event.lengthComputable && onProgress(Math.round((event.loaded / event.total) * 100));
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+          const now = Date.now();
+          const pct = Math.round((event.loaded / event.total) * 100);
+          if (pct === 100 || now - lastProgressTime >= 200) {
+            lastProgressTime = now;
+            onProgress(pct);
+          }
+        };
         xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? (onProgress(100), resolve()) : reject(new Error(`Upload failed (HTTP ${xhr.status})`));
         xhr.onerror = () => attempt < retries ? window.setTimeout(tryUpload, Math.pow(2, attempt - 1) * 1000) : reject(new Error(`Upload failed after ${retries} retries`));
         xhr.send(file);
@@ -228,32 +316,81 @@ export default function AlbumPage() {
 
   const duplicateGroups = buildDuplicateGroups(duplicateSourcePhotos ?? [], dedupThreshold);
 
+  const fetchWithRetry = async (url: string, init: RequestInit, retries = 3): Promise<Response> => {
+    let attempt = 0;
+    while (attempt < retries) {
+      attempt += 1;
+      try {
+        const res = await fetch(url, init);
+        if (res.ok || res.status < 500) {
+          return res;
+        }
+        if (attempt >= retries) return res;
+      } catch (err) {
+        if (attempt >= retries) throw err;
+      }
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
+    }
+    throw new Error("Request failed after retries");
+  };
+
   const uploadAll = async () => {
-    const pending = uploads.filter((item) => item.status === "pending");
+    const pending = uploads.filter((item) => item.status === "pending" || item.status === "error");
     if (!pending.length) return;
     setIsUploading(true);
+
     for (const item of pending) {
-      const index = uploads.findIndex((entry) => entry.file === item.file && entry.ceremonyId === item.ceremonyId);
-      setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "uploading", progress: 0 } : entry));
+      setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "uploading", progress: 0 } : entry)));
+
       try {
-        const metaRes = await fetch("/api/upload", {
+        // Streamed 1-by-1 compression right before upload transmit
+        const fileToUpload = await compressImageFile(
+          item.file,
+          compressionFormat,
+          compressionQuality
+        );
+        const origMb = (item.file.size / 1024 / 1024).toFixed(1);
+        const compMb = (fileToUpload.size / 1024 / 1024).toFixed(1);
+        console.info(`[upload] ${item.file.name}: ${origMb} MB -> ${compMb} MB (${compressionFormat.toUpperCase()} @ ${compressionQuality}%)`);
+
+        // Fetch presigned upload URL with automatic exponential backoff retries (3 attempts)
+        const metaRes = await fetchWithRetry("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ceremonyId: item.ceremonyId, filename: item.file.name, contentType: item.file.type, size: item.file.size }),
+          body: JSON.stringify({
+            ceremonyId: item.ceremonyId,
+            filename: fileToUpload.name,
+            contentType: fileToUpload.type,
+            size: fileToUpload.size,
+          }),
         });
-        if (!metaRes.ok) throw new Error("Failed to get upload URL");
+
+        if (!metaRes.ok) throw new Error(`Server returned HTTP ${metaRes.status}`);
         const { uploadUrl } = await metaRes.json();
-        await xhrUploadWithProgress(uploadUrl, item.file, (progress) => {
-          setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, progress } : entry));
+
+        await xhrUploadWithProgress(uploadUrl, fileToUpload, (progress) => {
+          setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, progress } : entry)));
         });
-        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "done", progress: 100 } : entry));
+
+        // Instantly prune completed item by unique ID from UI queue
+        setUploads((prev) => prev.filter((entry) => entry.id !== item.id));
       } catch (error) {
-        setUploads((prev) => prev.map((entry, i) => i === index ? { ...entry, status: "error", error: String(error) } : entry));
+        setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "error", error: String(error) } : entry)));
       }
     }
+
     setIsUploading(false);
     await fetchAlbum();
-    window.setTimeout(() => setUploads((prev) => prev.filter((entry) => entry.status !== "done")), 2000);
+  };
+
+  const retrySingleUpload = (item: UploadItem) => {
+    setUploads((prev) =>
+      prev.map((entry) =>
+        entry.id === item.id
+          ? { ...entry, status: "pending", error: undefined }
+          : entry
+      )
+    );
   };
 
   const copyShareLink = async () => {
@@ -400,9 +537,13 @@ export default function AlbumPage() {
           hashedPhotos.push(photo);
           continue;
         }
-        const imageHash = await computeDHashFromUrl(photo.url, { cacheBust: forceRescan });
-        hashedPhotos.push({ ...photo, imageHash });
-        newHashes.push({ photoId: photo.id, imageHash });
+        try {
+          const imageHash = await computeDHashFromUrl(photo.url, { cacheBust: forceRescan });
+          hashedPhotos.push({ ...photo, imageHash });
+          newHashes.push({ photoId: photo.id, imageHash });
+        } catch {
+          /* skip photo silently if thumbnail is missing or non-200 */
+        }
       }
       setDuplicateSourcePhotos(hashedPhotos);
       setShowDuplicateModal(true);
@@ -556,6 +697,14 @@ export default function AlbumPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      {/* Hidden Folder Picker Input */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        style={{ display: "none" }}
+        {...({ webkitdirectory: "", directory: "", multiple: true } as any)}
+        onChange={handleFolderSelect}
+      />
       <header className="glass px-4 md:px-8" style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
@@ -608,6 +757,7 @@ export default function AlbumPage() {
               );
             })}
             <button onClick={addCeremony} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-3 transition-colors text-[var(--taupe)] hover:text-[var(--gold)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500 }}><span style={{ fontSize: 18 }}>+</span> Add Ceremony</button>
+            <button onClick={() => folderInputRef.current?.click()} className="flex items-center gap-2 justify-center px-4 md:px-5 py-2 md:py-2.5 transition-colors text-[var(--gold)] hover:bg-[rgba(201,150,58,0.1)] border-t border-[var(--sand)] md:w-full" style={{ fontSize: 13, fontWeight: 500, cursor: "pointer" }}><FolderOpen size={14} /> Upload Event Folders</button>
             <div className="hidden md:block" style={{ height: 1, background: "var(--sand)", margin: "16px 20px" }} />
             <button onClick={() => setActiveCeremony("ACTIVITY")} className="flex items-center gap-3 md:justify-between px-4 md:px-5 py-2 md:py-2.5 rounded-full md:rounded-none transition-all text-left border md:border-0 md:border-l-[3px]" style={{ background: activeCeremony === "ACTIVITY" ? "var(--warm-white)" : "transparent", borderColor: activeCeremony === "ACTIVITY" ? "var(--gold)" : "transparent", cursor: "pointer" }}><span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: activeCeremony === "ACTIVITY" ? "var(--espresso)" : "var(--brown)", fontWeight: activeCeremony === "ACTIVITY" ? 500 : 400 }}><Activity size={14} />Activity Feed</span></button>
           </div>
@@ -659,8 +809,12 @@ export default function AlbumPage() {
               <div {...getRootProps()} style={{ border: `2px dashed ${isDragActive ? "var(--gold)" : "var(--sand)"}`, borderRadius: 16, padding: "32px 24px", textAlign: "center", background: isDragActive ? "rgba(201, 150, 58, 0.04)" : "var(--warm-white)", cursor: "pointer", transition: "all 0.2s ease", marginBottom: 16 }}>
                 <input {...getInputProps()} />
                 <div style={{ width: 48, height: 48, borderRadius: "50%", background: isDragActive ? "var(--gold)" : "var(--sand)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}><Upload size={20} color={isDragActive ? "#fff" : "var(--brown)"} /></div>
-                <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>{isDragActive ? "Drop photos here" : "Drag & drop photos"}</p>
-                <p style={{ fontSize: 13, color: "var(--brown)" }}>or <span style={{ color: "var(--gold)", textDecoration: "underline" }}>browse files</span> · JPG, PNG, WebP, HEIC up to 100MB</p>
+                <p style={{ fontSize: 15, color: "var(--espresso)", fontWeight: 500, marginBottom: 4 }}>{isDragActive ? "Drop photos or event folders here" : "Drag & drop photos or event folders"}</p>
+                <p style={{ fontSize: 13, color: "var(--brown)", marginBottom: 14 }}>Folder names auto-create ceremonies! · JPG, PNG, WebP, HEIC up to 100MB</p>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                  <button className="btn-ghost" onClick={() => { const input = document.querySelector('input[type="file"]:not([webkitdirectory])') as HTMLInputElement; input?.click(); }} style={{ fontSize: 12, padding: "6px 14px" }}>Browse Files</button>
+                  <button className="btn-gold" onClick={() => folderInputRef.current?.click()} style={{ fontSize: 12, padding: "6px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><FolderOpen size={13} />Browse Folders</button>
+                </div>
                 {isPreparingUploads ? <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 10 }}>Preparing files with album compression settings...</p> : null}
               </div>
 
@@ -753,7 +907,8 @@ export default function AlbumPage() {
                   uploads={uploads} 
                   isUploading={isUploading} 
                   onUploadAll={uploadAll} 
-                  onClear={(index) => setUploads((prev) => prev.filter((_, i) => i !== index))} 
+                  onClear={(id) => setUploads((prev) => prev.filter((entry) => entry.id !== id))}
+                  onRetry={retrySingleUpload}
                 />
               )}
 
@@ -812,7 +967,7 @@ export default function AlbumPage() {
         />
       )}
 
-      {album.faceEnrollmentBackend !== "remote_python" && album.faceEnrollmentBackend !== "local_native_http" ? (
+      {album.faceEnrollmentBackend !== "remote_python" && album.faceEnrollmentBackend !== "local_native_http" && !isUploading && uploads.length === 0 ? (
         <FaceProcessor photos={(album.ceremonies ?? []).flatMap((ceremony) => ceremony.photos.map((photo) => { 
           const useOriginal = FACE_CONFIG.scanSource === "original" && Boolean(photo.originalUrl); 
           return { id: photo.id, url: useOriginal ? photo.originalUrl! : photo.url, faceProcessed: Boolean(photo.faceProcessed), scanSource: useOriginal ? "original" : "thumbnail" }; 
@@ -823,26 +978,144 @@ export default function AlbumPage() {
   );
 }
 
-function UploadQueue({ uploads, isUploading, onUploadAll, onClear }: { uploads: UploadItem[]; isUploading: boolean; onUploadAll: () => void; onClear: (index: number) => void; }) {
+function UploadQueue({
+  uploads,
+  isUploading,
+  onUploadAll,
+  onClear,
+  onRetry,
+}: {
+  uploads: UploadItem[];
+  isUploading: boolean;
+  onUploadAll: () => void;
+  onClear: (id: string) => void;
+  onRetry: (item: UploadItem) => void;
+}) {
+  const pendingCount = uploads.filter((i) => i.status === "pending" || i.status === "error").length;
+  const doneCount = uploads.filter((i) => i.status === "done").length;
+  const totalSizeMb = (uploads.reduce((sum, item) => sum + item.file.size, 0) / 1024 / 1024).toFixed(1);
+
+  // Overall progress percentage
+  const totalProgress = Math.round(
+    uploads.reduce((sum, item) => {
+      if (item.status === "done") return sum + 100;
+      if (item.status === "uploading") return sum + item.progress;
+      return sum;
+    }, 0) / (uploads.length || 1)
+  );
+
   return (
     <div className="card" style={{ padding: 20, marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--espresso)" }}>Upload Queue ({uploads.filter((item) => item.status === "pending").length} pending)</p>
-        <button className="btn-primary" onClick={onUploadAll} disabled={isUploading || uploads.every((item) => item.status !== "pending")} style={{ fontSize: 12, padding: "8px 16px" }}>
-          {isUploading ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />Uploading...</> : <><Upload size={12} />Upload All</>}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso)" }}>
+              Upload Queue ({pendingCount} items remaining)
+            </p>
+            <span style={{ fontSize: 11, background: "var(--sand)", color: "var(--brown)", padding: "2px 8px", borderRadius: 100, fontWeight: 500 }}>
+              {totalSizeMb} MB total
+            </span>
+          </div>
+          {isUploading && (
+            <p style={{ fontSize: 12, color: "var(--gold)", marginTop: 2, fontWeight: 500 }}>
+              Uploading in background ({totalProgress}% overall)...
+            </p>
+          )}
+        </div>
+        <button
+          className="btn-gold"
+          onClick={onUploadAll}
+          disabled={isUploading || pendingCount === 0}
+          style={{ fontSize: 12, padding: "8px 16px" }}
+        >
+          {isUploading ? (
+            <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Uploading…</>
+          ) : (
+            <><Upload size={12} /> Upload Pending ({pendingCount})</>
+          )}
         </button>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {uploads.map((item, index) => (
-          <div key={`${item.file.name}-${index}`} style={{ background: "var(--warm-white)", borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px" }}>
-              <StatusIcon status={item.status} />
-              <span style={{ flex: 1, fontSize: 13, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.file.name}</span>
-              {item.status === "uploading" && <span style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, minWidth: 36, textAlign: "right" }}>{item.progress}%</span>}
-              <span style={{ fontSize: 11, color: "var(--taupe)" }}>{(item.file.size / 1024 / 1024).toFixed(1)} MB</span>
-              {item.status !== "uploading" && <button onClick={() => onClear(index)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", display: "flex" }}><X size={12} /></button>}
+
+      {/* Global Progress Bar */}
+      {isUploading && (
+        <div style={{ height: 4, background: "var(--sand)", borderRadius: 2, overflow: "hidden", marginBottom: 16 }}>
+          <div style={{ height: "100%", width: `${totalProgress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} />
+        </div>
+      )}
+
+      {/* Queue items list with Live Thumbnails */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {uploads
+          .filter((item) => item.status !== "done")
+          .map((item) => (
+            <div key={item.id} style={{ background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
+              {/* Live Thumbnail Preview */}
+              {item.previewUrl ? (
+                <div style={{ width: 36, height: 36, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--sand)" }}>
+                  <img src={item.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              ) : (
+                <StatusIcon status={item.status} />
+              )}
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "var(--espresso)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.file.name}
+                  </span>
+                  {item.folderName && (
+                    <span style={{ fontSize: 10, background: "rgba(201,150,58,0.15)", color: "var(--gold)", padding: "1px 6px", borderRadius: 4, fontWeight: 600, flexShrink: 0 }}>
+                      📁 {item.folderName}
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: "var(--taupe)" }}>
+                  {(item.file.size / 1024 / 1024).toFixed(1)} MB · {item.status.toUpperCase()}
+                </span>
+              </div>
+
+              {item.status === "uploading" && (
+                <span style={{ fontSize: 12, color: "var(--gold)", fontWeight: 600, minWidth: 40, textAlign: "right" }}>
+                  {item.progress}%
+                </span>
+              )}
+
+              {item.status === "error" && (
+                <button
+                  onClick={() => onRetry(item)}
+                  title="Retry upload"
+                  style={{
+                    fontSize: 11,
+                    background: "rgba(201,150,58,0.15)",
+                    color: "var(--gold)",
+                    border: "1px solid var(--gold)",
+                    padding: "3px 10px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  ↺ Retry
+                </button>
+              )}
+
+              {item.status !== "uploading" && (
+                <button
+                  onClick={() => onClear(item.id)}
+                  title="Remove from queue"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", padding: 4, display: "flex", alignItems: "center" }}
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
-            {item.status === "uploading" && <div style={{ height: 3, background: "var(--sand)" }}><div style={{ height: "100%", width: `${item.progress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} /></div>}
+
+            {item.status === "uploading" && (
+              <div style={{ height: 3, background: "var(--sand)" }}>
+                <div style={{ height: "100%", width: `${item.progress}%`, background: "var(--gold)", transition: "width 0.3s ease" }} />
+              </div>
+            )}
           </div>
         ))}
       </div>

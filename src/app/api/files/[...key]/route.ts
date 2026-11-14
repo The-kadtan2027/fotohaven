@@ -51,15 +51,33 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Check file exists + get stats
+    // Check file exists + get stats (with extension fallback)
     let stat;
+    let finalPath = resolved;
     try {
-      stat = statSync(resolved);
+      stat = statSync(finalPath);
     } catch {
+      const basePath = finalPath.replace(/\.[^.]+$/, "");
+      const alternates = [".webp", ".jpg", ".jpeg", ".png"];
+      let found = false;
+      for (const altExt of alternates) {
+        const altPath = `${basePath}${altExt}`;
+        try {
+          stat = statSync(altPath);
+          finalPath = altPath;
+          found = true;
+          break;
+        } catch {
+          /* try next */
+        }
+      }
+    }
+
+    if (!stat) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const ext = path.extname(resolved).toLowerCase();
+    const ext = path.extname(finalPath).toLowerCase();
     const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
     const fileSize = stat.size;
     // ETag based on mtime + size (cheap to compute, good enough for immutable photos)
