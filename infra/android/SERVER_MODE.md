@@ -91,11 +91,14 @@ disk, and the last charge/guard log lines.
 
 
 ### Deployment state (2026-11-14)
-- Server checkout: `~/fotohaven`, branch `android-server-mode`, HEAD **`b93d8e6`**
-- Remote: `origin/android-server-mode` at the same commit (`git rev-parse HEAD` == `git ls-remote`)
-- Built: `.next/BUILD_ID` generated `2026-11-14 23:12`, app restarted at 23:13
+- Server checkout: `~/fotohaven`, branch **`main`**, HEAD **`f2aa20b`**
+  (`origin/main` is at the same commit; a docs-only follow-up may advance it)
+- Branches merged into `main`: `feat/python-face-recognition`, `android-server-mode`
+  and `perf/face-service`
+- Built: `.next/BUILD_ID` generated `2026-11-14 23:12` from the same frontend tree;
+  native face service restarted on the optimized Python code
 - Previous build saved at `~/fotohaven/.next.backup-20261114-231104/`
-- Pre-deploy local modifications preserved in `git stash@{0}` (branch `feat/python-face-recognition`)
+- Pre-deploy local modifications preserved in `git stash@{0}`
 - Application data (`local.db`, uploads) was not touched by checkout/build
 
 Safe update procedure:
@@ -103,7 +106,7 @@ Safe update procedure:
 ```sh
 cd ~/fotohaven
 git fetch origin
-git checkout android-server-mode
+git checkout main
 git pull --ff-only
 # stop the watchdog during the build so it cannot restart a mid-build .next
 export SVDIR=$PREFIX/var/service
@@ -112,10 +115,18 @@ pm2 stop fotohaven
 cp -a .next ".next.backup-$(date +%Y%m%d-%H%M%S)"
 npm run build                 # do NOT run npm install unless needed; see sharp note
 pm2 start ecosystem.config.js --only fotohaven --update-env
+pm2 restart native-face-service   # Python changes need no Next build
 pm2 save
 sv up server-guard
 ~/bin/fotohaven-status.sh
 ```
+
+Face-service performance is tracked in
+[`native-face-service/PERFORMANCE.md`](../../native-face-service/PERFORMANCE.md):
+one-photo extraction improved from ~723–1073 ms to ~323–410 ms, warm
+`/search-by-photos` from ~65 ms to ~50 ms, with one enrollment worker and
+`OPENCV_NUM_THREADS=8`.
+
 
 Sharp/Android note: `@img/sharp-wasm32` is intentionally an optional dependency in
 `package.json`, while the installed copy in `node_modules` is what makes thumbnails
@@ -184,6 +195,13 @@ Not touched: `com.google.android.gms`, phone/SMS, Telegram, KernelSU, Termux, la
 | Public API | `https://fotohaven.live/api/share/<token>/.../photos` → `200` |
 | Sharp on server | `sharp-ok`; `@img/sharp-wasm32` installed; thumbnails served |
 | Data after deploy | uploads `9630 / 1.2G`, DB integrity `ok` |
+| Admin login | `admin` → `200`, `/api/auth/me` → `200` |
+| Upload lifecycle | temp album → PNG upload `200` → thumbnail job `completed`, `thumbnailKey` set, file present → album delete `200`, DB rows `0`, files gone |
+| Password share | no/wrong/right = `401/401/200` |
+| Batch select | `POST /api/share/:token/select` → `200 {updated:1}`, DB `isSelected=1` |
+| ZIP download | valid photo → `200`, 81,522-byte zip in 0.29 s |
+| Face service | extraction **323–410 ms** (was 723–1073), search-by-photos **50 ms** warm, selfie `/search` ~422 ms |
+| Missing-file audit | 2 of 4,816 originals missing (`BCV06827.jpg`, `BCV06967.jpg`), 0 missing thumbnails; pre-existing rows, not deleted |
 
 ## Restore
 
