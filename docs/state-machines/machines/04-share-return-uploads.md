@@ -2,6 +2,8 @@
 
 Owner: `src/app/share/[token]/page.tsx` (`returnUploads`, `uploadReturns`), `/api/share/[token]/upload`, local PUT.
 
+Status: implemented (F-30/F-31). Metadata returns a 15-minute JWT bound to the storage key; `/api/upload/local` accepts either a photographer session or that token. Retry reuses the `uploadUrl` and never re-creates the photo row.
+
 ## As-is
 
 ```mermaid

@@ -2,6 +2,8 @@
 
 Owner: `src/lib/job-runner.ts`, `JobQueue` table, `/api/admin/jobs`, health page.
 
+Status: F-22 implemented. Pending rows now carry a due time in `updatedAt` (`src/lib/job-backoff.ts`); the worker schedules the next wake instead of a tight retry loop.
+
 ## As-is
 
 ```mermaid

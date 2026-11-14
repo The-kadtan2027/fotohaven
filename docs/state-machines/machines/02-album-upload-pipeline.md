@@ -2,6 +2,8 @@
 
 Owner: `src/app/albums/[albumId]/page.tsx`, `src/lib/upload-queue.ts` (new), `/api/upload`, `/api/upload/local`.
 
+Status: implemented (F-13/F-14/F-15). Queue state is `src/lib/upload-queue.ts`; auto-start re-arms when the loop drains; failed items require an explicit Retry; removal compensates the phantom row.
+
 ## As-is
 
 ```mermaid

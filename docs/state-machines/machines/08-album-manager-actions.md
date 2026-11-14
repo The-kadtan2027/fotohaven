@@ -2,6 +2,8 @@
 
 Owner: `src/app/albums/[albumId]/page.tsx` plus photo/ceremony/album routes.
 
+Status: F-16 implemented (load error + Retry). Per-action busy guards for destructive actions were not added; the report-only risk remains.
+
 ## As-is
 
 ```mermaid

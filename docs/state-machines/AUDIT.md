@@ -88,6 +88,10 @@ Legend — status: **C** confirmed by code path, **L** likely (code path strongl
 | F-28 | Face thresholds | Bug | `src/app/api/admin/events/[id]/thresholds/route.ts:42-58`: cross-field `low < high` is validated only when **both** are sent. | API caller can persist `low > high`, an impossible state that breaks match bands. | Low × Med | Load current row and validate the merged pair | S | C |
 | F-29 | Auth | Hardening | `src/app/api/auth/login/route.ts:15-37`: unlimited password attempts; `src/middleware.ts` no limiter. | Credential stuffing on the admin boundary. | High × Low | 5 failures / 15 min per IP+username → 429 | S | C |
 | F-30 | Share return uploads | UX gap | `src/app/share/[token]/page.tsx:386-404`: only `pending` items are uploaded; failed items have no Retry and cannot re-enter the queue. Metadata POST is repeated on manual retry → duplicate rows. | Dead-end error; or duplicate finals if a workaround is used. | Med × Med | Per-item Retry reusing metadata; error copy + remove | M | C |
+| F-31 | Share return uploads | Bug | Runtime: `PUT /api/upload/local?key=…` from the share page returned **401** because middleware guards `/api/upload` and the share page has no admin session (`src/middleware.ts:26-33`, `src/app/api/upload/local/route.ts`). The documented "no account" flow never completed. | All unauthenticated share-page uploads fail at the last step; UI shows an error after the metadata row already exists. | High × High | Key-bound 15-minute upload JWT; `/api/upload/local` accepts session OR token; middleware lets the route decide | M | C (reproduced) |
+| F-32 | Share download | Bug | Runtime: `scope=finals` with a missing file never completed (curl hit a 10 s cap; 35-byte partial zip). `createReadStream` emits `'error'` asynchronously; the loop caught nothing, `archive.finalize()` was unawaited. | Download spins forever, leaks a connection, and may emit an unhandled stream error; affects any album with a missing/partial file. | High × Med | `fileExists()` pre-check, stream error handler, awaited `finalize()` in both ZIP routes | S | C (reproduced) |
+| F-33 | Guest matching | Data lifecycle | `src/lib/vector-cache.ts:60-90` caches an album matrix for 15 min; delete routes (`api/photos/[id]`, `delete-batch`, `api/ceremonies/[id]`, `api/albums/[id]`) did not invalidate it. | Deleted photos remain matchable (with live presigned URLs) until TTL. | Med × Med | Invalidate cache after every delete that removes photos | S | C |
+| F-34 | Share selection | Performance | `selectAllInCeremony` / clear fired one `PATCH` per photo (up to 700 concurrent requests on a phone). | Socket exhaustion / 502s, exactly the failure class in the upload history. | Med × High | Token-scoped `POST /api/share/:token/select` batch endpoint + versioned optimistic update | M | C |
 
 ### Redesign (structurally unsound; addressed by the new machines)
 
@@ -109,7 +113,7 @@ Legend — status: **C** confirmed by code path, **L** likely (code path strongl
 | L-05 | Health dashboard | Hardening | `src/app/api/admin/health/route.ts:23-68, 120-176`: `execSync` (`pm2 jlist`, `df`, `pgrep`) on every 30 s poll; `page.tsx:187-204` can overlap requests. | Blocks the Node event loop on a phone; stale/overlapping refreshes. | Move to async/`execFile` with cache; poll lock. |
 | L-06 | Upload | Design | `compressionConcurrency` UI (`albums/[albumId]/page.tsx:836-841`) has no effect; `mapWithConcurrency` (`:1193`) is dead. Compression is deliberately sequential to avoid memory pressure. | Users believe they changed performance; dead code. | Implemented removal (smallest fix), documented in ADR. |
 | L-07 | Guest matching | Design | `guest/page.tsx:163-167, 451-499`: a returning guest never gets the Quick Review wizard (`!isReturningGuest` guard). | Refinement path unavailable on second visit; by design in the last task but inconsistent. | Product decision needed. |
-| L-08 | Middleware | Security | `src/middleware.ts:40-51`: unauthenticated `PATCH` is allowed for all `/api/photos/*`, including `imageHash` (`api/photos/[photoId]/route.ts:65-72`). | A leaked photo ID can poison the duplicate index. | Restrict unauth PATCH body to `isSelected`; needs route-level auth context. |
+| L-08 | Middleware | Security | `src/middleware.ts:40-51`: unauthenticated `PATCH` was allowed for all `/api/photos/*`, including `imageHash` (`api/photos/[photoId]/route.ts:65-72`). | A leaked photo ID could poison the duplicate index. | **Fixed:** the route now requires a photographer session before accepting `imageHash`; `isSelected` stays public. |
 | L-09 | Guest OTP | Data lifecycle | `guestOtps` rows are never pruned; expired rows accumulate. | Slow DB growth on a phone. | Retention job. |
 | L-10 | Album delete | Observability | Deletes log only after success (`api/albums/[albumId]/route.ts:140-166`); no activity log; no dead-letter if storage deletion partially fails. | Silent partial deletes. | Ops/runbook task. |
 | L-11 | Rate limiting | Ops | In-memory limiter added by this audit resets on PM2 restart and is per instance. | Bypass by restart; ineffective if scaled. | Redis/SQLite-backed limiter if instances > 1. |
@@ -127,7 +131,64 @@ Legend — status: **C** confirmed by code path, **L** likely (code path strongl
 
 ## 4. Verification (Phase 8)
 
-Filled after implementation; see bottom of this file.
+Environment: Windows x64, Node 24.14.0, production build (`npm run build`), temporary SQLite DB at `.audit-tmp/test.db` and temp `LOCAL_UPLOAD_PATH`; no production data or secrets touched. Temp files were deleted after the run.
+
+### Commands
+
+| Command | Result |
+|---|---|
+| `cmd /c npx tsc --noEmit` | exit 0, no output |
+| `npm test` | **45 tests, 45 pass, 0 fail** (`tests/*.test.ts`, Node test runner via existing `tsx`) |
+| `npm run lint` | 0 errors; warnings are pre-existing `<img>`/font/exhaustive-deps notices |
+| `npm run build` | success; `/api/share/[token]/select` and the existing routes compile |
+
+### API behaviour (scripted `curl` against the production build)
+
+| Scenario | Observed |
+|---|---|
+| Share album, no password | 200; `totalPhotos=1`; ceremony photo rows stripped |
+| Password album: no header / wrong / right | 401 `{passwordRequired:true}` / 401 / 200 |
+| Cross-album ceremony id via another token | **404** `Ceremony not found` |
+| Own ceremony photos | 200, 1 photo |
+| Download, no password / right password | 401 / 200 `application/zip` |
+| Download finals with a missing file | **0.25 s, complete**, missing entry skipped (before fix: 10 s cap, 35-byte partial) |
+| Share upload metadata: no pw / right pw | 401 / 201 with upload URL |
+| Share upload PUT without a session | **200 with key-bound token**; no token 401; forged/mismatched key 401 |
+| Guest OTP (bypass) request / verify | 200 / 200 + `guest_session` |
+| Invalid guest cookie | 401 (previously a thrown verification could become 500) |
+| Guest enrolled with another album's photo id | `photos: 0` (IDOR scoped out) |
+| Guest enrolled with own photo id | `photos: 1`, score preserved |
+| Login | 200; after 5 failures the next attempt is 429 |
+| OTP send | 3 allowed, 4th is 429 |
+| Album detail as admin | no `password` key; no `sessionToken` substring |
+| Anonymous `PATCH {isSelected}` | 200 and reflected on next GET |
+| Anonymous `PATCH {imageHash}` | **401** |
+| Batch select: wrong pw / right pw / forged id | 401 / 200 `updated:2` / forged id ignored |
+| Batch deselect | 200; both rows `isSelected=false` |
+| Expired album: GET / ceremony / download | 410 / 410 / 410 |
+| `GET /api/files/../../Windows/win.ini` | 403 |
+| File extension fallback (`sample.webp` → `sample.jpg`) | 200 `image/jpeg`, correct bytes |
+
+### Browser evidence (headless Chromium, production build)
+
+| Flow | Observed |
+|---|---|
+| Protected share: wrong password, then correct | Inline “Incorrect password”, then the gallery rendered; no “Link unavailable” trap (F-01 fixed) |
+| Guest consent → camera denied | Full-screen error card with `Retry camera`, `Upload a face photo`, `Back`; status pill “Scan failed” (F-09 fixed) |
+| Share selection with network offline | Optimistic star reverted, toast “Couldn’t save your selection”; no stale counter (F-03 fixed) |
+| Album manager upload (1 real PNG) | Queue appeared and cleared; grid/photo count went 1 → 2 (F-13/F-14 path) |
+| `/albums/does-not-exist` | “Album not found” + Retry instead of an infinite spinner (F-16 fixed) |
+
+Not verified: real camera capture success, 700-photo scroll performance, R2/S3 upload path, PM2/Android runtime, screen-reader output, multi-tab convergence, and a tab closed mid-upload (compensation cannot run). These remain residual risks below.
+
+### Residual risks
+
+- If a tab closes after `POST /api/upload` but before the PUT/compensation, one phantom row remains (documented in ADR-003; no schema change).
+- The rate limiter is process-local and resets on PM2 restart (L-11).
+- `execSync` health checks still block the event loop every 30 s (L-05).
+- Components are not render-tested; browser evidence covers the changed flows but not every visual state.
+- Returning guests still skip Quick Review by design (L-07, needs product decision).
+
 
 ## 5. Transition coverage summary
 
@@ -135,18 +196,22 @@ Per-machine state × event matrices are in `machines/*.md`. Summary of the chang
 
 | Machine | States (to-be) | Events | Covered by tests | Ignored by design | Untested |
 |---|---|---|---|---|---|
-| Upload queue | `pending, uploading, error, done→removed` | ENQUEUE, START, PROGRESS, SUCCEED, FAIL, RETRY, REMOVE | reducer: all transitions + impossible event no-ops | PROGRESS in non-uploading state | network timing (manual) |
-| Share selection | `idle, pending(version), confirmed, rolled-back` | TOGGLE, PATCH_OK, PATCH_FAIL, REPLACE, CLEAR | reducer: rollback, stale-version ignore, replace | PATCH_OK for replaced state | browser double-click (manual) |
-| Job queue | `pending(due), processing(lease), completed, failed` | ENQUEUE, CLAIM, COMPLETE, FAIL, RECOVER, ADMIN_RETRY | retry delay helper | malformed payload (still retried, then failed) | crash mid-job (manual) |
-| Guest scan overlay | `idle, camera_ready, capturing, error` | START_CAMERA, CAMERA_READY, CAMERA_DENIED, CAPTURE, FAIL, RETRY, BACK | transition helper | CAPTURE while busy | real camera (manual) |
+| Upload queue | `pending, uploading, error; success removes` | ENQUEUE, START, PROGRESS, SUCCEED, FAIL, RETRY, REMOVE, ATTACH_REMOTE | reducer: all transitions + impossible event no-ops | PROGRESS in non-uploading state | network timing (manual) |
+| Share selection | `idle, pending(version), confirmed, rolled-back` | TOGGLE, SET, MERGE, PATCH_OK, PATCH_FAIL, REPLACE, CLEAR | reducer: rollback, stale-version ignore, merge, replace | PATCH_OK for a replaced state | browser double-click (manual) |
+| Share batch select | `pending → confirmed / rolled-back` | SELECT_ALL, CLEAR, BATCH_OK, BATCH_FAIL | reducer + runtime endpoint | photo ids outside the album are dropped | 700-photo run |
+| Share return upload | `pending, uploading, done→removed, error→retry` | META_OK, PROGRESS, SUCCEED, FAIL, RETRY, REMOVE | runtime signed-PUT + metadata tests | second retry after metadata failure | tab close mid-PUT |
+| Job queue | `pending(due), processing(lease), completed, failed` | ENQUEUE, CLAIM, COMPLETE, FAIL, RECOVER, ADMIN_RETRY | retry-delay helper | malformed payload (retried, then failed) | crash mid-job (manual) |
+| Guest scan overlay | `idle, starting, ready, capturing, error` | START, READY, CAPTURE, FAIL, RETRY, RESET | reducer: all transitions + impossible events | CAPTURE outside ready | real camera (manual) |
 
 ## 6. Before / after
 
 | Metric | Before | After |
 |---|---|---|
-| Explicit reducers | 0 | 3 (`upload-queue`, `selection-machine`, `guest-scan` helper) |
-| Boolean clusters removed | — | upload `isUploading` remains UI-only; scan error state local |
-| Defects closed | — | F-01…F-30 except reported-only items |
-| Tests | 0 | see `npm test` output below |
-| New dependencies | — | none |
+| Explicit reducers/machines | 0 | 3 (`upload-queue`, `selection-machine`, `guest-scan`) |
+| Boolean clusters removed | `cameraReady`, upload status duplication, `isReturning` retry ambiguity | camera readiness now a single phase; queue status from reducer; return uploads reuse `uploadUrl` |
+| Defects closed | — | F-01…F-34 (L-06/L-08 also fixed) |
+| Tests | 0 | **45** across 7 files (`npm test`) |
+| New dependencies | — | none (Node's built-in test runner + existing `tsx`) |
 | Schema changes | — | none |
+| New routes | — | `POST /api/share/[token]/select` (batch selection) |
+| API contract additions | — | `password` on share upload/download forms, `scope=finals`; album detail no longer returns `password`/guest `sessionToken` |

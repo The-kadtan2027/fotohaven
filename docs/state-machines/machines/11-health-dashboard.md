@@ -2,6 +2,8 @@
 
 Owner: `src/app/admin/health/page.tsx`, `/api/admin/health`, `/api/admin/jobs`.
 
+Status: **report-only** (L-05). No code change in this branch; the poll lock/redirect design above is the recommended fix.
+
 ## As-is
 
 ```mermaid

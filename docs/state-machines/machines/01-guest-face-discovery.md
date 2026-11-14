@@ -2,6 +2,8 @@
 
 Owner: `src/app/share/[token]/guest/page.tsx`; servers: `src/app/api/guest/*`, `src/app/api/recognize/route.ts`.
 
+Status: F-09/F-10/F-11 implemented (scan error card, enroll checks, results fallback). Full page reducer extraction deferred (ADR-010); the camera overlay is driven by `src/lib/guest-scan.ts`.
+
 ## As-is
 
 ```mermaid

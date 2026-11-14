@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clearRateLimit,
   consumeRateLimit,
+  isRateLimited,
   rateLimitKey,
   resetRateLimits,
   retryAfterSeconds,
@@ -45,6 +46,15 @@ test("success clear resets the bucket", () => {
   consumeRateLimit("test:d", options, 0);
   clearRateLimit("test:d");
   assert.equal(consumeRateLimit("test:d", options, 1).allowed, true);
+});
+
+test("isRateLimited reads without recording", () => {
+  resetRateLimits();
+  const options = { limit: 1, windowMs: 1000 };
+  assert.equal(isRateLimited("test:e", options, 0).allowed, true);
+  assert.equal(isRateLimited("test:e", options, 0).allowed, true, "peek does not count");
+  consumeRateLimit("test:e", options, 0);
+  assert.equal(isRateLimited("test:e", options, 1).allowed, false);
 });
 
 test("keys are normalized and scoped", () => {

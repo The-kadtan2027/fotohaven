@@ -89,3 +89,36 @@ Successful verify/login clears the identity bucket. `429` with `Retry-After`.
 - **Toast/lightbox accessibility.** Reported (L-03/L-04) with evidence; a component-wide a11y pass is a separate change with its own review surface.
 - **Admin health blocking `execSync`.** Reported (L-05); changing it needs a caching design and is not a state-machine defect.
 - **`.env.example` secret and tracked DB.** Reported (L-01); rotating/removing secrets is owner action.
+
+## ADR-011: Key-bound upload tokens for the public share flow
+
+**Context.** `/api/upload/local` is admin-guarded by middleware, but the share-page return-upload flow is intentionally unauthenticated (token + optional password). Runtime check showed the final PUT returned 401, so the documented flow never completed.
+
+**Decision.** The share/admin metadata routes wrap the local upload URL with a 15-minute HS256 JWT whose `key` claim is the exact storage key. `/api/upload/local` is moved out of the blanket middleware guard and authorizes inside the route: photographer session **or** a token matching the decoded key. The token is bound to one path, expires quickly, and is never accepted for a different key (runtime-tested 401).
+
+**Rejected.** Making `/api/upload/local` fully public (arbitrary key overwrite), and proxying bytes through the metadata route (phone memory/bandwidth). R2 presigned URLs are returned untouched.
+
+## ADR-012: Batch selection endpoint instead of N PATCHes
+
+**Context.** "Select All" on a 700-photo ceremony issued 700 concurrent PATCH requests from a phone browser, the same socket-exhaustion class as the upload history.
+
+**Decision.** `POST /api/share/[token]/select` accepts `{photoIds, isSelected, password?}`, verifies the token/expiry/password, filters IDs to the album, updates in one SQL statement, and logs one activity event with a count. The client applies per-photo versioned optimistic updates and rolls all of them back if the single request fails.
+
+**Rejected.** A public batch route under `/api/photos` (needs auth-context plumbing and is easier to abuse), and sequential per-photo requests (slow but still 700 round trips).
+
+## ADR-013: Existence check before appending a ZIP entry
+
+**Context.** `createReadStream` does not throw synchronously for a missing file; the stream emits `error` later. A missing original left the ZIP response open indefinitely (reproduced: 10 s client cap, partial output). `archive.finalize()` was also unawaited.
+
+**Decision.** `fileExists(key)` (storage adapter) is checked before `getFileStream`; stream `error` is handled; `finalize()` is awaited and errors logged. Missing files are skipped with a warning, so one lost object cannot block the entire album download.
+
+**Trade-off.** A download can succeed with fewer files than requested. The alternative (abort the whole ZIP) is worse for a client downloading a large album; the server log is the recovery path.
+
+## ADR-014: Invalidate the vector cache on every destructive path
+
+**Context.** `getAlbumVectorMatrix` caches album descriptors for 15 minutes; deletes did not invalidate it, so deleted photos could still be returned as matches with live presigned URLs.
+
+**Decision.** Invalidate after single-photo delete, batch delete, ceremony delete, and album delete, in addition to the existing faces/reprocess hooks. The cache remains a pure read optimization; SQLite stays authoritative.
+
+**Rejected.** Lowering the TTL (still leaves a window) and invalidating on a timer (does not fix correctness).
+

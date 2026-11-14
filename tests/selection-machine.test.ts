@@ -72,6 +72,13 @@ test("replace rehydrates from the server", () => {
   assert.deepEqual(replaced.pending, {});
 });
 
+test("merge adds server-selected ids without dropping local ones", () => {
+  const { state } = toggle(initialSelection(), "p1");
+  const merged = selectionReducer(state, { type: "merge", ids: ["p2"] });
+  assert.deepEqual([...merged.selected].sort(), ["p1", "p2"]);
+  assert.equal(merged.pending.p1, true, "local intent preserved");
+});
+
 test("clear resets values and invalidates in-flight results", () => {
   const { state, version } = toggle(initialSelection(), "p1");
   const cleared = selectionReducer(state, { type: "clear" });

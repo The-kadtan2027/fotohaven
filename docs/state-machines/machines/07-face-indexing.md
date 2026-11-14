@@ -2,6 +2,8 @@
 
 Owners: `src/app/albums/[albumId]/FaceProcessor.tsx`, `/api/photos/:id/faces`, `/api/albums/:id/reprocess-faces`, `src/app/api/admin/enroll/[eventId]/route.ts`, `native-face-service/*`.
 
+Status: F-17/F-23 implemented. Model load failures reset the cached promise; the chip exposes Retry; enrollment polling has a 10-minute deadline and an unmount guard.
+
 ## As-is
 
 ```mermaid

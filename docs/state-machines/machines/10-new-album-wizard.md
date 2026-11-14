@@ -2,6 +2,8 @@
 
 Owner: `src/app/albums/new/page.tsx`, `/api/albums`.
 
+Status: F-20 implemented (local end-of-day expiry, errors cleared on step change).
+
 ## As-is
 
 ```mermaid

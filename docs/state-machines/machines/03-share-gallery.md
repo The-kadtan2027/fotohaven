@@ -1,6 +1,8 @@
 # Machine 03 — Share gallery access, selection and notes
 
-Owner: `src/app/share/[token]/page.tsx`; servers: `/api/share/[token]`, `/api/share/[token]/ceremonies/:id/photos`, `/api/share/[token]/download`, `/api/photos/:id`, `/api/comments`.
+Owner: `src/app/share/[token]/page.tsx`; servers: `/api/share/[token]`, `/api/share/[token]/ceremonies/:id/photos`, `/api/share/[token]/select`, `/api/share/[token]/download`, `/api/photos/:id`, `/api/comments`.
+
+Status: implemented (F-01…F-05). Selection is versioned in `src/lib/selection-machine.ts`; Select All/Clear use the token-scoped batch endpoint (one request).
 
 ## As-is
 

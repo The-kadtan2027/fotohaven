@@ -2,6 +2,8 @@
 
 Owners: `public/sw.js`, `src/components/PwaInstaller.tsx`, `src/app/manifest.ts`.
 
+Status: F-24/F-25 implemented (per-entry pre-cache, auth/admin/guest API cache exclusions, v3 caches).
+
 ## As-is
 
 ```mermaid
