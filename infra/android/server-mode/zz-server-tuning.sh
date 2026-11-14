@@ -8,6 +8,7 @@ LOG="$HOME/.pm2/server-tuning.log"
   for q in /sys/block/dm-*/queue/read_ahead_kb; do
     su -c "echo 2048 > $q" 2>/dev/null || true
   done
+  su -c "echo 1 > /sys/class/power_supply/battery/slowly_charging" 2>/dev/null || true
   su -c "/system/bin/settings put global settings_enable_monitor_phantom_procs false" 2>&1
   su -c "/system/bin/device_config put activity_manager max_phantom_processes 2147483647" 2>&1
   su -c "/system/bin/am set-standby-bucket --user 0 com.termux active" 2>&1
