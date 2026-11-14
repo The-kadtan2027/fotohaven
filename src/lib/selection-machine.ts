@@ -7,6 +7,7 @@ export interface SelectionState {
 
 export type SelectionAction =
   | { type: "replace"; ids: string[] }
+  | { type: "merge"; ids: string[] }
   | { type: "toggle"; id: string }
   | { type: "patch_ok"; id: string; version: number }
   | { type: "patch_fail"; id: string; version: number; previous: boolean }
@@ -40,6 +41,14 @@ export function selectionReducer(
   switch (action.type) {
     case "replace":
       return initialSelection(action.ids);
+
+    case "merge": {
+      const next = copy(state);
+      for (const id of action.ids) {
+        next.selected.add(id);
+      }
+      return next;
+    }
 
     case "toggle": {
       const next = copy(state);

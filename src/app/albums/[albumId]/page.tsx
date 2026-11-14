@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDropzone } from "react-dropzone";
@@ -34,6 +34,11 @@ import { buildDuplicateGroups, type AlbumPhoto } from "./album-utils";
 import { compressImageFile, computeDHashFromUrl, type CompressionFormat } from "@/lib/image-utils";
 import { useToast } from "@/components/ToastProvider";
 import { FACE_CONFIG } from "@/lib/face-config";
+import {
+  uploadQueueReducer,
+  type QueuedUpload,
+  type UploadStatus,
+} from "@/lib/upload-queue";
 
 interface Photo extends AlbumPhoto {
   size: number;
@@ -83,18 +88,27 @@ interface Album {
   activityLogs?: ActivityLog[];
 }
 
-type UploadStatus = "pending" | "uploading" | "done" | "error";
-
-interface UploadItem {
-  id: string;
+interface UploadItem extends QueuedUpload {
   file: File;
   ceremonyId: string;
   folderName?: string;
-  previewUrl?: string;
-  status: UploadStatus;
-  progress: number;
-  error?: string;
 }
+
+// Chromium exposes this on selected files; it is not part of the File type.
+function fileRelativePath(file: File): string {
+  const candidate = file as File & { webkitRelativePath?: string };
+  return candidate.webkitRelativePath ?? "";
+}
+
+// Non-standard directory-picker attributes are not in React's input types.
+const directoryInputProps = {
+  webkitdirectory: "",
+  directory: "",
+  multiple: true,
+} as React.InputHTMLAttributes<HTMLInputElement> & {
+  webkitdirectory: string;
+  directory: string;
+};
 
 export default function AlbumPage() {
   const { albumId } = useParams<{ albumId: string }>();
@@ -103,9 +117,14 @@ export default function AlbumPage() {
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCeremony, setActiveCeremony] = useState<string | null>(null);
-  const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const [uploads, dispatchUploads] = useReducer(
+    uploadQueueReducer<UploadItem>,
+    [] as UploadItem[]
+  );
+  const uploadLoopRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPreparingUploads, setIsPreparingUploads] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
@@ -114,7 +133,6 @@ export default function AlbumPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [compressionFormat, setCompressionFormat] = useState<CompressionFormat>("webp");
   const [compressionQuality, setCompressionQuality] = useState(80);
-  const [compressionConcurrency, setCompressionConcurrency] = useState(2);
   const [dedupThreshold, setDedupThreshold] = useState(10);
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
   const [isFindingDuplicates, setIsFindingDuplicates] = useState(false);
@@ -124,17 +142,25 @@ export default function AlbumPage() {
   const [isReprocessingFaces, setIsReprocessingFaces] = useState(false);
   const [enrollStatus, setEnrollStatus] = useState("");
   const [enrollRunning, setEnrollRunning] = useState(false);
+  const enrollCancelledRef = useRef(false);
   const [highThreshold, setHighThreshold] = useState(0.7);
   const [lowThreshold, setLowThreshold] = useState(0.55);
 
   const fetchAlbum = useCallback(async () => {
+    setLoadError("");
     try {
       const response = await fetch(`/api/albums/${albumId}`);
       if (response.status === 401) {
         router.replace("/login");
         return;
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "Album not found."
+            : `Couldn’t load this album (HTTP ${response.status}).`
+        );
+      }
       const data = await response.json();
       setAlbum(data);
       setCompressionFormat(data.compressionFormat ?? "webp");
@@ -151,9 +177,10 @@ export default function AlbumPage() {
 
       const validPhotoIds = new Set((data.ceremonies ?? []).flatMap((c: Ceremony) => c.photos.map((photo: Photo) => photo.id)));
       setSelectedPhotos((prev) => prev.filter((id) => validPhotoIds.has(id)));
-      setLoading(false);
     } catch (err) {
       console.error("Failed to fetch album", err);
+      setLoadError(err instanceof Error ? err.message : "Couldn’t load this album.");
+    } finally {
       setLoading(false);
     }
   }, [albumId, router]);
@@ -161,6 +188,13 @@ export default function AlbumPage() {
   useEffect(() => {
     fetchAlbum();
   }, [fetchAlbum]);
+
+  useEffect(() => {
+    enrollCancelledRef.current = false;
+    return () => {
+      enrollCancelledRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -203,7 +237,7 @@ export default function AlbumPage() {
 
       // Auto-resolve or create ceremonies for dropped folders
       for (const file of acceptedFiles) {
-        const relativePath = (file as any).webkitRelativePath || "";
+        const relativePath = fileRelativePath(file);
         const folderName = resolveFolderCeremonyName(relativePath);
 
         if (folderName && !ceremonyMap[folderName]) {
@@ -245,31 +279,36 @@ export default function AlbumPage() {
       }
 
       const prepared: UploadItem[] = acceptedFiles.map((file) => {
-        const relativePath = (file as any).webkitRelativePath || "";
+        const relativePath = fileRelativePath(file);
         const folderName = resolveFolderCeremonyName(relativePath);
-        const ceremonyId =
-          (folderName && ceremonyMap[folderName]) || activeCeremony || album.ceremonies[0]?.id || "";
+        const resolvedCeremonyId = folderName ? ceremonyMap[folderName] : undefined;
+        const ceremonyId = resolvedCeremonyId || (folderName ? "" : activeCeremony || album.ceremonies[0]?.id || "");
+        const missingCeremony = Boolean(folderName) && !resolvedCeremonyId;
 
         return {
-          id: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
+          id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
           file,
           ceremonyId,
           folderName: folderName || undefined,
-          status: "pending",
+          status: missingCeremony ? "error" : "pending",
+          error: missingCeremony
+            ? `Couldn’t create the ceremony folder “${folderName}”. Remove this file and retry.`
+            : undefined,
           progress: 0,
         };
       });
 
-      setUploads((prev) => [...prev, ...prepared]);
+      dispatchUploads({ type: "enqueue", items: prepared });
     } finally {
       setIsPreparingUploads(false);
     }
   }, [album, activeCeremony]);
 
-  // Auto-start upload when new pending files enter queue
+  // Auto-start upload when new pending files enter queue. The loop ref makes
+  // the effect idempotent even if a click lands in the same commit.
   useEffect(() => {
     const hasPending = uploads.some((item) => item.status === "pending");
-    if (hasPending && !isUploading && !isPreparingUploads) {
+    if (hasPending && !uploadLoopRef.current && !isPreparingUploads) {
       void uploadAll();
     }
   }, [uploads, isUploading, isPreparingUploads]);
@@ -287,6 +326,8 @@ export default function AlbumPage() {
     if (files.length > 0) {
       void onDrop(files);
     }
+    // Reset so choosing the same folder twice fires onChange again.
+    e.target.value = "";
   };
 
   const xhrUploadWithProgress = (url: string, file: File, onProgress: (pct: number) => void, retries = 3) =>
@@ -307,8 +348,26 @@ export default function AlbumPage() {
             onProgress(pct);
           }
         };
-        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? (onProgress(100), resolve()) : reject(new Error(`Upload failed (HTTP ${xhr.status})`));
-        xhr.onerror = () => attempt < retries ? window.setTimeout(tryUpload, Math.pow(2, attempt - 1) * 1000) : reject(new Error(`Upload failed after ${retries} retries`));
+
+        const retryOrFail = (error: Error) => {
+          if (attempt < retries) {
+            window.setTimeout(tryUpload, Math.pow(2, attempt - 1) * 1000);
+          } else {
+            reject(error);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            onProgress(100);
+            resolve();
+          } else if (xhr.status >= 500) {
+            retryOrFail(new Error(`Upload failed (HTTP ${xhr.status})`));
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+          }
+        };
+        xhr.onerror = () => retryOrFail(new Error(`Upload failed after ${retries} retries`));
         xhr.send(file);
       };
       tryUpload();
@@ -334,63 +393,110 @@ export default function AlbumPage() {
     throw new Error("Request failed after retries");
   };
 
+  const removeRemotePhoto = async (photoId?: string) => {
+    if (!photoId) return;
+    try {
+      await fetch(`/api/photos/${photoId}`, { method: "DELETE" });
+    } catch (err) {
+      console.warn("[upload] Failed to compensate phantom photo row", photoId, err);
+    }
+  };
+
+  const removeUpload = (item: UploadItem) => {
+    void removeRemotePhoto(item.remotePhotoId);
+    dispatchUploads({ type: "remove", id: item.id });
+  };
+
   const uploadAll = async () => {
-    const pending = uploads.filter((item) => item.status === "pending" || item.status === "error");
+    if (uploadLoopRef.current) return;
+    const pending = uploads.filter((item) => item.status === "pending");
     if (!pending.length) return;
+
+    uploadLoopRef.current = true;
     setIsUploading(true);
 
-    for (const item of pending) {
-      setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "uploading", progress: 0 } : entry)));
+    try {
+      for (const item of pending) {
+        if (!item.ceremonyId) {
+          dispatchUploads({
+            type: "fail",
+            id: item.id,
+            error: "No ceremony is available for this file.",
+          });
+          continue;
+        }
 
-      try {
-        // Streamed 1-by-1 compression right before upload transmit
-        const fileToUpload = await compressImageFile(
-          item.file,
-          compressionFormat,
-          compressionQuality
-        );
-        const origMb = (item.file.size / 1024 / 1024).toFixed(1);
-        const compMb = (fileToUpload.size / 1024 / 1024).toFixed(1);
-        console.info(`[upload] ${item.file.name}: ${origMb} MB -> ${compMb} MB (${compressionFormat.toUpperCase()} @ ${compressionQuality}%)`);
+        dispatchUploads({ type: "start", id: item.id });
+        let remotePhotoId: string | undefined;
 
-        // Fetch presigned upload URL with automatic exponential backoff retries (3 attempts)
-        const metaRes = await fetchWithRetry("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ceremonyId: item.ceremonyId,
-            filename: fileToUpload.name,
-            contentType: fileToUpload.type,
-            size: fileToUpload.size,
-          }),
-        });
+        try {
+          // Streamed 1-by-1 compression right before upload transmit
+          const fileToUpload = await compressImageFile(
+            item.file,
+            compressionFormat,
+            compressionQuality
+          );
+          const origMb = (item.file.size / 1024 / 1024).toFixed(1);
+          const compMb = (fileToUpload.size / 1024 / 1024).toFixed(1);
+          console.info(`[upload] ${item.file.name}: ${origMb} MB -> ${compMb} MB (${compressionFormat.toUpperCase()} @ ${compressionQuality}%)`);
 
-        if (!metaRes.ok) throw new Error(`Server returned HTTP ${metaRes.status}`);
-        const { uploadUrl } = await metaRes.json();
+          // Fetch presigned upload URL with automatic exponential backoff retries (3 attempts)
+          const metaRes = await fetchWithRetry("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ceremonyId: item.ceremonyId,
+              filename: fileToUpload.name,
+              contentType: fileToUpload.type,
+              size: fileToUpload.size,
+            }),
+          });
 
-        await xhrUploadWithProgress(uploadUrl, fileToUpload, (progress) => {
-          setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, progress } : entry)));
-        });
+          if (!metaRes.ok) throw new Error(`Server returned HTTP ${metaRes.status}`);
+          const metaData = (await metaRes.json()) as {
+            photoId?: string;
+            uploadUrl?: string;
+            error?: string;
+          };
+          if (!metaData.photoId || !metaData.uploadUrl) {
+            throw new Error(metaData.error || "Server did not return an upload target.");
+          }
 
-        // Instantly prune completed item by unique ID from UI queue
-        setUploads((prev) => prev.filter((entry) => entry.id !== item.id));
-      } catch (error) {
-        setUploads((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "error", error: String(error) } : entry)));
+          remotePhotoId = metaData.photoId;
+          dispatchUploads({
+            type: "attachRemote",
+            id: item.id,
+            remotePhotoId,
+            uploadUrl: metaData.uploadUrl,
+          });
+
+          await xhrUploadWithProgress(metaData.uploadUrl, fileToUpload, (progress) => {
+            dispatchUploads({ type: "progress", id: item.id, progress });
+          });
+
+          dispatchUploads({ type: "succeed", id: item.id });
+          remotePhotoId = undefined;
+        } catch (error) {
+          // The metadata POST creates the photo row before the bytes land.
+          // Compensate so a failed transfer cannot leave a phantom photo.
+          await removeRemotePhoto(remotePhotoId);
+          dispatchUploads({
+            type: "fail",
+            id: item.id,
+            error: error instanceof Error ? error.message : "Upload failed.",
+          });
+        }
       }
+    } finally {
+      uploadLoopRef.current = false;
+      setIsUploading(false);
     }
 
-    setIsUploading(false);
     await fetchAlbum();
   };
 
   const retrySingleUpload = (item: UploadItem) => {
-    setUploads((prev) =>
-      prev.map((entry) =>
-        entry.id === item.id
-          ? { ...entry, status: "pending", error: undefined }
-          : entry
-      )
-    );
+    dispatchUploads({ type: "retry", id: item.id });
   };
 
   const copyShareLink = async () => {
@@ -601,6 +707,7 @@ export default function AlbumPage() {
 
     setEnrollRunning(true);
     setEnrollStatus("Starting...");
+    const deadline = Date.now() + 10 * 60_000;
 
     try {
       const response = await fetch(`/api/admin/enroll/${album.id}`, { method: "POST" });
@@ -611,7 +718,14 @@ export default function AlbumPage() {
 
       let done = false;
       while (!done) {
+        if (enrollCancelledRef.current) return;
+        if (Date.now() > deadline) {
+          throw new Error("Face enrollment is taking too long. Check the face service and try again.");
+        }
+
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        if (enrollCancelledRef.current) return;
+
         const statusResp = await fetch(`/api/admin/enroll/${album.id}`, { cache: "no-store" });
         const statusData = await statusResp.json().catch(() => ({}));
 
@@ -638,10 +752,12 @@ export default function AlbumPage() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Face enrollment failed";
-      setEnrollStatus(`Error: ${message}`);
-      toast(message, "error");
+      if (!enrollCancelledRef.current) {
+        setEnrollStatus(`Error: ${message}`);
+        toast(message, "error");
+      }
     } finally {
-      setEnrollRunning(false);
+      if (!enrollCancelledRef.current) setEnrollRunning(false);
     }
   };
 
@@ -689,6 +805,24 @@ export default function AlbumPage() {
   const usesServiceEnrollment = usesRemoteFaceEnrollment || usesLocalNativeFaceEnrollment;
 
   if (loading) return <CenteredState><Loader2 size={32} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} /></CenteredState>;
+  if (loadError) {
+    return (
+      <CenteredState>
+        <div style={{ textAlign: "center", display: "grid", gap: 14 }}>
+          <p style={{ fontSize: 15, color: "var(--espresso)" }}>{loadError}</p>
+          <button
+            className="btn-gold"
+            onClick={() => {
+              setLoading(true);
+              void fetchAlbum();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </CenteredState>
+    );
+  }
   if (!album || (!activeCeremonyData && activeCeremony !== "ACTIVITY")) return <CenteredState><p>Album not found.</p></CenteredState>;
 
   const totalPhotos = album.ceremonies.reduce((sum, ceremony) => sum + ceremony.photos.length, 0);
@@ -702,7 +836,7 @@ export default function AlbumPage() {
         ref={folderInputRef}
         type="file"
         style={{ display: "none" }}
-        {...({ webkitdirectory: "", directory: "", multiple: true } as any)}
+        {...directoryInputProps}
         onChange={handleFolderSelect}
       />
       <header className="glass px-4 md:px-8" style={{ position: "sticky", top: 0, zIndex: 50, borderBottom: "1px solid var(--sand)" }}>
@@ -835,11 +969,6 @@ export default function AlbumPage() {
                       <input type="range" min={10} max={100} value={compressionQuality} onChange={(event) => setCompressionQuality(Number(event.target.value))} />
                     </label>
                     <label style={{ display: "grid", gap: 8 }}>
-                      <span style={settingsLabel}>Preparation Concurrency: {compressionConcurrency}</span>
-                      <input type="range" min={1} max={4} value={compressionConcurrency} onChange={(event) => setCompressionConcurrency(Number(event.target.value))} />
-                      <span style={{ fontSize: 12, color: "var(--brown)" }}>Browser-only setting. Higher values may prepare faster on strong laptops but can make weaker machines stutter.</span>
-                    </label>
-                    <label style={{ display: "grid", gap: 8 }}>
                       <span style={settingsLabel}>Duplicate Threshold: {dedupThreshold}</span>
                       <input type="range" min={1} max={20} value={dedupThreshold} onChange={(event) => setDedupThreshold(Number(event.target.value))} />
                       <span style={{ fontSize: 12, color: "var(--brown)" }}>Lower values are stricter. Higher values group looser visual matches.</span>
@@ -907,7 +1036,7 @@ export default function AlbumPage() {
                   uploads={uploads} 
                   isUploading={isUploading} 
                   onUploadAll={uploadAll} 
-                  onClear={(id) => setUploads((prev) => prev.filter((entry) => entry.id !== id))}
+                  onClear={removeUpload}
                   onRetry={retrySingleUpload}
                 />
               )}
@@ -988,17 +1117,16 @@ function UploadQueue({
   uploads: UploadItem[];
   isUploading: boolean;
   onUploadAll: () => void;
-  onClear: (id: string) => void;
+  onClear: (item: UploadItem) => void;
   onRetry: (item: UploadItem) => void;
 }) {
-  const pendingCount = uploads.filter((i) => i.status === "pending" || i.status === "error").length;
-  const doneCount = uploads.filter((i) => i.status === "done").length;
+  const pendingCount = uploads.filter((i) => i.status === "pending").length;
+  const errorCount = uploads.filter((i) => i.status === "error").length;
   const totalSizeMb = (uploads.reduce((sum, item) => sum + item.file.size, 0) / 1024 / 1024).toFixed(1);
 
   // Overall progress percentage
   const totalProgress = Math.round(
     uploads.reduce((sum, item) => {
-      if (item.status === "done") return sum + 100;
       if (item.status === "uploading") return sum + item.progress;
       return sum;
     }, 0) / (uploads.length || 1)
@@ -1010,7 +1138,7 @@ function UploadQueue({
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <p style={{ fontSize: 14, fontWeight: 600, color: "var(--espresso)" }}>
-              Upload Queue ({pendingCount} items remaining)
+              Upload Queue ({pendingCount} pending{errorCount > 0 ? `, ${errorCount} failed` : ""})
             </p>
             <span style={{ fontSize: 11, background: "var(--sand)", color: "var(--brown)", padding: "2px 8px", borderRadius: 100, fontWeight: 500 }}>
               {totalSizeMb} MB total
@@ -1046,18 +1174,10 @@ function UploadQueue({
       {/* Queue items list with Live Thumbnails */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {uploads
-          .filter((item) => item.status !== "done")
           .map((item) => (
             <div key={item.id} style={{ background: "var(--warm-white)", borderRadius: 10, border: "1px solid var(--sand)", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
-              {/* Live Thumbnail Preview */}
-              {item.previewUrl ? (
-                <div style={{ width: 36, height: 36, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--sand)" }}>
-                  <img src={item.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                </div>
-              ) : (
-                <StatusIcon status={item.status} />
-              )}
+              <StatusIcon status={item.status} />
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1102,7 +1222,7 @@ function UploadQueue({
 
               {item.status !== "uploading" && (
                 <button
-                  onClick={() => onClear(item.id)}
+                  onClick={() => onClear(item)}
                   title="Remove from queue"
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--taupe)", padding: 4, display: "flex", alignItems: "center" }}
                 >
@@ -1125,7 +1245,6 @@ function UploadQueue({
 
 function StatusIcon({ status }: { status: UploadStatus }) {
   if (status === "uploading") return <Loader2 size={14} color="var(--gold)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />;
-  if (status === "done") return <Check size={14} color="var(--sage)" style={{ flexShrink: 0 }} />;
   if (status === "error") return <X size={14} color="var(--blush)" style={{ flexShrink: 0 }} />;
   return <div style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px solid var(--taupe)", flexShrink: 0 }} />;
 }
@@ -1190,33 +1309,6 @@ function appendHidden(form: HTMLFormElement, name: string, value: string) {
   form.appendChild(input);
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>
-) {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, () => worker())
-  );
-
-  return results;
-}
-
-function formatMb(size: number) {
-  return (size / 1024 / 1024).toFixed(1);
-}
-
 function parseActivityPayload(payload: string | null) {
   if (!payload) return null;
   try {
@@ -1275,14 +1367,16 @@ function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
           color = "#3b82f6";
           bgColor = "rgba(59, 130, 246, 0.1)";
         } else if (log.eventType === "photo_selected") {
-          title = "Photo Selected";
-          description = <>{name} selected a photo.</>;
+          const count = typeof payloadData?.count === "number" ? payloadData.count : 1;
+          title = count > 1 ? "Photos Selected" : "Photo Selected";
+          description = <>{name} selected {count > 1 ? `${count} photos` : "a photo"}.</>;
           Icon = Check;
           color = "var(--gold)";
           bgColor = "rgba(201, 150, 58, 0.15)";
         } else if (log.eventType === "photo_deselected") {
-          title = "Photo Deselected";
-          description = <>{name} removed a photo from their selection.</>;
+          const count = typeof payloadData?.count === "number" ? payloadData.count : 1;
+          title = count > 1 ? "Photos Deselected" : "Photo Deselected";
+          description = <>{name} removed {count > 1 ? `${count} photos` : "a photo"} from their selection.</>;
           Icon = X;
           color = "var(--taupe)";
           bgColor = "rgba(176, 164, 147, 0.15)";

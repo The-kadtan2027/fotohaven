@@ -36,6 +36,11 @@ export default function NewAlbumPage() {
   const removeCeremony = (name: string) =>
     setCeremonies((prev) => prev.filter((c) => c !== name));
 
+  const goToStep = (next: number) => {
+    setError("");
+    setStep(next);
+  };
+
   const handleSubmit = async () => {
     if (!title || !clientName || ceremonies.length === 0) {
       setError("Please complete all required fields.");
@@ -44,6 +49,11 @@ export default function NewAlbumPage() {
     setLoading(true);
     setError("");
     try {
+      // A date input means "the selected day"; send the user's local end of day.
+      const expiresAtIso = expiresAt
+        ? new Date(`${expiresAt}T23:59:59.999`).toISOString()
+        : null;
+
       const res = await authFetch("/api/albums", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,16 +61,23 @@ export default function NewAlbumPage() {
           title, 
           clientName, 
           ceremonies, 
-          expiresAt: expiresAt || null,
+          expiresAt: expiresAtIso,
           password: password || null,
           notifyEmail: notifyEmail || null
         }),
       });
-      if (!res.ok) throw new Error("Failed to create album");
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Failed to create album");
+      }
       const album = await res.json();
       router.push(`/albums/${album.id}`);
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setLoading(false);
     }
   };
@@ -112,7 +129,7 @@ export default function NewAlbumPage() {
                 Album Details
               </h1>
               <p style={{ color: "var(--brown)", fontSize: 14, marginBottom: 32 }}>
-                Name this album and tell us who it's for.
+                Name this album and tell us who it&apos;s for.
               </p>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -127,7 +144,7 @@ export default function NewAlbumPage() {
                   />
                 </div>
                 <div>
-                  <label style={labelStyle}>Photographer's Name</label>
+                  <label style={labelStyle}>Photographer&apos;s Name</label>
                   <input
                     className="input"
                     placeholder="e.g. Rahul Mehta Photography"
@@ -140,7 +157,7 @@ export default function NewAlbumPage() {
               <div style={{ marginTop: 32, display: "flex", justifyContent: "flex-end" }}>
                 <button
                   className="btn-primary"
-                  onClick={() => { if (title && clientName) setStep(2); else setError("Please fill both fields."); }}
+                  onClick={() => { if (title && clientName) goToStep(2); else setError("Please fill both fields."); }}
                 >
                   Next
                   <ChevronRight size={16} />
@@ -217,13 +234,13 @@ export default function NewAlbumPage() {
               )}
 
               <div style={{ marginTop: 32, display: "flex", justifyContent: "space-between" }}>
-                <button className="btn-ghost" onClick={() => setStep(1)}>
+                <button className="btn-ghost" onClick={() => goToStep(1)}>
                   <ArrowLeft size={14} />
                   Back
                 </button>
                 <button
                   className="btn-primary"
-                  onClick={() => { if (ceremonies.length > 0) setStep(3); else setError("Add at least one ceremony."); }}
+                  onClick={() => { if (ceremonies.length > 0) goToStep(3); else setError("Add at least one ceremony."); }}
                 >
                   Next
                   <ChevronRight size={16} />
@@ -291,7 +308,7 @@ export default function NewAlbumPage() {
                     onChange={(e) => setNotifyEmail(e.target.value)}
                   />
                   <p style={{ fontSize: 12, color: "var(--taupe)", marginTop: 4 }}>
-                    We'll email you as soon as the client opens the link.
+                    We&apos;ll email you as soon as the client opens the link.
                   </p>
                 </div>
               </div>
@@ -317,7 +334,7 @@ export default function NewAlbumPage() {
               )}
 
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <button className="btn-ghost" onClick={() => setStep(2)}>
+                <button className="btn-ghost" onClick={() => goToStep(2)}>
                   <ArrowLeft size={14} />
                   Back
                 </button>

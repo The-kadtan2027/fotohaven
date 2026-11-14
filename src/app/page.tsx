@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Image as ImageIcon, Share2, Clock, FolderOpen, Trash2, LogOut, User, Eye, Star, Settings, QrCode, X, Download } from "lucide-react";
+import { Plus, Image as ImageIcon, Share2, Clock, FolderOpen, Trash2, LogOut, User, Eye, Star, Settings, QrCode, X, Download, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import QRCode from "qrcode";
 
@@ -35,21 +35,35 @@ export default function Home() {
   const { toast, confirm } = useToast();
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [username, setUsername] = useState<string | null>(null);
   const [qrToken, setQrToken] = useState<string | null>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const fetchAlbums = useCallback(() => {
-    fetch("/api/albums")
-      .then((r) => r.json())
-      .then((data) => { 
-        setAlbums(data); 
-        setLoading(false); 
-      })
-      .catch((err) => { 
-        console.error("Failed to fetch albums", err); 
-        setLoading(false); 
-      });
-  }, []);
+  const fetchAlbums = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await fetch("/api/albums");
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Couldn’t load albums (HTTP ${response.status}).`);
+      }
+      const data: unknown = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected album list response.");
+      }
+      setAlbums(data as AlbumSummary[]);
+    } catch (err) {
+      console.error("Failed to fetch albums", err);
+      setLoadError(err instanceof Error ? err.message : "Couldn’t load albums.");
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
 
   useEffect(() => {
     // Check auth first
@@ -104,20 +118,22 @@ export default function Home() {
 
   const showQr = (token: string) => {
     setQrToken(token);
-    setTimeout(() => {
-      const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement | null;
-      if (canvas) {
-        QRCode.toCanvas(canvas, shareUrl(token), {
-          width: 280,
-          margin: 2,
-          color: { dark: "#1a1208", light: "#faf7f2" },
-        }).catch(console.error);
-      }
-    }, 50);
   };
 
+  useEffect(() => {
+    if (!qrToken || !qrCanvasRef.current) return;
+    QRCode.toCanvas(qrCanvasRef.current, shareUrl(qrToken), {
+      width: 280,
+      margin: 2,
+      color: { dark: "#1a1208", light: "#faf7f2" },
+    }).catch((err) => {
+      console.error("[QR] Failed to render", err);
+      toast("Couldn’t render the QR code.", "error");
+    });
+  }, [qrToken, toast]);
+
   const downloadQr = () => {
-    const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement | null;
+    const canvas = qrCanvasRef.current;
     if (!canvas || !qrToken) return;
     const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
@@ -148,7 +164,13 @@ export default function Home() {
   }, 0);
 
   if (!username) {
-    return <div style={{ minHeight: "100vh", background: "var(--cream)" }} />;
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cream)", gap: 12 }}>
+        <Loader2 size={24} color="var(--taupe)" style={{ animation: "spin 1s linear infinite" }} />
+        <span style={{ fontSize: 14, color: "var(--brown)" }}>Loading dashboard…</span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
   }
 
   return (
@@ -223,6 +245,15 @@ export default function Home() {
             {[1, 2, 3].map((i) => (
               <div key={i} className="skeleton" style={{ height: 260, borderRadius: 16 }} />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
+            <p role="alert" style={{ fontSize: 15, color: "var(--blush)", marginBottom: 16 }}>
+              {loadError}
+            </p>
+            <button className="btn-gold" onClick={() => void fetchAlbums()}>
+              Retry
+            </button>
           </div>
         ) : albums.length === 0 ? (
           <EmptyState />
@@ -357,7 +388,7 @@ export default function Home() {
             <p style={{ fontSize: 12, color: "var(--taupe)", marginBottom: 24 }}>Scan to open the gallery</p>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
               <canvas
-                id="qr-canvas"
+                ref={qrCanvasRef}
                 style={{ borderRadius: 12, border: "1px solid var(--sand)" }}
               />
             </div>

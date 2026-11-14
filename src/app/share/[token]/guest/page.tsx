@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -19,6 +19,12 @@ import {
 } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { averageDescriptors } from "@/lib/face-math";
+import {
+  canCapture,
+  initialScanState,
+  isScanBusy,
+  scanReducer,
+} from "@/lib/guest-scan";
 
 type Photo = {
   id: string;
@@ -69,7 +75,7 @@ export default function GuestFaceDiscoveryPage() {
   const [matchedPhotos, setMatchedPhotos] = useState<MatchedPhoto[]>([]);
   const [guestName, setGuestName] = useState("");
   const [isReturningGuest, setIsReturningGuest] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
+  const [scanState, dispatchScan] = useReducer(scanReducer, initialScanState);
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [isFlashing, setIsFlashing] = useState(false);
   const [confirmedPhotoIds, setConfirmedPhotoIds] = useState<string[]>([]);
@@ -101,7 +107,6 @@ export default function GuestFaceDiscoveryPage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setCameraReady(false);
   }
 
   useEffect(() => {
@@ -203,7 +208,17 @@ export default function GuestFaceDiscoveryPage() {
       if (data.hasFaceDescriptor) {
         setIsReturningGuest(true);
         setStatus("Loading your matched photos...");
-        await loadMatchedPhotos({ source: "selfie" });
+        try {
+          await loadMatchedPhotos({ source: "selfie" });
+        } catch (matchErr) {
+          setStatus("");
+          setError(
+            matchErr instanceof Error
+              ? matchErr.message
+              : "Couldn’t load your matches. Rescan your face to try again."
+          );
+          setStep("results");
+        }
       } else {
         setStep("consent");
       }
@@ -218,6 +233,7 @@ export default function GuestFaceDiscoveryPage() {
     const targetMode = mode || facingMode;
     setError("");
     stopCamera();
+    dispatchScan({ type: "start" });
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: targetMode, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -227,9 +243,13 @@ export default function GuestFaceDiscoveryPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      setCameraReady(true);
+      dispatchScan({ type: "ready" });
     } catch {
-      setError("Camera access is blocked or unavailable. Try uploading a face photo instead.");
+      dispatchScan({
+        type: "fail",
+        message:
+          "Camera access is blocked or unavailable. Retry, or upload a face photo instead.",
+      });
     }
   }
 
@@ -253,24 +273,26 @@ export default function GuestFaceDiscoveryPage() {
     return faceApiPromiseRef.current;
   }
 
-function parseNativeMatches(recogData: any): Array<{ photoId: string; score: number }> {
-  const parseList = (list: any[], fallbackScore: number) => {
+function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score: number }> {
+  const parseList = (list: unknown, fallbackScore: number) => {
     if (!Array.isArray(list)) return [];
     return list
       .map((item) => {
         if (typeof item === "string") return { photoId: item, score: fallbackScore };
         if (typeof item === "object" && item !== null) {
-          const photoId = item.photo_id || item.photoId || item.id;
-          const score = typeof item.score === "number" ? item.score : fallbackScore;
-          return { photoId, score };
+          const candidate = item as Record<string, unknown>;
+          const photoId = candidate.photo_id ?? candidate.photoId ?? candidate.id;
+          const score = typeof candidate.score === "number" ? candidate.score : fallbackScore;
+          return typeof photoId === "string" ? { photoId, score } : null;
         }
         return null;
       })
-      .filter((m): m is { photoId: string; score: number } => Boolean(m && m.photoId));
+      .filter((m): m is { photoId: string; score: number } => Boolean(m));
   };
 
-  const definite = parseList(recogData.definite, 0.75);
-  const possible = parseList(recogData.possible, 0.55);
+  const record = (recogData ?? {}) as Record<string, unknown>;
+  const definite = parseList(record.definite, 0.75);
+  const possible = parseList(record.possible, 0.55);
 
   // Definite matches (high threshold >= 0.65) are primary. Only fall back to possible if definite is empty.
   const selected = definite.length > 0 ? definite : possible;
@@ -287,62 +309,66 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
 }
 
   async function scanAndMatch() {
-    if (!videoRef.current || !cameraReady) return;
+    if (!videoRef.current || !canCapture(scanState)) return;
     setIsFlashing(true);
     setTimeout(() => setIsFlashing(false), 150);
+    dispatchScan({ type: "capture" });
     setBusy(true);
     setError("");
     setStatus("Analyzing face...");
+    let canvas: HTMLCanvasElement | null = null;
 
     try {
       // 1. Capture instant video frame Base64
-      const canvas = document.createElement("canvas");
+      canvas = document.createElement("canvas");
       canvas.width = videoRef.current.videoWidth || 640;
       canvas.height = videoRef.current.videoHeight || 480;
       const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      }
+      if (!ctx) throw new Error("Couldn’t read the camera frame. Retry.");
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+      if (!imageB64) throw new Error("The camera returned an empty frame. Retry.");
 
       stopCamera();
 
       // 2. Native Python Face Recognition backend (Instant 1-Click Search)
-      if (imageB64) {
-        try {
-          const recogRes = await fetch("/api/recognize", {
+      try {
+        const recogRes = await fetch("/api/recognize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+        });
+        if (recogRes.ok) {
+          const recogData = await recogRes.json();
+          const nativeMatches = parseNativeMatches(recogData);
+          const enrollRes = await fetch("/api/guest/enroll-face", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+            body: JSON.stringify({ nativeMatches }),
           });
-          if (recogRes.ok) {
-            const recogData = await recogRes.json();
-            const nativeMatches = parseNativeMatches(recogData);
-            await fetch("/api/guest/enroll-face", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ nativeMatches }),
-            });
-            await loadMatchedPhotos({ source: "selfie" });
-            return;
+          if (!enrollRes.ok) {
+            const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(errData.error || "Failed to save face profile.");
           }
-        } catch {
-          /* Fallback to browser face-api */
+          await loadMatchedPhotos({ source: "selfie" });
+          return;
         }
+      } catch {
+        /* Fallback to browser face-api */
       }
 
       // 3. Browser face-api backend (Single-frame detection)
       const faceapi = await getFaceApi();
       const detection = await faceapi
         .detectSingleFace(
-          canvas as any,
+          canvas,
           new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
         )
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (!detection) {
-        throw new Error("No face was detected. Please center your face inside the oval guide and try again.");
+        throw new Error("No face was detected. Center your face inside the oval guide and try again.");
       }
 
       const enrollRes = await fetch("/api/guest/enroll-face", {
@@ -352,14 +378,20 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
       });
 
       if (!enrollRes.ok) {
-        const errData = await enrollRes.json();
+        const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(errData.error || "Failed to save face profile.");
       }
 
       await loadMatchedPhotos({ source: "selfie" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Face scan failed.");
+      const message = err instanceof Error ? err.message : "Face scan failed.";
+      setStatus("");
+      dispatchScan({ type: "fail", message });
     } finally {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
       setBusy(false);
     }
   }
@@ -390,11 +422,15 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
         if (recogRes.ok) {
           const recogData = await recogRes.json();
           const nativeMatches = parseNativeMatches(recogData);
-          await fetch("/api/guest/enroll-face", {
+          const enrollRes = await fetch("/api/guest/enroll-face", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ nativeMatches }),
           });
+          if (!enrollRes.ok) {
+            const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(errData.error || "Failed to save face profile.");
+          }
           stopCamera();
           await loadMatchedPhotos({ source: "selfie" });
           return;
@@ -435,13 +471,15 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
       });
 
       if (!enrollRes.ok) {
-        const errData = await enrollRes.json();
+        const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(errData.error || "Failed to save face profile.");
       }
 
       await loadMatchedPhotos({ source: "selfie" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to process uploaded face photo.");
+      const message = err instanceof Error ? err.message : "Failed to process uploaded face photo.";
+      setStatus("");
+      dispatchScan({ type: "fail", message });
     } finally {
       setBusy(false);
       if (uploadInputRef.current) uploadInputRef.current.value = "";
@@ -552,8 +590,15 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
     setConfirmedPhotoIds([]);
     setError("");
     setStatus("");
+    dispatchScan({ type: "reset" });
     setStep("scan");
     void startCamera();
+  }
+
+  function backToConsent() {
+    stopCamera();
+    dispatchScan({ type: "reset" });
+    setStep("consent");
   }
 
   // Mobile Touch Swipe Handlers for Lightbox
@@ -671,6 +716,9 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
   }
 
   const matchLabel = matchSource === "refined" ? "Refined matches" : "Initial selfie matches";
+  const scanBusy = isScanBusy(scanState);
+  const shutterReady = canCapture(scanState) && !busy;
+  const scanFailed = scanState.phase === "error";
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)", padding: "32px 16px" }}>
@@ -748,6 +796,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
               <button
                 className="btn-gold"
                 onClick={() => {
+                  dispatchScan({ type: "reset" });
                   setStep("scan");
                   void startCamera();
                 }}
@@ -874,18 +923,77 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
                   width: 8,
                   height: 8,
                   borderRadius: "50%",
-                  background: busy ? "#f59e0b" : cameraReady ? "#22c55e" : "#9ca3af",
-                  boxShadow: cameraReady && !busy ? "0 0 10px #22c55e" : "none",
+                  background: scanFailed
+                    ? "#f87171"
+                    : scanBusy
+                      ? "#f59e0b"
+                      : canCapture(scanState)
+                        ? "#22c55e"
+                        : "#9ca3af",
+                  boxShadow: canCapture(scanState) && !scanBusy ? "0 0 10px #22c55e" : "none",
                 }}
               />
-              {busy ? status || "Analyzing face..." : "Align face inside oval"}
+              {scanFailed
+                ? "Scan failed"
+                : scanBusy
+                  ? scanState.phase === "capturing"
+                    ? status || "Analyzing face..."
+                    : "Starting camera…"
+                  : canCapture(scanState)
+                    ? "Align face inside oval"
+                    : "Preparing camera…"}
             </div>
+
+            {scanFailed ? (
+              <div
+                role="alert"
+                style={{
+                  position: "absolute",
+                  left: 20,
+                  right: 20,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  margin: "0 auto",
+                  maxWidth: 380,
+                  background: "rgba(26,18,8,0.92)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: 16,
+                  padding: 22,
+                  color: "#fff",
+                  zIndex: 25,
+                  textAlign: "center",
+                  backdropFilter: "blur(14px)",
+                }}
+              >
+                <p style={{ fontSize: 14, lineHeight: 1.5, marginBottom: 18 }}>{scanState.message}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button type="button" className="btn-gold" onClick={() => void startCamera()}>
+                    Retry camera
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => uploadInputRef.current?.click()}
+                    style={{ color: "#fff", borderColor: "rgba(255,255,255,0.3)" }}
+                  >
+                    Upload a face photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={backToConsent}
+                    style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", fontSize: 13, cursor: "pointer", padding: 6 }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {/* Top-Right Camera Flip Button */}
             <button
               type="button"
               onClick={toggleFacingMode}
-              disabled={busy}
+              disabled={scanBusy}
               title="Switch Camera (Front/Rear)"
               style={{
                 position: "absolute",
@@ -930,7 +1038,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
               <button
                 type="button"
                 onClick={() => uploadInputRef.current?.click()}
-                disabled={busy}
+                disabled={scanBusy}
                 title="Upload face photo instead"
                 style={{
                   background: "rgba(255, 255, 255, 0.16)",
@@ -952,7 +1060,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
               {/* Tactical iOS Dual-Ring Shutter Button */}
               <button
                 onClick={scanAndMatch}
-                disabled={busy || !cameraReady}
+                disabled={!shutterReady}
                 title="Capture snapshot"
                 style={{
                   width: 76,
@@ -964,7 +1072,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  cursor: busy || !cameraReady ? "not-allowed" : "pointer",
+                  cursor: !shutterReady ? "not-allowed" : "pointer",
                   padding: 0,
                   transition: "transform 0.15s ease",
                 }}
@@ -974,8 +1082,8 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
                     width: 58,
                     height: 58,
                     borderRadius: "50%",
-                    background: busy ? "#9ca3af" : "#f59e0b",
-                    boxShadow: "0 0 18px rgba(245, 158, 11, 0.7)",
+                    background: shutterReady ? "#f59e0b" : "#6b7280",
+                    boxShadow: shutterReady ? "0 0 18px rgba(245, 158, 11, 0.7)" : "none",
                     transition: "background 0.2s ease",
                   }}
                 />
@@ -984,10 +1092,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
               {/* Close / Exit Button */}
               <button
                 type="button"
-                onClick={() => {
-                  stopCamera();
-                  setStep("consent");
-                }}
+                onClick={backToConsent}
                 title="Close camera"
                 style={{
                   background: "rgba(255, 255, 255, 0.16)",
@@ -1051,7 +1156,7 @@ function parseNativeMatches(recogData: any): Array<{ photoId: string; score: num
                 onClick={() => handleReviewChoice(true)}
                 disabled={busy}
               >
-                Yes, that's me
+                Yes, that&apos;s me
               </button>
             </div>
 
