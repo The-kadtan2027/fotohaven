@@ -51,6 +51,9 @@ Everything is in:
   and at/below the resume SoC.
 - At setup time the phone was at 96%, so it stopped immediately and will
   discharge to 75% before charging back to 80%. This is intentional.
+- Android may still display “Charging” after the limit stops it; the SMB5
+  `status` node is stale. `battery_charging_enabled=0` plus positive
+  `current_now` is the authoritative stopped state.
 - Log: `~/charge-limit.log`; transitions only (STOP / RESUME / SLOW_CHARGE / errors).
 - Stop charging does **not** create a true power bypass: with USB connected,
   `battery_charging_enabled=0` leaves the phone running mostly from the battery
@@ -77,6 +80,13 @@ Everything is in:
 - Retains 7 daily DB copies; weekly (Sunday) uploads manifest, retained 30 days.
 - Never deletes or modifies live uploads. Log: `~/daily-backup.log`.
 - `--once` is available for a manual run; verified at setup (31 MB, integrity ok).
+
+### One-screen status
+```sh
+~/bin/fotohaven-status.sh
+```
+Prints PM2, runit service status, battery limit state, local/public HTTP,
+disk, and the last charge/guard log lines.
 
 
 
