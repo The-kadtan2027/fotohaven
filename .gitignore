@@ -66,3 +66,7 @@ pm2/
 Thumbs.db
 *.tflite
 
+
+# Python
+__pycache__/
+*.py[cod]
