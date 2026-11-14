@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/sh
 # Make sure runit is supervising the server daemons after boot.
 # Termux:Boot may already have started it; do not create a second runsvdir.
+export PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:$PATH"
 termux-wake-lock 2>/dev/null || true
 PREFIX=/data/data/com.termux/files/usr
 if ! pgrep -f "$PREFIX/bin/runsvdir" >/dev/null 2>&1; then

@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/sh
 # Persistent server-mode tuning for the FotoHaven phone. Safe to run repeatedly.
+export PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:$PATH"
 sleep 5
 LOG="$HOME/.pm2/server-tuning.log"
 {
