@@ -5,17 +5,27 @@ import { eq } from "drizzle-orm";
 import { deleteFile } from "@/lib/storage";
 import { getOptionalGuestFromRequest, logActivity } from "@/lib/activity-log";
 import { logger } from "@/lib/logger";
-import { withHandler, apiSuccess, apiBadRequest, apiNotFound } from "@/lib/api-response";
+import { withHandler, apiSuccess, apiBadRequest, apiNotFound, apiUnauthorized } from "@/lib/api-response";
+import { hasPhotographerSession } from "@/lib/request-auth";
+import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
 
 type Context = { params: Promise<{ photoId: string }> };
 
 export const DELETE = withHandler("DELETE /api/photos/[photoId]", async (req: NextRequest, { params }: Context) => {
   const { photoId } = await params;
 
-  // Look up the photo to get its storageKey
-  const photo = await db.query.photos.findFirst({
-    where: eq(photos.id, photoId),
-  });
+  // Look up the photo to get its storageKey and owning album
+  const photo = db
+    .select({
+      id: photos.id,
+      storageKey: photos.storageKey,
+      thumbnailKey: photos.thumbnailKey,
+      albumId: ceremonies.albumId,
+    })
+    .from(photos)
+    .innerJoin(ceremonies, eq(photos.ceremonyId, ceremonies.id))
+    .where(eq(photos.id, photoId))
+    .get();
 
   if (!photo) {
     return apiNotFound("Photo not found");
@@ -29,6 +39,7 @@ export const DELETE = withHandler("DELETE /api/photos/[photoId]", async (req: Ne
 
   // Delete photo row from database
   await db.delete(photos).where(eq(photos.id, photoId)).run();
+  invalidateAlbumVectorCache(photo.albumId);
 
   logger.info("STORAGE", `Deleted photo ${photoId} (${photo.storageKey})`);
   return apiSuccess({ deletedPhotoId: photoId });
@@ -63,6 +74,10 @@ export const PATCH = withHandler("PATCH /api/photos/[photoId]", async (req: Next
   }
 
   if ("imageHash" in body) {
+    // imageHash is an admin-only index field; selection is public (share page).
+    if (!(await hasPhotographerSession())) {
+      return apiUnauthorized("Unauthorized");
+    }
     if (body.imageHash !== null && (typeof body.imageHash !== "string" || !/^[0-9a-f]{16}$/i.test(body.imageHash))) {
       return apiBadRequest("imageHash must be a 16-character hex string or null");
     }

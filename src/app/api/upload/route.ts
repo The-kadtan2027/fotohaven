@@ -5,6 +5,7 @@ import { UploadPhotoPayload, UploadPhotoResponse } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { ceremonies, photos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { authorizeLocalUploadUrl } from "@/lib/upload-token";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const MAX_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -66,8 +67,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Return a presigned PUT URL — client uploads directly to R2
-    const uploadUrl = await getPresignedUploadUrl(storageKey, body.contentType);
+    // Return a presigned PUT URL — client uploads directly to R2/local storage
+    const uploadUrl = await authorizeLocalUploadUrl(
+      await getPresignedUploadUrl(storageKey, body.contentType),
+      storageKey
+    );
 
     const response: UploadPhotoResponse = { photoId, uploadUrl, storageKey };
     return NextResponse.json(response, { status: 201 });

@@ -43,24 +43,44 @@ function noStoreJson(body: unknown, init?: ResponseInit) {
 }
 
 async function getAuthenticatedGuest() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get(getGuestCookieName())?.value;
-  if (!session) {
+  try {
+    const cookieStore = await cookies();
+    const session = cookieStore.get(getGuestCookieName())?.value;
+    if (!session) {
+      return null;
+    }
+
+    const payload = await verifyGuestSession(session);
+    const guest = db
+      .select()
+      .from(guests)
+      .where(and(eq(guests.id, payload.sub), eq(guests.albumId, payload.albumId)))
+      .get();
+
+    if (!guest || !guest.sessionToken || guest.sessionToken !== payload.st) {
+      return null;
+    }
+
+    return guest;
+  } catch {
     return null;
   }
+}
 
-  const payload = await verifyGuestSession(session);
-  const guest = db
-    .select()
-    .from(guests)
-    .where(and(eq(guests.id, payload.sub), eq(guests.albumId, payload.albumId)))
-    .get();
+function getAlbumPhotoDetails(albumId: string, photoIds: string[]) {
+  if (photoIds.length === 0) return [];
 
-  if (!guest || !guest.sessionToken || guest.sessionToken !== payload.st) {
-    return null;
-  }
-
-  return guest;
+  return db
+    .select({
+      id: photos.id,
+      storageKey: photos.storageKey,
+      thumbnailKey: photos.thumbnailKey,
+      originalName: photos.originalName,
+    })
+    .from(photos)
+    .innerJoin(ceremonies, eq(photos.ceremonyId, ceremonies.id))
+    .where(and(inArray(photos.id, photoIds), eq(ceremonies.albumId, albumId)))
+    .all();
 }
 
 function getAlbumFaces(albumId: string) {
@@ -258,18 +278,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
             .where(eq(guests.id, guest.id))
             .run();
 
-          const nativeMatchedPhotos = photoIds.length > 0
-            ? db
-                .select({
-                  id: photos.id,
-                  storageKey: photos.storageKey,
-                  thumbnailKey: photos.thumbnailKey,
-                  originalName: photos.originalName,
-                })
-                .from(photos)
-                .where(inArray(photos.id, photoIds))
-                .all()
-            : [];
+          const nativeMatchedPhotos = getAlbumPhotoDetails(guest.albumId, photoIds);
 
           const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
             photoId: p.id,
@@ -307,18 +316,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
       const matchMap = new Map(matches.map((m) => [m.photoId, m.score]));
       const photoIds = Array.from(matchMap.keys());
 
-      const nativeMatchedPhotos = photoIds.length > 0
-        ? db
-            .select({
-              id: photos.id,
-              storageKey: photos.storageKey,
-              thumbnailKey: photos.thumbnailKey,
-              originalName: photos.originalName,
-            })
-            .from(photos)
-            .where(inArray(photos.id, photoIds))
-            .all()
-        : [];
+      const nativeMatchedPhotos = getAlbumPhotoDetails(guest.albumId, photoIds);
 
       const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
         photoId: p.id,
@@ -343,19 +341,7 @@ async function runDiscovery(source: DiscoverySource, confirmedPhotoIds?: string[
     }
 
     if (parsed && Array.isArray(parsed.nativePhotoIds)) {
-      const nativeMatchedPhotos =
-        parsed.nativePhotoIds.length > 0
-          ? db
-              .select({
-                id: photos.id,
-                storageKey: photos.storageKey,
-                thumbnailKey: photos.thumbnailKey,
-                originalName: photos.originalName,
-              })
-              .from(photos)
-              .where(inArray(photos.id, parsed.nativePhotoIds))
-              .all()
-          : [];
+      const nativeMatchedPhotos = getAlbumPhotoDetails(guest.albumId, parsed.nativePhotoIds);
 
       const mappedPromises = nativeMatchedPhotos.map(async (p) => ({
         photoId: p.id,

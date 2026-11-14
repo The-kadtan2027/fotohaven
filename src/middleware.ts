@@ -11,6 +11,8 @@ const PUBLIC_API_PREFIXES = [
   '/api/comments/',
   '/api/files/',
   '/api/guest/',
+  // The route itself accepts either an admin session or a signed upload token.
+  '/api/upload/local',
 ];
 
 // API routes that require authentication

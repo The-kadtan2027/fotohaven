@@ -6,7 +6,10 @@ import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import { enqueueJob } from "@/lib/job-runner";
 import { logger } from "@/lib/logger";
-import { withHandler, apiBadRequest, apiForbidden, apiError } from "@/lib/api-response";
+import { withHandler, apiBadRequest, apiForbidden, apiError, apiUnauthorized } from "@/lib/api-response";
+import { resolveWithinRoot } from "@/lib/storage-path";
+import { hasPhotographerSession } from "@/lib/request-auth";
+import { verifyUploadToken } from "@/lib/upload-token";
 
 const UPLOAD_BASE =
   process.env.LOCAL_UPLOAD_PATH ||
@@ -19,6 +22,7 @@ const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 async function handleUpload(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get("key");
+  const uploadToken = searchParams.get("token");
 
   if (!key) {
     return apiBadRequest("Missing key parameter");
@@ -29,11 +33,20 @@ async function handleUpload(req: Request) {
   }
 
   const decodedKey = decodeURIComponent(key);
-  const filePath = path.join(UPLOAD_BASE, decodedKey);
 
-  // Security: prevent path traversal
-  const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(UPLOAD_BASE))) {
+  // Either an authenticated photographer or a short-lived, key-bound token
+  // issued by the share upload route (public share flow).
+  const hasSession = await hasPhotographerSession();
+  if (!hasSession) {
+    if (!uploadToken || !(await verifyUploadToken(uploadToken, decodedKey))) {
+      return apiUnauthorized("Unauthorized");
+    }
+  }
+
+  const resolved = resolveWithinRoot(UPLOAD_BASE, decodedKey);
+
+  // Security: prevent path traversal (including sibling roots with a shared prefix)
+  if (!resolved) {
     logger.warn("STORAGE", `Path traversal attempt rejected: ${decodedKey}`);
     return apiForbidden("Forbidden");
   }

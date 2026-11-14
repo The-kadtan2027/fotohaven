@@ -2,11 +2,12 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
 import sharp from "sharp";
-import { eq, and, lt, desc } from "drizzle-orm";
+import { eq, and, lt, lte, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobQueue, photos } from "@/lib/schema";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
+import { jobDueAt } from "@/lib/job-backoff";
 
 export type JobType = "thumbnail" | "face_index" | "album_cleanup";
 export type JobStatus = "pending" | "processing" | "completed" | "failed";
@@ -68,7 +69,7 @@ export async function enqueueJob(
 
 export function triggerWorker() {
   if (isWorkerRunning || isBuildPhase()) return;
-  if (workerTimer) clearTimeout(workerTimer);
+  clearTimeout(workerTimer ?? undefined);
 
   workerTimer = setTimeout(() => {
     void processNextJob();
@@ -97,13 +98,13 @@ async function processNextJob() {
       throw err;
     }
 
-    // 2. Fetch oldest pending job
+    // 2. Fetch oldest pending job that is due (updatedAt doubles as "not before")
     let job;
     try {
       job = db
         .select()
         .from(jobQueue)
-        .where(eq(jobQueue.status, "pending"))
+        .where(and(eq(jobQueue.status, "pending"), lte(jobQueue.updatedAt, now)))
         .orderBy(jobQueue.createdAt)
         .get();
     } catch (err: any) {
@@ -153,6 +154,7 @@ async function processNextJob() {
       db.update(jobQueue)
         .set({
           status: "completed",
+          lastError: null,
           updatedAt: finishTime,
         })
         .where(eq(jobQueue.id, job.id))
@@ -164,26 +166,48 @@ async function processNextJob() {
         .set({
           status: isFinalAttempt ? "failed" : "pending",
           lastError: handlerError,
-          updatedAt: finishTime,
+          updatedAt: isFinalAttempt ? finishTime : jobDueAt(finishTime, currentAttempts),
         })
         .where(eq(jobQueue.id, job.id))
         .run();
+      if (!isFinalAttempt) {
+        const delay = jobDueAt(finishTime, currentAttempts).getTime() - finishTime.getTime();
+        console.log(
+          `[JobRunner] Job ${job.id} (${job.type}) will retry in ${Math.round(delay / 1000)}s (attempt ${currentAttempts}/${job.maxAttempts}).`
+        );
+      }
     }
   } catch (err) {
     console.error("[JobRunner] Unexpected worker loop error:", err);
   } finally {
     isWorkerRunning = false;
 
-    // Check if more pending jobs exist
+    // Wake for the next due job, or for the earliest backoff expiry.
     try {
-      const hasMore = db
+      const now = new Date();
+      const hasDue = db
         .select({ id: jobQueue.id })
         .from(jobQueue)
-        .where(eq(jobQueue.status, "pending"))
+        .where(and(eq(jobQueue.status, "pending"), lte(jobQueue.updatedAt, now)))
         .get();
 
-      if (hasMore) {
+      if (hasDue) {
         triggerWorker();
+      } else {
+        const next = db
+          .select({ updatedAt: jobQueue.updatedAt })
+          .from(jobQueue)
+          .where(eq(jobQueue.status, "pending"))
+          .orderBy(jobQueue.updatedAt)
+          .get();
+
+        if (next) {
+          const waitMs = Math.max(250, new Date(next.updatedAt).getTime() - now.getTime());
+          clearTimeout(workerTimer ?? undefined);
+          workerTimer = setTimeout(() => {
+            void processNextJob();
+          }, Math.min(waitMs, 60_000));
+        }
       }
     } catch {
       // Ignore if table missing
@@ -197,7 +221,10 @@ async function handleThumbnailJob(payload: ThumbnailJobPayload) {
   const parsedPath = path.parse(resolvedPath);
   const thumbFilename = `thumb_${parsedPath.name}.jpg`;
   const thumbResolved = path.join(parsedPath.dir, thumbFilename);
-  const thumbKey = decodedKey.replace(parsedPath.base, thumbFilename);
+  const keyDir = decodedKey.includes("/")
+    ? decodedKey.slice(0, decodedKey.lastIndexOf("/") + 1)
+    : "";
+  const thumbKey = `${keyDir}${thumbFilename}`;
 
   // Check if original file exists on disk
   try {
@@ -211,10 +238,17 @@ async function handleThumbnailJob(payload: ThumbnailJobPayload) {
     .jpeg({ quality: 75 })
     .toFile(thumbResolved);
 
-  db.update(photos)
+  const result = db
+    .update(photos)
     .set({ thumbnailKey: thumbKey })
     .where(eq(photos.storageKey, decodedKey))
     .run();
+
+  // The photo was deleted while the job was queued: do not leave an orphan thumbnail.
+  if (result.changes === 0) {
+    await fs.unlink(thumbResolved).catch(() => {});
+    console.warn(`[JobRunner] Thumbnail orphan removed for missing photo ${decodedKey}`);
+  }
 }
 
 // Handler: Native Face Indexing Service Call

@@ -67,6 +67,34 @@ export function clearRateLimit(key: string) {
   buckets.delete(key);
 }
 
+/** Reads a bucket without recording an attempt (used to reject before doing work). */
+export function isRateLimited(
+  key: string,
+  options: RateLimitOptions,
+  now = Date.now()
+): RateLimitResult {
+  const bucket = buckets.get(key);
+  if (!bucket) {
+    return { allowed: true, remaining: options.limit, retryAfterMs: 0 };
+  }
+
+  prune(bucket, now, options.windowMs);
+  if (bucket.hits.length < options.limit) {
+    return {
+      allowed: true,
+      remaining: options.limit - bucket.hits.length,
+      retryAfterMs: 0,
+    };
+  }
+
+  const oldest = bucket.hits[0] ?? now;
+  return {
+    allowed: false,
+    remaining: 0,
+    retryAfterMs: Math.max(0, options.windowMs - (now - oldest)),
+  };
+}
+
 /** Test/maintenance hook. Never call from request paths. */
 export function resetRateLimits() {
   buckets.clear();

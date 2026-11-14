@@ -146,10 +146,25 @@ export async function getStorageStats(): Promise<{
 }
 
 /**
- * Get a readable stream for a file directly from local storage.
+ * Return a readable stream for a file directly from local storage.
  * Bypasses memory buffering, great for piping into Server-Side ZIP generation.
  */
 export async function getFileStream(key: string): Promise<Readable> {
   const filePath = path.join(UPLOAD_BASE, key);
   return createReadStream(filePath);
+}
+
+/**
+ * Check whether a stored object exists before appending it to a ZIP.
+ * createReadStream does not throw synchronously for a missing file; it emits
+ * 'error' later, which can leave the archive stream open forever.
+ */
+export async function fileExists(key: string): Promise<boolean> {
+  if (!key) return false;
+  try {
+    const stat = await fs.stat(path.join(UPLOAD_BASE, key));
+    return stat.isFile();
+  } catch {
+    return false;
+  }
 }

@@ -4,6 +4,7 @@ import { getPresignedUrl } from "@/lib/storage";
 import { albums } from "@/lib/schema";
 import { FACE_CONFIG } from "@/lib/face-config";
 import { eq } from "drizzle-orm";
+import { invalidateAlbumVectorCache } from "@/lib/vector-cache";
 
 export async function GET(
   request: NextRequest,
@@ -59,7 +60,21 @@ export async function GET(
       ),
     };
 
-    return NextResponse.json(albumWithUrls);
+    // Never send the bcrypt hash or guest session tokens to the browser (F-26).
+    const {
+      password: _password,
+      activityLogs,
+      ...safeAlbum
+    } = albumWithUrls as typeof albumWithUrls & { password?: string | null };
+
+    const safeActivityLogs = (activityLogs ?? []).map((log) => ({
+      ...log,
+      guest: log.guest
+        ? { id: log.guest.id, name: log.guest.name, email: log.guest.email }
+        : null,
+    }));
+
+    return NextResponse.json({ ...safeAlbum, activityLogs: safeActivityLogs });
   } catch (error) {
     console.error("[GET_ALBUM]", error);
     return NextResponse.json(
@@ -161,6 +176,7 @@ export async function DELETE(
 
     // Delete album from database (cascade deletes ceremonies, photos, comments)
     await db.delete(albums).where(eq(albums.id, albumId)).run();
+    invalidateAlbumVectorCache(albumId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -31,6 +31,7 @@ export interface ReturnUploadPayload {
   contentType: string;
   size: number;
   returnOf?: string; // optional link to original photoId
+  password?: string; // required when the album is password protected
 }
 
 export interface Album {

@@ -5,6 +5,8 @@ import { ReturnUploadPayload, UploadPhotoResponse } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { albums, ceremonies, photos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import { authorizeLocalUploadUrl } from "@/lib/upload-token";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const MAX_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -22,7 +24,7 @@ export async function POST(
     // Verify album exists via token
     const album = await db.query.albums.findFirst({
       where: eq(albums.shareToken, token),
-      columns: { id: true, title: true, expiresAt: true },
+      columns: { id: true, title: true, expiresAt: true, password: true },
     });
 
     if (!album) {
@@ -35,6 +37,17 @@ export async function POST(
     }
 
     const body: ReturnUploadPayload = await req.json();
+
+    // A protected album must not accept writes with only the token (F-07).
+    if (album.password) {
+      if (!body.password) {
+        return NextResponse.json({ passwordRequired: true }, { status: 401 });
+      }
+      const match = await bcrypt.compare(body.password, album.password);
+      if (!match) {
+        return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+      }
+    }
 
     if (!body.ceremonyId || !body.filename || !body.contentType) {
       return NextResponse.json(
@@ -81,7 +94,10 @@ export async function POST(
     }).run();
 
     // Return presigned URL so the client uploads directly to storage
-    const uploadUrl = await getPresignedUploadUrl(storageKey, body.contentType);
+    const uploadUrl = await authorizeLocalUploadUrl(
+      await getPresignedUploadUrl(storageKey, body.contentType),
+      storageKey
+    );
 
     const response: UploadPhotoResponse = { photoId, uploadUrl, storageKey };
     return NextResponse.json(response, { status: 201 });
