@@ -43,7 +43,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_executor = ThreadPoolExecutor(max_workers=ENROLL_WORKERS)
+_enroll_executor = ThreadPoolExecutor(max_workers=ENROLL_WORKERS)
+_search_executor = ThreadPoolExecutor(max_workers=2)
 _enrollment_status: dict[str, dict] = {}
 
 
@@ -73,7 +74,7 @@ async def startup() -> None:
 
     print("[native-face-service] Warming up OpenCV face models...")
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(_executor, warmup)
+    await loop.run_in_executor(_search_executor, warmup)
     print("[native-face-service] Ready.")
 
 
@@ -104,7 +105,7 @@ async def search_faces(req: SearchRequest):
         raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
 
     loop = asyncio.get_running_loop()
-    embedding = await loop.run_in_executor(_executor, extract_query_embedding, image)
+    embedding = await loop.run_in_executor(_search_executor, extract_query_embedding, image)
 
     if req.event_id not in index_stats():
         rows = get_all_event_embeddings(req.event_id)
@@ -184,7 +185,7 @@ async def enroll(req: EnrollRequest):
             _enrollment_status[event_id] = {"running": False, "done": False, "error": str(exc)}
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(_executor, run)
+    loop.run_in_executor(_enroll_executor, run)
     return {"status": "started", "event_id": event_id}
 
 

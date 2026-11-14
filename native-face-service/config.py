@@ -72,8 +72,9 @@ FACE_DETECTION_MAX_SIDE = max(
     640, min(4096, _read_int("FACE_DETECTION_MAX_SIDE", 1600))
 )
 
-# OpenCV thread count per worker. 2 enrollment workers x 4 threads fits the 8 cores.
-OPENCV_NUM_THREADS = max(1, min(8, _read_int("OPENCV_NUM_THREADS", 4)))
+# Benchmarked on the 8-core phone: one worker with 8 OpenCV threads is faster
+# than two competing workers, and uses one model copy (~50 MB) instead of two.
+OPENCV_NUM_THREADS = max(1, min(8, _read_int("OPENCV_NUM_THREADS", 8)))
 
 # Cap the number of returned matches per tier to keep responses small on huge albums.
 SEARCH_MAX_RESULTS = max(1, min(5000, _read_int("SEARCH_MAX_RESULTS", 500)))
@@ -83,7 +84,7 @@ SEARCH_MAX_RESULTS = max(1, min(5000, _read_int("SEARCH_MAX_RESULTS", 500)))
 # Set via env var ENROLL_WORKERS; defaults to 2.
 import os as _os
 ENROLL_WORKERS = max(1, min(
-    _read_int("ENROLL_WORKERS", 2),
+    _read_int("ENROLL_WORKERS", 1),
     _os.cpu_count() or 1,
 ))
 
