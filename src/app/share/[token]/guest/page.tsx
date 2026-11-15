@@ -109,16 +109,24 @@ function parseRecognizeResult(recogData: unknown): RecognizeResult {
 }
 
 async function requestFaceMatches(token: string, imageB64: string): Promise<RecognizeResult> {
-  const response = await fetch("/api/recognize", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/recognize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("Face service took too long to respond. Please retry.");
+  }
 
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Your guest session expired. Reload the page and verify again.");
+    }
     const message =
       typeof data.error === "string"
         ? data.error
@@ -145,12 +153,17 @@ async function requestFaceMatches(token: string, imageB64: string): Promise<Reco
 }
 
 async function enrollNativeMatches(matches: Array<{ photoId: string; score: number }>) {
-  const response = await fetch("/api/guest/enroll-face", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nativeMatches: matches }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/guest/enroll-face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nativeMatches: matches }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("Saving your face profile took too long. Please retry.");
+  }
 
   if (!response.ok) {
     const data = (await response.json().catch(() => ({}))) as { error?: string };
