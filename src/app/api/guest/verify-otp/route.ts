@@ -11,6 +11,8 @@ import {
 import { logger } from "@/lib/logger";
 import { withHandler, apiSuccess, apiBadRequest, apiUnauthorized, apiNotFound, apiError } from "@/lib/api-response";
 import { clearRateLimit } from "@/lib/rate-limit";
+import { hasUsableFaceDescriptor } from "@/lib/face-descriptor";
+import { isSecureRequest } from "@/lib/request-protocol";
 import {
   clientIp,
   consumeRateLimit,
@@ -178,12 +180,12 @@ export const POST = withHandler("POST /api/guest/verify-otp", async (request: Re
   const response = apiSuccess({
     bypass,
     name,
-    hasFaceDescriptor: Boolean(existingGuest?.faceDescriptor),
+    hasFaceDescriptor: hasUsableFaceDescriptor(existingGuest?.faceDescriptor),
   });
 
   response.cookies.set(getGuestCookieName(), guestJwt, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(request),
     sameSite: "lax",
     path: "/",
     maxAge: getGuestSessionMaxAgeSeconds(),

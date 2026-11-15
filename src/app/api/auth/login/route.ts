@@ -14,6 +14,7 @@ import {
   tooManyRequests,
 } from '@/lib/auth-limits';
 import { clearRateLimit } from '@/lib/rate-limit';
+import { isSecureRequest } from '@/lib/request-protocol';
 
 export const POST = withHandler('POST /api/auth/login', async (request: Request) => {
   const body = await request.json();
@@ -72,7 +73,7 @@ export const POST = withHandler('POST /api/auth/login', async (request: Request)
   const response = apiSuccess({ username: photographer.username });
   response.cookies.set('session', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecureRequest(request),
     sameSite: 'lax',
     path: '/',
     maxAge: 60 * 60 * 24 * 7, // 7 days

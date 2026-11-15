@@ -18,7 +18,6 @@ import {
   Upload,
 } from "lucide-react";
 import { FACE_CONFIG } from "@/lib/face-config";
-import { averageDescriptors } from "@/lib/face-math";
 import {
   canCapture,
   initialScanState,
@@ -61,6 +60,104 @@ type MatchResponse = {
   error?: string;
 };
 
+type RecognizeResult = {
+  matches: Array<{ photoId: string; score: number }>;
+  facesDetected: number;
+  bestScore: number | null;
+};
+
+function parseMatchList(list: unknown, fallbackScore: number) {
+  if (!Array.isArray(list)) return [] as Array<{ photoId: string; score: number }>;
+  return list
+    .map((item) => {
+      if (typeof item === "string") return { photoId: item, score: fallbackScore };
+      if (typeof item === "object" && item !== null) {
+        const candidate = item as Record<string, unknown>;
+        const photoId = candidate.photo_id ?? candidate.photoId ?? candidate.id;
+        const score = typeof candidate.score === "number" ? candidate.score : fallbackScore;
+        return typeof photoId === "string" ? { photoId, score } : null;
+      }
+      return null;
+    })
+    .filter((value): value is { photoId: string; score: number } => Boolean(value));
+}
+
+function parseRecognizeResult(recogData: unknown): RecognizeResult {
+  const record = (recogData ?? {}) as Record<string, unknown>;
+  const definite = parseMatchList(record.definite, 0.75);
+  const possible = parseMatchList(record.possible, 0.55);
+
+  // Definite matches are primary; possible matches are the fallback tier.
+  const selected = definite.length > 0 ? definite : possible;
+  const scoreMap = new Map<string, number>();
+  for (const match of selected) {
+    const existing = scoreMap.get(match.photoId);
+    if (existing === undefined || match.score > existing) {
+      scoreMap.set(match.photoId, match.score);
+    }
+  }
+
+  const facesDetected =
+    typeof record.faces_detected === "number" ? record.faces_detected : selected.length > 0 ? 1 : 0;
+  const bestScore = typeof record.best_score === "number" ? record.best_score : null;
+
+  return {
+    matches: Array.from(scoreMap.entries()).map(([photoId, score]) => ({ photoId, score })),
+    facesDetected,
+    bestScore,
+  };
+}
+
+async function requestFaceMatches(token: string, imageB64: string): Promise<RecognizeResult> {
+  const response = await fetch("/api/recognize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (!response.ok) {
+    const message =
+      typeof data.error === "string"
+        ? data.error
+        : typeof data.detail === "string"
+          ? data.detail
+          : response.status === 422
+            ? "No face detected. Center your face in the oval and try again."
+            : "Face service is unavailable. Please try again.";
+    throw new Error(message);
+  }
+
+  const result = parseRecognizeResult(data);
+  if (result.facesDetected === 0) {
+    throw new Error("No face detected. Center your face in the oval and try again.");
+  }
+  if (result.matches.length === 0) {
+    const best = result.bestScore !== null ? ` (best similarity ${result.bestScore.toFixed(2)})` : "";
+    throw new Error(
+      `No matching faces found${best}. Use better lighting, face the camera directly, or browse all photos.`
+    );
+  }
+
+  return result;
+}
+
+async function enrollNativeMatches(matches: Array<{ photoId: string; score: number }>) {
+  const response = await fetch("/api/guest/enroll-face", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nativeMatches: matches }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || "Failed to save your face profile.");
+  }
+}
+
 export default function GuestFaceDiscoveryPage() {
   const { token } = useParams<{ token: string }>();
   const [step, setStep] = useState<Step>("otp");
@@ -97,7 +194,6 @@ export default function GuestFaceDiscoveryPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const faceApiPromiseRef = useRef<Promise<typeof import("face-api.js")> | null>(null);
 
   function stopCamera() {
     if (streamRef.current) {
@@ -259,55 +355,6 @@ export default function GuestFaceDiscoveryPage() {
     void startCamera(nextMode);
   }
 
-  async function getFaceApi() {
-    if (!faceApiPromiseRef.current) {
-      faceApiPromiseRef.current = import("face-api.js").then(async (faceapi) => {
-        await Promise.all([
-          faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
-          faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-          faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-        ]);
-        return faceapi;
-      });
-    }
-    return faceApiPromiseRef.current;
-  }
-
-function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score: number }> {
-  const parseList = (list: unknown, fallbackScore: number) => {
-    if (!Array.isArray(list)) return [];
-    return list
-      .map((item) => {
-        if (typeof item === "string") return { photoId: item, score: fallbackScore };
-        if (typeof item === "object" && item !== null) {
-          const candidate = item as Record<string, unknown>;
-          const photoId = candidate.photo_id ?? candidate.photoId ?? candidate.id;
-          const score = typeof candidate.score === "number" ? candidate.score : fallbackScore;
-          return typeof photoId === "string" ? { photoId, score } : null;
-        }
-        return null;
-      })
-      .filter((m): m is { photoId: string; score: number } => Boolean(m));
-  };
-
-  const record = (recogData ?? {}) as Record<string, unknown>;
-  const definite = parseList(record.definite, 0.75);
-  const possible = parseList(record.possible, 0.55);
-
-  // Definite matches (high threshold >= 0.65) are primary. Only fall back to possible if definite is empty.
-  const selected = definite.length > 0 ? definite : possible;
-
-  const scoreMap = new Map<string, number>();
-  for (const m of selected) {
-    const existing = scoreMap.get(m.photoId);
-    if (existing === undefined || m.score > existing) {
-      scoreMap.set(m.photoId, m.score);
-    }
-  }
-
-  return Array.from(scoreMap.entries()).map(([photoId, score]) => ({ photoId, score }));
-}
-
   async function scanAndMatch() {
     if (!videoRef.current || !canCapture(scanState)) return;
     setIsFlashing(true);
@@ -315,73 +362,26 @@ function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score:
     dispatchScan({ type: "capture" });
     setBusy(true);
     setError("");
-    setStatus("Analyzing face...");
+    setStatus("Scanning face...");
     let canvas: HTMLCanvasElement | null = null;
 
     try {
-      // 1. Capture instant video frame Base64
       canvas = document.createElement("canvas");
       canvas.width = videoRef.current.videoWidth || 640;
       canvas.height = videoRef.current.videoHeight || 480;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Couldn’t read the camera frame. Retry.");
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+
       const imageB64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
       if (!imageB64) throw new Error("The camera returned an empty frame. Retry.");
 
       stopCamera();
+      setStatus("Matching your face...");
+      const result = await requestFaceMatches(token, imageB64);
 
-      // 2. Native Python Face Recognition backend (Instant 1-Click Search)
-      try {
-        const recogRes = await fetch("/api/recognize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ event_id: token, image_b64: imageB64 }),
-        });
-        if (recogRes.ok) {
-          const recogData = await recogRes.json();
-          const nativeMatches = parseNativeMatches(recogData);
-          const enrollRes = await fetch("/api/guest/enroll-face", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nativeMatches }),
-          });
-          if (!enrollRes.ok) {
-            const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(errData.error || "Failed to save face profile.");
-          }
-          await loadMatchedPhotos({ source: "selfie" });
-          return;
-        }
-      } catch {
-        /* Fallback to browser face-api */
-      }
-
-      // 3. Browser face-api backend (Single-frame detection)
-      const faceapi = await getFaceApi();
-      const detection = await faceapi
-        .detectSingleFace(
-          canvas,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
-        )
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-      if (!detection) {
-        throw new Error("No face was detected. Center your face inside the oval guide and try again.");
-      }
-
-      const enrollRes = await fetch("/api/guest/enroll-face", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descriptor: Array.from(detection.descriptor) }),
-      });
-
-      if (!enrollRes.ok) {
-        const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(errData.error || "Failed to save face profile.");
-      }
-
+      setStatus("Saving face profile...");
+      await enrollNativeMatches(result.matches);
       await loadMatchedPhotos({ source: "selfie" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Face scan failed.";
@@ -402,7 +402,7 @@ function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score:
 
     setBusy(true);
     setError("");
-    setStatus("Analyzing face photo...");
+    setStatus("Scanning face photo...");
 
     try {
       const base64String = await new Promise<string>((resolve, reject) => {
@@ -412,69 +412,18 @@ function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score:
         reader.readAsDataURL(file);
       });
 
-      try {
-        const recogRes = await fetch("/api/recognize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ event_id: token, image_b64: base64String }),
-        });
+      setStatus("Matching your face...");
+      const result = await requestFaceMatches(token, base64String);
 
-        if (recogRes.ok) {
-          const recogData = await recogRes.json();
-          const nativeMatches = parseNativeMatches(recogData);
-          const enrollRes = await fetch("/api/guest/enroll-face", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nativeMatches }),
-          });
-          if (!enrollRes.ok) {
-            const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(errData.error || "Failed to save face profile.");
-          }
-          stopCamera();
-          await loadMatchedPhotos({ source: "selfie" });
-          return;
-        }
-      } catch {
-        /* Fallback to browser face-api */
-      }
-
-      const faceapi = await getFaceApi();
-      const img = await faceapi.bufferToImage(file);
-
-      const detections = await faceapi
-        .detectAllFaces(
-          img,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: FACE_CONFIG.detectionMinConfidence })
-        )
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-
-      if (detections.length === 0) {
-        throw new Error("No face was detected in this photo. Please upload a clear photo of your face.");
-      }
-
-      if (detections.length > 1) {
+      if (result.facesDetected > 1) {
         throw new Error(
-          `Found ${detections.length} faces in this photo. Please upload a photo with only your face visible.`
+          `Found ${result.facesDetected} faces in this photo. Upload a photo with only your face visible.`
         );
       }
 
-      const descriptor = detections[0].descriptor;
       stopCamera();
-
-      setStatus("Enrolling face profile...");
-      const enrollRes = await fetch("/api/guest/enroll-face", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descriptor: Array.from(descriptor) }),
-      });
-
-      if (!enrollRes.ok) {
-        const errData = (await enrollRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(errData.error || "Failed to save face profile.");
-      }
-
+      setStatus("Saving face profile...");
+      await enrollNativeMatches(result.matches);
       await loadMatchedPhotos({ source: "selfie" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to process uploaded face photo.";
@@ -491,17 +440,28 @@ function parseNativeMatches(recogData: unknown): Array<{ photoId: string; score:
     setStatus("Matching photos...");
 
     let res: Response;
-    if (source === "refined" && opts?.photoIds?.length) {
-      res = await fetch("/api/guest/my-photos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoIds: opts.photoIds }),
-      });
-    } else {
-      res = await fetch("/api/guest/my-photos", { cache: "no-store" });
+    try {
+      if (source === "refined" && opts?.photoIds?.length) {
+        res = await fetch("/api/guest/my-photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photoIds: opts.photoIds }),
+          signal: AbortSignal.timeout(20_000),
+        });
+      } else {
+        res = await fetch("/api/guest/my-photos", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(20_000),
+        });
+      }
+    } catch {
+      throw new Error("Loading your matches took too long. Please try again.");
     }
 
-    if (!res.ok) throw new Error("Failed to load matches.");
+    if (!res.ok) {
+      const errorData = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errorData.error || "Failed to load your matches.");
+    }
 
     const data = (await res.json()) as MatchResponse;
     const photos = data.photos || [];
