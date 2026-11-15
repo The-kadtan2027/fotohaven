@@ -202,6 +202,7 @@ Not touched: `com.google.android.gms`, phone/SMS, Telegram, KernelSU, Termux, la
 | Batch select | `POST /api/share/:token/select` → `200 {updated:1}`, DB `isSelected=1` |
 | ZIP download | valid photo → `200`, 81,522-byte zip in 0.29 s |
 | Face service | extraction **477 ms** at 2048 (was 723–1073); **335–410 ms** at opt-in 1600; search-by-photos **50 ms** warm; selfie `/search` ~422 ms |
+| Guest flow | isolated `:3100` with `GUEST_OTP_BYPASS=true`; OTP → consent → uploaded a real album face → **45 matched**, 3 view modes, two anchors → **48 refined**; guest/OTP/activity rows removed, production bypass remains `false` |
 | Missing-file audit | 2 of 4,816 originals missing (`BCV06827.jpg`, `BCV06967.jpg`), 0 missing thumbnails; pre-existing rows, not deleted |
 
 ## Restore
