@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -8,6 +9,7 @@ import numpy as np
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from config import (
@@ -24,6 +26,7 @@ from db import (
 )
 from enrollment import enroll_event
 from opencv_backend import (
+    NoFaceDetected,
     cv2,
     decode_base64_image,
     extract_query_embedding,
@@ -99,13 +102,33 @@ async def search_faces(req: SearchRequest):
     if not models_ready():
         raise HTTPException(status_code=503, detail="Face models are not installed")
 
+    started = time.perf_counter()
     try:
         image = decode_base64_image(req.image_b64)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
+    decode_ms = (time.perf_counter() - started) * 1000
 
     loop = asyncio.get_running_loop()
-    embedding = await loop.run_in_executor(_search_executor, extract_query_embedding, image)
+    query_started = time.perf_counter()
+    try:
+        embedding, faces_detected = await loop.run_in_executor(
+            _search_executor, extract_query_embedding, image
+        )
+    except NoFaceDetected as exc:
+        total_ms = (time.perf_counter() - started) * 1000
+        print(
+            f"[native-search] event={req.event_id} NO_FACE decode={decode_ms:.1f}ms total={total_ms:.1f}ms"
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "No face detected. Center your face in the oval and try again.",
+                "code": "NO_FACE",
+                "faces_detected": 0,
+            },
+        )
+    query_ms = (time.perf_counter() - query_started) * 1000
 
     if req.event_id not in index_stats():
         rows = get_all_event_embeddings(req.event_id)
@@ -114,7 +137,18 @@ async def search_faces(req: SearchRequest):
     db_high, db_low = get_event_thresholds(req.event_id)
     high_threshold = req.high_threshold if req.high_threshold is not None else db_high
     low_threshold = req.low_threshold if req.low_threshold is not None else db_low
+
+    search_started = time.perf_counter()
     result = search(req.event_id, embedding, high_threshold, low_threshold, SEARCH_MAX_RESULTS)
+    search_ms = (time.perf_counter() - search_started) * 1000
+    total_ms = (time.perf_counter() - started) * 1000
+
+    print(
+        f"[native-search] event={req.event_id} faces={faces_detected} "
+        f"best={result.get('best_score')} indexed={result.get('indexed_faces')} "
+        f"definite={len(result['definite'])} possible={len(result['possible'])} "
+        f"decode={decode_ms:.1f}ms query={query_ms:.1f}ms search={search_ms:.1f}ms total={total_ms:.1f}ms"
+    )
 
     return {
         "definite": result["definite"],
@@ -122,6 +156,15 @@ async def search_faces(req: SearchRequest):
         "high_threshold": high_threshold,
         "low_threshold": low_threshold,
         "embedding_dim": int(embedding.shape[0]),
+        "faces_detected": faces_detected,
+        "best_score": result.get("best_score"),
+        "indexed_faces": result.get("indexed_faces"),
+        "timings": {
+            "decode_ms": round(decode_ms, 1),
+            "query_ms": round(query_ms, 1),
+            "search_ms": round(search_ms, 1),
+            "total_ms": round(total_ms, 1),
+        },
     }
 
 
@@ -130,12 +173,13 @@ async def search_by_photos(req: SearchByPhotosRequest):
     if not models_ready():
         raise HTTPException(status_code=503, detail="Face models are not installed")
 
+    started = time.perf_counter()
     if not req.photo_ids:
-        return {"definite": [], "possible": []}
+        return {"definite": [], "possible": [], "best_score": None, "indexed_faces": 0}
 
     emb_bytes_list = get_photo_embeddings(req.event_id, req.photo_ids)
     if not emb_bytes_list:
-        return {"definite": [], "possible": []}
+        return {"definite": [], "possible": [], "best_score": None, "indexed_faces": 0}
 
     embeddings = [np.frombuffer(b, dtype=np.float32) for b in emb_bytes_list]
     avg_emb = np.mean(embeddings, axis=0)
@@ -152,12 +196,21 @@ async def search_by_photos(req: SearchByPhotosRequest):
     low_threshold = req.low_threshold if req.low_threshold is not None else db_low
 
     result = search(req.event_id, avg_emb, high_threshold, low_threshold, SEARCH_MAX_RESULTS)
+    total_ms = (time.perf_counter() - started) * 1000
+    print(
+        f"[native-refine] event={req.event_id} anchors={len(req.photo_ids)} "
+        f"best={result.get('best_score')} indexed={result.get('indexed_faces')} "
+        f"definite={len(result['definite'])} possible={len(result['possible'])} total={total_ms:.1f}ms"
+    )
 
     return {
         "definite": result["definite"],
         "possible": result["possible"],
         "high_threshold": high_threshold,
         "low_threshold": low_threshold,
+        "best_score": result.get("best_score"),
+        "indexed_faces": result.get("indexed_faces"),
+        "timings": {"total_ms": round(total_ms, 1)},
     }
 
 

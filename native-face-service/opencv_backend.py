@@ -15,12 +15,17 @@ from config import (
     FACE_DETECTION_TOP_K,
     FACE_DETECTOR_MODEL,
     FACE_QUERY_FALLBACK_SIZE,
+    FACE_QUERY_SCORE_THRESHOLD,
     FACE_RECOGNIZER_MODEL,
     OPENCV_NUM_THREADS,
 )
 
 # Avoid each enrollment worker spawning a full set of OpenCV threads.
 cv2.setNumThreads(OPENCV_NUM_THREADS)
+
+
+class NoFaceDetected(Exception):
+    """Raised when a query frame contains no usable face."""
 
 
 _tls = threading.local()  # per-thread model instances
@@ -53,7 +58,7 @@ def get_models():
             str(FACE_DETECTOR_MODEL),
             "",
             (320, 320),
-            FACE_DETECTION_SCORE_THRESHOLD,
+            min(FACE_DETECTION_SCORE_THRESHOLD, FACE_QUERY_SCORE_THRESHOLD),
             FACE_DETECTION_NMS_THRESHOLD,
             FACE_DETECTION_TOP_K,
         )
@@ -112,23 +117,32 @@ def detect_faces(image: np.ndarray) -> np.ndarray:
     return faces
 
 
-def extract_query_embedding(image: np.ndarray) -> np.ndarray:
+def extract_query_embedding(image: np.ndarray) -> tuple[np.ndarray, int]:
+    """Return (normalized embedding, detected face count).
+
+    Raises NoFaceDetected instead of inventing an embedding from a non-face
+    image; otherwise a dark/empty camera frame silently yields zero matches.
+    """
     faces = detect_faces(image)
+    if len(faces) == 0:
+        raise NoFaceDetected("No face detected in the scan frame")
+
+    usable = faces[faces[:, -1] >= FACE_QUERY_SCORE_THRESHOLD]
+    if len(usable) == 0:
+        raise NoFaceDetected("No face above the detection confidence threshold")
+
+    best_face = usable[np.argmax(usable[:, -1])]
     _, recognizer = get_models()
-
-    if len(faces) > 0:
-        best_face = faces[np.argmax(faces[:, -1])]
-        aligned = recognizer.alignCrop(image, best_face)
-        feature = recognizer.feature(aligned)
-        return _normalize_feature(feature)
-
-    resized = cv2.resize(image, (FACE_QUERY_FALLBACK_SIZE, FACE_QUERY_FALLBACK_SIZE))
-    feature = recognizer.feature(resized)
-    return _normalize_feature(feature)
+    aligned = recognizer.alignCrop(image, best_face)
+    feature = recognizer.feature(aligned)
+    return _normalize_feature(feature), len(usable)
 
 
 def extract_photo_embeddings(image: np.ndarray) -> List[Dict[str, object]]:
     faces = detect_faces(image)
+    # The detector is created with the lower query threshold; enrollment keeps
+    # the stricter album quality gate.
+    faces = faces[faces[:, -1] >= FACE_DETECTION_SCORE_THRESHOLD]
     if len(faces) == 0:
         return []
 
@@ -159,6 +173,14 @@ def extract_photo_embeddings(image: np.ndarray) -> List[Dict[str, object]]:
 def warmup() -> None:
     if not models_ready():
         return
-    blank = np.zeros((FACE_QUERY_FALLBACK_SIZE, FACE_QUERY_FALLBACK_SIZE, 3), dtype=np.uint8)
-    extract_query_embedding(blank)
+    try:
+        blank = np.zeros(
+            (FACE_QUERY_FALLBACK_SIZE, FACE_QUERY_FALLBACK_SIZE, 3),
+            dtype=np.uint8,
+        )
+        extract_query_embedding(blank)
+    except NoFaceDetected:
+        # Loading/running the models is the point of warmup; a blank frame
+        # correctly has no face.
+        pass
 

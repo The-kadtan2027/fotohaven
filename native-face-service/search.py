@@ -59,9 +59,15 @@ def search(
         index = _store.get(event_id)
 
     if index is None or index.size() == 0:
-        return {"definite": [], "possible": []}
+        return {
+            "definite": [],
+            "possible": [],
+            "best_score": None,
+            "indexed_faces": 0,
+        }
 
     similarities = index.matrix @ query_embedding
+    best_score = float(np.max(similarities)) if len(similarities) else None
     order = np.argsort(similarities)[::-1]
 
     definite: List[dict] = []
@@ -88,6 +94,8 @@ def search(
     return {
         "definite": definite[:max_results],
         "possible": possible[:max_results],
+        "best_score": round(best_score, 4) if best_score is not None else None,
+        "indexed_faces": index.size(),
     }
 
 

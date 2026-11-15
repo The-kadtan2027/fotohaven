@@ -43,6 +43,13 @@ export async function POST(request: Request) {
     };
 
     if (Array.isArray(body.nativeMatches)) {
+      if (body.nativeMatches.length === 0) {
+        return NextResponse.json(
+          { error: "No face matches to save. Retry the scan." },
+          { status: 400 }
+        );
+      }
+
       db.update(guests)
         .set({
           faceDescriptor: JSON.stringify({ nativeMatches: body.nativeMatches }),
@@ -54,6 +61,13 @@ export async function POST(request: Request) {
     }
 
     if (Array.isArray(body.nativePhotoIds)) {
+      if (body.nativePhotoIds.length === 0) {
+        return NextResponse.json(
+          { error: "No face matches to save. Retry the scan." },
+          { status: 400 }
+        );
+      }
+
       db.update(guests)
         .set({
           faceDescriptor: JSON.stringify({ nativePhotoIds: body.nativePhotoIds }),
